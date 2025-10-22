@@ -87,3 +87,17 @@ jobs:
           gofmt -l .
           exit 1
         fi
+
+  shellcheck:
+    name: Shellcheck
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Run shellcheck
+      uses: ludeeus/action-shellcheck@master
+      with:
+        scandir: './scripts'
+        severity: warning
