@@ -23,8 +23,25 @@ type Client struct {
 	closed   bool
 }
 
+// ClientOption configures a Client
+type ClientOption func(*clientConfig)
+
+type clientConfig struct {
+	commandPath string
+	commandArgs []string
+}
+
+// WithCommand sets a custom command path and args for the ACP process
+// Useful for testing or custom installations
+func WithCommand(path string, args ...string) ClientOption {
+	return func(c *clientConfig) {
+		c.commandPath = path
+		c.commandArgs = args
+	}
+}
+
 // NewClient spawns a claude-code-acp process and returns a client to communicate with it
-func NewClient(workspace string, apiKey string) (*Client, error) {
+func NewClient(workspace string, apiKey string, opts ...ClientOption) (*Client, error) {
 	if workspace == "" {
 		return nil, fmt.Errorf("workspace path is required")
 	}
@@ -32,8 +49,17 @@ func NewClient(workspace string, apiKey string) (*Client, error) {
 		return nil, fmt.Errorf("API key is required")
 	}
 
-	// Create command to spawn claude-code-acp process
-	cmd := exec.Command("claude-code-acp", "--workspace", workspace)
+	// Apply options
+	cfg := &clientConfig{
+		commandPath: "claude-code-acp",
+		commandArgs: []string{"--workspace", workspace},
+	}
+	for _, opt := range opts {
+		opt(cfg)
+	}
+
+	// Create command to spawn ACP process
+	cmd := exec.Command(cfg.commandPath, cfg.commandArgs...)
 
 	// Set API key via environment variable
 	cmd.Env = append(os.Environ(), fmt.Sprintf("ANTHROPIC_API_KEY=%s", apiKey))
