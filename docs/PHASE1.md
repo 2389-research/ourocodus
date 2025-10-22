@@ -683,6 +683,181 @@ After Phase 1:
 - Error recovery (Phase 4)
 - Idea → PRD generation (Phase 3)
 
+## WebSocket Protocol Specification
+
+### Message Format
+
+All WebSocket messages include a `version` field for protocol versioning:
+
+```json
+{
+  "version": "1.0",
+  "type": "session:create",
+  "agentId": "auth"
+}
+```
+
+**Version:** Protocol version string (format: `"major.minor"`)
+- Phase 1: `"1.0"`
+- Breaking changes increment major version
+- Backward-compatible changes increment minor version
+
+### Connection Handshake
+
+**1. Client connects to WebSocket endpoint:**
+```
+ws://localhost:8080/ws
+```
+
+**2. Server acknowledges connection:**
+```json
+{
+  "version": "1.0",
+  "type": "connection:established",
+  "serverId": "relay-uuid",
+  "timestamp": "2025-10-22T12:34:56Z"
+}
+```
+
+**3. Client must send first message within 10 seconds or connection closes**
+
+### Message Types
+
+**From PWA to Relay:**
+
+**Create Session:**
+```json
+{
+  "version": "1.0",
+  "type": "session:create",
+  "agentId": "auth"
+}
+```
+
+**Send Message to Agent:**
+```json
+{
+  "version": "1.0",
+  "type": "agent:message",
+  "sessionId": "uuid",
+  "content": "Create a JWT auth module"
+}
+```
+
+**Stop Session:**
+```json
+{
+  "version": "1.0",
+  "type": "session:stop",
+  "sessionId": "uuid"
+}
+```
+
+**From Relay to PWA:**
+
+**Session Created:**
+```json
+{
+  "version": "1.0",
+  "type": "session:created",
+  "sessionId": "uuid",
+  "agentId": "auth",
+  "timestamp": "2025-10-22T12:34:56Z"
+}
+```
+
+**Session Ready (ACP process spawned):**
+```json
+{
+  "version": "1.0",
+  "type": "session:ready",
+  "sessionId": "uuid"
+}
+```
+
+**Agent Response:**
+```json
+{
+  "version": "1.0",
+  "type": "agent:response",
+  "sessionId": "uuid",
+  "agentId": "auth",
+  "content": "I've created auth.go with JWT implementation...",
+  "timestamp": "2025-10-22T12:34:57Z"
+}
+```
+
+**Error:**
+```json
+{
+  "version": "1.0",
+  "type": "error",
+  "sessionId": "uuid",
+  "agentId": "auth",
+  "error": {
+    "code": "ACP_PROCESS_CRASHED",
+    "message": "Agent process exited unexpectedly",
+    "details": "exit status 1",
+    "recoverable": false
+  }
+}
+```
+
+**Session Terminated:**
+```json
+{
+  "version": "1.0",
+  "type": "session:terminated",
+  "sessionId": "uuid",
+  "reason": "user requested"
+}
+```
+
+### Heartbeat
+
+**Phase 1:** No heartbeat/ping mechanism (kept simple for POC)
+
+**Client disconnection detection:** Relay detects when `ws.ReadMessage()` returns error
+
+**Server health:** Client assumes relay is healthy if WebSocket connection is open
+
+**Future (Phase 2):**
+```json
+// Server → Client (every 30s)
+{"version": "1.0", "type": "ping"}
+
+// Client → Server
+{"version": "1.0", "type": "pong"}
+```
+
+### Protocol Versioning Rules
+
+**Version Compatibility:**
+- Client and server MUST include `version` in all messages
+- Server MUST reject messages with unsupported `version`
+- Version mismatch returns error and closes connection
+
+**Version Check Response:**
+```json
+{
+  "version": "1.0",
+  "type": "error",
+  "error": {
+    "code": "VERSION_MISMATCH",
+    "message": "Protocol version 2.0 not supported (server supports 1.0)",
+    "recoverable": false
+  }
+}
+```
+
+**Future Version Migration:**
+- Phase 1: `"1.0"` (stdio + direct WebSocket)
+- Phase 2: `"1.1"` (add heartbeat, may add NATS)
+- Phase 3: `"2.0"` (breaking change: add coordinator messages)
+
+See [docs/ERROR_HANDLING.md](ERROR_HANDLING.md) for error codes and handling strategy.
+See [docs/SESSION_LIFECYCLE.md](SESSION_LIFECYCLE.md) for detailed session flow.
+
 ## Known Limitations (POC Trade-offs)
 
 Phase 1 makes pragmatic compromises to validate the concept quickly:
