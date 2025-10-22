@@ -1,3 +1,4 @@
+//go:build ignore
 // +build ignore
 
 // Manual test for ACP client with echo-agent

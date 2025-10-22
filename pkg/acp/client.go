@@ -17,10 +17,10 @@ type Client struct {
 	stdout   io.ReadCloser
 	stderr   io.ReadCloser
 	scanner  *bufio.Scanner
+	closedMu sync.RWMutex
 	mu       sync.Mutex
 	nextID   int
 	closed   bool
-	closedMu sync.RWMutex
 }
 
 // NewClient spawns a claude-code-acp process and returns a client to communicate with it
@@ -47,23 +47,23 @@ func NewClient(workspace string, apiKey string) (*Client, error) {
 	// Setup stdout pipe
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		stdin.Close()
+		_ = stdin.Close()
 		return nil, fmt.Errorf("failed to create stdout pipe: %w", err)
 	}
 
 	// Setup stderr pipe for debugging
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
-		stdin.Close()
-		stdout.Close()
+		_ = stdin.Close()
+		_ = stdout.Close()
 		return nil, fmt.Errorf("failed to create stderr pipe: %w", err)
 	}
 
 	// Start the process
 	if err := cmd.Start(); err != nil {
-		stdin.Close()
-		stdout.Close()
-		stderr.Close()
+		_ = stdin.Close()
+		_ = stdout.Close()
+		_ = stderr.Close()
 		return nil, fmt.Errorf("failed to start claude-code-acp: %w", err)
 	}
 
@@ -207,8 +207,8 @@ func (c *Client) Close() error {
 	}
 
 	// Close remaining pipes
-	c.stdout.Close()
-	c.stderr.Close()
+	_ = c.stdout.Close()
+	_ = c.stderr.Close()
 
 	return nil
 }
