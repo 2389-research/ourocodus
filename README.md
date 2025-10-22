@@ -99,6 +99,48 @@ ourocodus/
 └── docs/                 # Documentation
 ```
 
+### Code Quality
+
+The project uses automated quality gates:
+
+**CI/CD (GitHub Actions)**
+- Builds on all PRs and pushes to main
+- Runs full test suite
+- Lints code with golangci-lint
+- Checks formatting with gofmt
+
+**Pre-commit Hooks (Optional)**
+```bash
+# Install pre-commit
+pip install pre-commit  # or: brew install pre-commit
+
+# Install hooks
+pre-commit install
+
+# Run manually
+pre-commit run --all-files
+```
+
+Hooks run:
+- `gofmt` - Format Go code
+- `go vet` - Static analysis
+- `golangci-lint` - Comprehensive linting
+- `go mod tidy` - Clean dependencies
+- `make build` - Verify build succeeds
+
+**Manual Linting**
+```bash
+# Install golangci-lint
+brew install golangci-lint  # macOS
+# or: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+
+# Run linter
+golangci-lint run
+
+# Auto-fix issues
+golangci-lint run --fix
+```
+
 ## Contributing
 
 1. Check [GitHub Issues](https://github.com/2389-research/ourocodus/issues)
