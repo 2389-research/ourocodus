@@ -1,0 +1,124 @@
+package relay
+
+import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/gorilla/websocket"
+)
+
+func TestServer_ConnectionHandshake(t *testing.T) {
+	// Create server
+	server := NewServer()
+
+	// Create test HTTP server
+	httpServer := httptest.NewServer(http.HandlerFunc(server.HandleWebSocket))
+	defer httpServer.Close()
+
+	// Convert http://... to ws://...
+	wsURL := "ws" + strings.TrimPrefix(httpServer.URL, "http") + "/ws"
+
+	// Connect via WebSocket
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("Failed to connect: %v", err)
+	}
+	defer conn.Close()
+
+	// Read connection:established message
+	_, message, err := conn.ReadMessage()
+	if err != nil {
+		t.Fatalf("Failed to read message: %v", err)
+	}
+
+	// Parse message
+	var base BaseMessage
+	if err := json.Unmarshal(message, &base); err != nil {
+		t.Fatalf("Failed to parse message: %v", err)
+	}
+
+	// Verify it's a connection:established message
+	if base.Version != "1.0" {
+		t.Errorf("expected version 1.0, got %s", base.Version)
+	}
+	if base.Type != "connection:established" {
+		t.Errorf("expected type connection:established, got %s", base.Type)
+	}
+
+	// Parse full message to check for serverId and timestamp
+	var fullMsg map[string]interface{}
+	if err := json.Unmarshal(message, &fullMsg); err != nil {
+		t.Fatalf("Failed to parse full message: %v", err)
+	}
+
+	if _, ok := fullMsg["serverId"]; !ok {
+		t.Error("message missing serverId field")
+	}
+	if _, ok := fullMsg["timestamp"]; !ok {
+		t.Error("message missing timestamp field")
+	}
+}
+
+func TestServer_Echo(t *testing.T) {
+	// Create server
+	server := NewServer()
+
+	// Create test HTTP server
+	httpServer := httptest.NewServer(http.HandlerFunc(server.HandleWebSocket))
+	defer httpServer.Close()
+
+	// Convert http://... to ws://...
+	wsURL := "ws" + strings.TrimPrefix(httpServer.URL, "http") + "/ws"
+
+	// Connect via WebSocket
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("Failed to connect: %v", err)
+	}
+	defer conn.Close()
+
+	// Read and discard connection:established message
+	_, _, err = conn.ReadMessage()
+	if err != nil {
+		t.Fatalf("Failed to read handshake: %v", err)
+	}
+
+	// Send test message
+	testMsg := map[string]interface{}{
+		"version": "1.0",
+		"type":    "test:echo",
+		"message": "hello",
+	}
+	if err := conn.WriteJSON(testMsg); err != nil {
+		t.Fatalf("Failed to send message: %v", err)
+	}
+
+	// Read echo response
+	_, response, err := conn.ReadMessage()
+	if err != nil {
+		t.Fatalf("Failed to read response: %v", err)
+	}
+
+	// Parse response
+	var echoMsg map[string]interface{}
+	if err := json.Unmarshal(response, &echoMsg); err != nil {
+		t.Fatalf("Failed to parse response: %v", err)
+	}
+
+	// Verify echo has same fields plus timestamp
+	if echoMsg["version"] != "1.0" {
+		t.Errorf("expected version 1.0, got %v", echoMsg["version"])
+	}
+	if echoMsg["type"] != "test:echo" {
+		t.Errorf("expected type test:echo, got %v", echoMsg["type"])
+	}
+	if echoMsg["message"] != "hello" {
+		t.Errorf("expected message hello, got %v", echoMsg["message"])
+	}
+	if _, ok := echoMsg["timestamp"]; !ok {
+		t.Error("echo message missing timestamp field")
+	}
+}
