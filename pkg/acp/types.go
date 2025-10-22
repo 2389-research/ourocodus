@@ -4,25 +4,25 @@ package acp
 
 // Request represents a JSON-RPC 2.0 request
 type Request struct {
-	JSONRPC string      `json:"jsonrpc"` // Always "2.0"
 	ID      interface{} `json:"id"`
-	Method  string      `json:"method"`
 	Params  interface{} `json:"params,omitempty"`
+	JSONRPC string      `json:"jsonrpc"` // Always "2.0"
+	Method  string      `json:"method"`
 }
 
 // Response represents a JSON-RPC 2.0 response
 type Response struct {
-	JSONRPC string      `json:"jsonrpc"` // Always "2.0"
 	ID      interface{} `json:"id"`
 	Result  interface{} `json:"result,omitempty"`
 	Error   *Error      `json:"error,omitempty"`
+	JSONRPC string      `json:"jsonrpc"` // Always "2.0"
 }
 
 // Error represents a JSON-RPC 2.0 error object
 type Error struct {
-	Code    int         `json:"code"`
-	Message string      `json:"message"`
 	Data    interface{} `json:"data,omitempty"`
+	Message string      `json:"message"`
+	Code    int         `json:"code"`
 }
 
 // ACP-specific methods
@@ -34,19 +34,19 @@ const (
 
 // SendMessageParams represents parameters for sending a message to the agent
 type SendMessageParams struct {
-	Content string   `json:"content"`
 	Images  []string `json:"images,omitempty"`
+	Content string   `json:"content"`
 }
 
 // AgentMessage represents a message from the agent
 type AgentMessage struct {
+	ToolCall *ToolCall `json:"toolCall,omitempty"`
 	Type     string    `json:"type"` // "text" or "toolCall"
 	Content  string    `json:"content,omitempty"`
-	ToolCall *ToolCall `json:"toolCall,omitempty"`
 }
 
 // ToolCall represents a tool invocation from the agent
 type ToolCall struct {
-	Name string                 `json:"name"`
 	Args map[string]interface{} `json:"args"`
+	Name string                 `json:"name"`
 }
