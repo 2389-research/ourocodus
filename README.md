@@ -59,18 +59,86 @@ PWA (Browser) ←WebSocket→ Relay (Go) ←stdio→ 3x Claude Code ACP processe
 
 ## Development
 
+### Build System
+
+The project uses a Makefile for building and managing the system:
+
 ```bash
 # Build all components
 make build
+# → Produces: bin/relay, bin/cli, bin/echo-agent
 
 # Run tests
 make test
+# → Runs: go test ./...
 
-# Start system
+# Start system (when implemented)
 make run
+# → Starts relay server
 
 # Stop system
 make stop
+# → Terminates running processes
+
+# Clean build artifacts
+make clean
+# → Removes: bin/ directory
+```
+
+### Project Structure
+
+```
+ourocodus/
+├── cmd/                  # Binary entry points
+│   ├── relay/           # WebSocket relay server
+│   ├── cli/             # Command-line interface
+│   └── echo-agent/      # Echo test agent
+├── pkg/                  # Shared packages
+├── web/                  # PWA frontend
+├── scripts/              # Build and setup scripts
+└── docs/                 # Documentation
+```
+
+### Code Quality
+
+The project uses automated quality gates:
+
+**CI/CD (GitHub Actions)**
+- Builds on all PRs and pushes to main
+- Runs full test suite
+- Lints code with golangci-lint
+- Checks formatting with gofmt
+
+**Pre-commit Hooks (Optional)**
+```bash
+# Install pre-commit
+pip install pre-commit  # or: brew install pre-commit
+
+# Install hooks
+pre-commit install
+
+# Run manually
+pre-commit run --all-files
+```
+
+Hooks run:
+- `gofmt` - Format Go code
+- `go vet` - Static analysis
+- `golangci-lint` - Comprehensive linting
+- `go mod tidy` - Clean dependencies
+- `make build` - Verify build succeeds
+
+**Manual Linting**
+```bash
+# Install golangci-lint
+brew install golangci-lint  # macOS
+# or: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+
+# Run linter
+golangci-lint run
+
+# Auto-fix issues
+golangci-lint run --fix
 ```
 
 ## Contributing
