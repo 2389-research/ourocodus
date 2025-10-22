@@ -60,6 +60,7 @@ func NewClient(workspace string, apiKey string, opts ...ClientOption) (*Client, 
 	}
 
 	// Create command to spawn ACP process
+	// #nosec G204 -- Command path is intentionally configurable via ClientOption for testing and custom installations
 	cmd := exec.Command(cfg.commandPath, cfg.commandArgs...)
 
 	// Run the process within the workspace for relative path operations
