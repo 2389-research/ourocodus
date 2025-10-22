@@ -8,12 +8,69 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-# Worktrees to create
-WORKTREES=(
-    "agent/auth"
-    "agent/db"
-    "agent/tests"
-)
+# Show usage
+show_usage() {
+    cat << EOF
+Usage: $0 [agent1] [agent2] [agent3] ...
+
+Creates git worktrees for agent isolation in the ourocodus multi-agent system.
+
+Options:
+  -h, --help    Show this help message
+
+Agent Selection (priority order):
+  1. CLI arguments: ./setup-worktrees.sh frontend backend api
+  2. AGENTS env var: AGENTS="frontend,backend,ml" ./setup-worktrees.sh
+  3. Default (Phase 1): auth, db, tests
+
+Examples:
+  # Use Phase 1 defaults (auth, db, tests)
+  ./setup-worktrees.sh
+
+  # Create custom agents
+  ./setup-worktrees.sh frontend backend api
+
+  # Using environment variable
+  AGENTS="auth,db,frontend,backend" ./setup-worktrees.sh
+
+  # Single agent
+  ./setup-worktrees.sh ml-model
+
+Each agent gets:
+  - Worktree at: agent/NAME/
+  - Branch: agent/NAME
+  - Isolated working directory for concurrent development
+EOF
+    exit 0
+}
+
+# Check for help flag
+if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+    show_usage
+fi
+
+# Determine agents (3-tier priority)
+if [ "$#" -gt 0 ]; then
+    # Priority 1: CLI arguments
+    agents=("$@")
+    echo -e "${BLUE}Using CLI arguments: ${agents[*]}${NC}"
+elif [ -n "${AGENTS:-}" ]; then
+    # Priority 2: Environment variable
+    IFS=',' read -r -a agents <<< "$AGENTS"
+    echo -e "${BLUE}Using AGENTS env variable: ${agents[*]}${NC}"
+else
+    # Priority 3: Phase 1 defaults
+    agents=("auth" "db" "tests")
+    echo -e "${BLUE}Using Phase 1 defaults: ${agents[*]}${NC}"
+fi
+
+# Normalize to agent/NAME format
+WORKTREES=()
+for agent in "${agents[@]}"; do
+    # Trim whitespace
+    agent=$(echo "$agent" | xargs)
+    WORKTREES+=("agent/$agent")
+done
 
 # Script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -21,6 +78,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 echo -e "${BLUE}=== Git Worktree Setup ===${NC}"
 echo "Repository: $REPO_ROOT"
+echo "Creating ${#WORKTREES[@]} worktree(s)"
 echo ""
 
 # Function to check if worktree exists
