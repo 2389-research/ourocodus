@@ -18,7 +18,7 @@ type Client struct {
 	stderr   io.ReadCloser
 	scanner  *bufio.Scanner
 	closedMu sync.RWMutex
-	mu       sync.Mutex
+	reqMu    sync.Mutex // Protects entire request/response cycle
 	nextID   int
 	closed   bool
 }
@@ -94,6 +94,7 @@ func (c *Client) logStderr() {
 }
 
 // SendMessage sends a message to the agent and returns the response
+// This method is thread-safe - the entire request/response cycle is protected by a mutex
 func (c *Client) SendMessage(content string) (*AgentMessage, error) {
 	c.closedMu.RLock()
 	if c.closed {
@@ -102,11 +103,13 @@ func (c *Client) SendMessage(content string) (*AgentMessage, error) {
 	}
 	c.closedMu.RUnlock()
 
-	// Generate thread-safe message ID
-	c.mu.Lock()
+	// Lock for entire request/response cycle to prevent interleaving
+	c.reqMu.Lock()
+	defer c.reqMu.Unlock()
+
+	// Generate message ID (no longer needs separate lock since reqMu protects it)
 	id := c.nextID
 	c.nextID++
-	c.mu.Unlock()
 
 	// Construct JSON-RPC request
 	req := Request{
@@ -126,10 +129,7 @@ func (c *Client) SendMessage(content string) (*AgentMessage, error) {
 
 	// Write request to stdin (with newline as delimiter)
 	data = append(data, '\n')
-	c.mu.Lock()
-	_, err = c.stdin.Write(data)
-	c.mu.Unlock()
-	if err != nil {
+	if _, err = c.stdin.Write(data); err != nil {
 		return nil, fmt.Errorf("failed to write request: %w", err)
 	}
 
@@ -138,25 +138,16 @@ func (c *Client) SendMessage(content string) (*AgentMessage, error) {
 }
 
 // readResponse reads a single JSON-RPC response from stdout
+// Must be called with reqMu held (called from SendMessage)
 func (c *Client) readResponse() (*AgentMessage, error) {
-	c.closedMu.RLock()
-	if c.closed {
-		c.closedMu.RUnlock()
-		return nil, fmt.Errorf("client is closed")
-	}
-	c.closedMu.RUnlock()
-
-	// Read next line from stdout
-	c.mu.Lock()
+	// Read next line from stdout (protected by reqMu from caller)
 	if !c.scanner.Scan() {
-		c.mu.Unlock()
 		if err := c.scanner.Err(); err != nil {
 			return nil, fmt.Errorf("failed to read response: %w", err)
 		}
 		return nil, fmt.Errorf("no response from agent (EOF)")
 	}
 	line := c.scanner.Bytes()
-	c.mu.Unlock()
 
 	// Parse JSON-RPC response
 	var resp Response
