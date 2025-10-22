@@ -59,18 +59,44 @@ PWA (Browser) ←WebSocket→ Relay (Go) ←stdio→ 3x Claude Code ACP processe
 
 ## Development
 
+### Build System
+
+The project uses a Makefile for building and managing the system:
+
 ```bash
 # Build all components
 make build
+# → Produces: bin/relay, bin/cli, bin/echo-agent
 
 # Run tests
 make test
+# → Runs: go test ./...
 
-# Start system
+# Start system (when implemented)
 make run
+# → Starts relay server
 
 # Stop system
 make stop
+# → Terminates running processes
+
+# Clean build artifacts
+make clean
+# → Removes: bin/ directory
+```
+
+### Project Structure
+
+```
+ourocodus/
+├── cmd/                  # Binary entry points
+│   ├── relay/           # WebSocket relay server
+│   ├── cli/             # Command-line interface
+│   └── echo-agent/      # Echo test agent
+├── pkg/                  # Shared packages
+├── web/                  # PWA frontend
+├── scripts/              # Build and setup scripts
+└── docs/                 # Documentation
 ```
 
 ## Contributing
