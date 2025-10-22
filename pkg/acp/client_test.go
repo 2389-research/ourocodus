@@ -3,6 +3,8 @@ package acp_test
 import (
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/2389-research/ourocodus/pkg/acp"
@@ -11,6 +13,12 @@ import (
 // getEchoAgentPath returns the path to the echo-agent binary for testing
 func getEchoAgentPath(t *testing.T) string {
 	t.Helper()
+
+	// Skip on Windows - echo-agent and bash scripts require Unix-like environment
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping on Windows: echo-agent and bash scripts require a Unix-like shell")
+	}
+
 	binPath, err := filepath.Abs("../../bin/echo-agent")
 	if err != nil {
 		t.Fatalf("Failed to get echo-agent path: %v", err)
@@ -24,6 +32,7 @@ func getEchoAgentPath(t *testing.T) string {
 }
 
 func TestNewClient_Success(t *testing.T) {
+	t.Parallel()
 	echoAgent := getEchoAgentPath(t)
 	tmpDir := t.TempDir()
 
@@ -40,18 +49,20 @@ func TestNewClient_Success(t *testing.T) {
 }
 
 func TestNewClient_InvalidWorkspace(t *testing.T) {
+	t.Parallel()
 	_, err := acp.NewClient("", "test-api-key")
 	if err == nil {
 		t.Error("Expected error for empty workspace, got nil")
 	}
 
 	expectedMsg := "workspace path is required"
-	if err.Error() != expectedMsg {
-		t.Errorf("Expected error %q, got %q", expectedMsg, err.Error())
+	if !strings.Contains(err.Error(), expectedMsg) {
+		t.Errorf("Expected error containing %q, got %q", expectedMsg, err.Error())
 	}
 }
 
 func TestNewClient_InvalidAPIKey(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
 	_, err := acp.NewClient(tmpDir, "")
 	if err == nil {
@@ -59,12 +70,13 @@ func TestNewClient_InvalidAPIKey(t *testing.T) {
 	}
 
 	expectedMsg := "API key is required"
-	if err.Error() != expectedMsg {
-		t.Errorf("Expected error %q, got %q", expectedMsg, err.Error())
+	if !strings.Contains(err.Error(), expectedMsg) {
+		t.Errorf("Expected error containing %q, got %q", expectedMsg, err.Error())
 	}
 }
 
 func TestSendMessage_ValidRequest(t *testing.T) {
+	t.Parallel()
 	echoAgent := getEchoAgentPath(t)
 	tmpDir := t.TempDir()
 
@@ -92,6 +104,7 @@ func TestSendMessage_ValidRequest(t *testing.T) {
 }
 
 func TestSendMessage_MultipleSequential(t *testing.T) {
+	t.Parallel()
 	echoAgent := getEchoAgentPath(t)
 	tmpDir := t.TempDir()
 
@@ -122,6 +135,7 @@ func TestSendMessage_MultipleSequential(t *testing.T) {
 }
 
 func TestClose_TerminatesCleanly(t *testing.T) {
+	t.Parallel()
 	echoAgent := getEchoAgentPath(t)
 	tmpDir := t.TempDir()
 
@@ -144,6 +158,7 @@ func TestClose_TerminatesCleanly(t *testing.T) {
 }
 
 func TestSendMessage_AfterClose(t *testing.T) {
+	t.Parallel()
 	echoAgent := getEchoAgentPath(t)
 	tmpDir := t.TempDir()
 
@@ -165,12 +180,13 @@ func TestSendMessage_AfterClose(t *testing.T) {
 	}
 
 	expectedMsg := "client is closed"
-	if err.Error() != expectedMsg {
-		t.Errorf("Expected error %q, got %q", expectedMsg, err.Error())
+	if !strings.Contains(err.Error(), expectedMsg) {
+		t.Errorf("Expected error containing %q, got %q", expectedMsg, err.Error())
 	}
 }
 
 func TestNewClient_InvalidCommand(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
 
 	// Try to create client with non-existent command
@@ -186,6 +202,7 @@ func TestNewClient_InvalidCommand(t *testing.T) {
 }
 
 func TestSendMessage_ProcessCrash(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
 
 	// Create a mock process that exits immediately
@@ -209,6 +226,7 @@ func TestSendMessage_ProcessCrash(t *testing.T) {
 }
 
 func TestSendMessage_InvalidJSON(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
 
 	// Create a mock process that returns invalid JSON

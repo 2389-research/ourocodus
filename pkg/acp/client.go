@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"sync"
+	"time"
 )
 
 // Client manages communication with a single claude-code-acp process
@@ -61,6 +62,9 @@ func NewClient(workspace string, apiKey string, opts ...ClientOption) (*Client, 
 	// Create command to spawn ACP process
 	cmd := exec.Command(cfg.commandPath, cfg.commandArgs...)
 
+	// Run the process within the workspace for relative path operations
+	cmd.Dir = workspace
+
 	// Set API key via environment variable
 	cmd.Env = append(os.Environ(), fmt.Sprintf("ANTHROPIC_API_KEY=%s", apiKey))
 
@@ -90,7 +94,7 @@ func NewClient(workspace string, apiKey string, opts ...ClientOption) (*Client, 
 		_ = stdin.Close()
 		_ = stdout.Close()
 		_ = stderr.Close()
-		return nil, fmt.Errorf("failed to start claude-code-acp: %w", err)
+		return nil, fmt.Errorf("failed to start %q: %w", cfg.commandPath, err)
 	}
 
 	client := &Client{
@@ -102,6 +106,9 @@ func NewClient(workspace string, apiKey string, opts ...ClientOption) (*Client, 
 		nextID:  1,
 		closed:  false,
 	}
+
+	// Allow large JSON messages (init 64KB, max 5MB)
+	client.scanner.Buffer(make([]byte, 64*1024), 5*1024*1024)
 
 	// Start goroutine to log stderr (for debugging)
 	go client.logStderr()
@@ -159,12 +166,12 @@ func (c *Client) SendMessage(content string) (*AgentMessage, error) {
 		return nil, fmt.Errorf("failed to write request: %w", err)
 	}
 
-	// Read response from stdout
-	return c.readResponse()
+	// Read response from stdout and verify it matches the request ID
+	return c.readResponse(id)
 }
 
-// readResponse reads a single JSON-RPC response from stdout
-func (c *Client) readResponse() (*AgentMessage, error) {
+// readResponse reads a single JSON-RPC response from stdout and validates the ID
+func (c *Client) readResponse(expectedID int) (*AgentMessage, error) {
 	c.closedMu.RLock()
 	if c.closed {
 		c.closedMu.RUnlock()
@@ -188,6 +195,19 @@ func (c *Client) readResponse() (*AgentMessage, error) {
 	var resp Response
 	if err := json.Unmarshal(line, &resp); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
+	}
+
+	// Verify response ID matches request ID
+	if respID, ok := resp.ID.(float64); ok {
+		if int(respID) != expectedID {
+			return nil, fmt.Errorf("mismatched response id: got %v, want %d", resp.ID, expectedID)
+		}
+	} else if respID, ok := resp.ID.(int); ok {
+		if respID != expectedID {
+			return nil, fmt.Errorf("mismatched response id: got %v, want %d", resp.ID, expectedID)
+		}
+	} else if resp.ID != expectedID {
+		return nil, fmt.Errorf("mismatched response id: got %v, want %d", resp.ID, expectedID)
 	}
 
 	// Check for JSON-RPC error
@@ -223,13 +243,24 @@ func (c *Client) Close() error {
 		return fmt.Errorf("failed to close stdin: %w", err)
 	}
 
-	// Wait for process to exit
-	if err := c.cmd.Wait(); err != nil {
-		// Process may exit with non-zero status, which is acceptable
-		// Only return error if it's a system error, not exit status
-		if _, ok := err.(*exec.ExitError); !ok {
-			return fmt.Errorf("failed to wait for process: %w", err)
+	// Wait for process to exit with a timeout; force-kill if it hangs
+	done := make(chan error, 1)
+	go func() { done <- c.cmd.Wait() }()
+
+	select {
+	case err := <-done:
+		// Process exited normally
+		if err != nil {
+			// Process may exit with non-zero status, which is acceptable
+			// Only return error if it's a system error, not exit status
+			if _, ok := err.(*exec.ExitError); !ok {
+				return fmt.Errorf("failed to wait for process: %w", err)
+			}
 		}
+	case <-time.After(5 * time.Second):
+		// Process didn't exit in time, force kill it
+		_ = c.cmd.Process.Kill()
+		<-done // Wait for goroutine to finish
 	}
 
 	// Close remaining pipes
