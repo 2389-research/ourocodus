@@ -50,7 +50,12 @@ PWA (Browser) ←WebSocket→ Relay (Go) ←stdio→ 3x Claude Code ACP processe
 
 **Current:** Phase 1 - Foundation implementation
 
-See [GitHub Issues](https://github.com/2389-research/ourocodus/issues) for detailed task breakdown.
+**Progress:** [13 issues](https://github.com/2389-research/ourocodus/issues) | [Milestone](https://github.com/2389-research/ourocodus/milestone/1) | [Issue Map](docs/ISSUES.md)
+
+### Quick Links
+- [Issue #1: Project Initialization](https://github.com/2389-research/ourocodus/issues/1) ← **Start here**
+- [Issue Dependency Graph](docs/ISSUES.md)
+- [Phase 1 Spec](docs/PHASE1.md)
 
 ## Development
 
