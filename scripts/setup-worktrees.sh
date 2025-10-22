@@ -72,6 +72,9 @@ for agent in "${agents[@]}"; do
     WORKTREES+=("agent/$agent")
 done
 
+# Default start point for new branches (override via env: START_POINT=origin/main)
+START_POINT="${START_POINT:-HEAD}"
+
 # Script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -81,16 +84,38 @@ echo "Repository: $REPO_ROOT"
 echo "Creating ${#WORKTREES[@]} worktree(s)"
 echo ""
 
-# Function to check if worktree exists
+# Function to check if worktree exists (robust exact path matching)
 worktree_exists() {
     local worktree_path="$1"
-    git worktree list | grep -q "$worktree_path"
+    git worktree list --porcelain \
+      | awk '/^worktree /{print $2}' \
+      | grep -Fxq "$worktree_path"
 }
 
 # Function to check if branch exists
 branch_exists() {
     local branch_name="$1"
     git show-ref --verify --quiet "refs/heads/$branch_name"
+}
+
+# Function to check if branch is already attached to any worktree
+branch_in_use() {
+    local branch_name="$1"
+    git worktree list --porcelain \
+      | awk -v b="refs/heads/$branch_name" '
+          $1=="worktree"{p=$2}
+          $1=="branch" && $2==b{print p; exit 0}
+        ' | grep -q .
+}
+
+# Function to return the worktree path for a checked-out branch
+branch_location_for() {
+    local branch_name="$1"
+    git worktree list --porcelain \
+      | awk -v b="refs/heads/$branch_name" '
+          $1=="worktree"{p=$2}
+          $1=="branch" && $2==b{print p; exit 0}
+        '
 }
 
 # Function to create worktree
@@ -110,10 +135,25 @@ create_worktree() {
     # Create directory if it doesn't exist
     mkdir -p "$(dirname "$worktree_path")"
 
+    # Guard: path exists but is not a registered worktree
+    if [ -d "$worktree_path" ] && ! worktree_exists "$worktree_path"; then
+        echo -e "${RED}✗ Path exists but is not a registered worktree: ${worktree_path}${NC}"
+        echo -e "${YELLOW}  Hint: remove/move the directory or choose a different path.${NC}"
+        return 1
+    fi
+
     # Check if branch exists
     if branch_exists "$branch_name"; then
         echo -e "${YELLOW}  Branch '${branch_name}' already exists, using it${NC}"
-        if git worktree add "$worktree_path" "$branch_name" 2>/dev/null; then
+
+        # Check if branch is already checked out elsewhere
+        if branch_in_use "$branch_name"; then
+            existing="$(branch_location_for "$branch_name")"
+            echo -e "${YELLOW}  Branch is already checked out at: ${existing}. Skipping.${NC}"
+            return 0
+        fi
+
+        if git worktree add "$worktree_path" "$branch_name"; then
             echo -e "${GREEN}✓ Created worktree at: ${worktree_path}${NC}"
         else
             echo -e "${RED}✗ Failed to create worktree at: ${worktree_path}${NC}"
@@ -121,7 +161,7 @@ create_worktree() {
         fi
     else
         # Create new branch and worktree
-        if git worktree add -b "$branch_name" "$worktree_path" HEAD 2>/dev/null; then
+        if git worktree add -b "$branch_name" "$worktree_path" "$START_POINT"; then
             echo -e "${GREEN}✓ Created worktree at: ${worktree_path} with new branch '${branch_name}'${NC}"
         else
             echo -e "${RED}✗ Failed to create worktree at: ${worktree_path}${NC}"
