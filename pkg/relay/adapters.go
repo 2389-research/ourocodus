@@ -46,7 +46,7 @@ func NewGorillaUpgrader(checkOrigin func(*http.Request) bool) *GorillaUpgrader {
 func (u *GorillaUpgrader) Upgrade(w interface{}, r interface{}, responseHeader interface{}) (WebSocketConn, error) {
 	httpW, ok := w.(http.ResponseWriter)
 	if !ok {
-		panic("w must be http.ResponseWriter")
+		panic("Upgrade: type assertion failed - w must be http.ResponseWriter")
 	}
 	httpR, ok := r.(*http.Request)
 	if !ok {
