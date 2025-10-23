@@ -122,3 +122,227 @@ func TestServer_Echo(t *testing.T) {
 		t.Error("echo message missing timestamp field")
 	}
 }
+
+func TestServer_VersionMismatch(t *testing.T) {
+	// Create server
+	server := NewServer()
+
+	// Create test HTTP server
+	httpServer := httptest.NewServer(http.HandlerFunc(server.HandleWebSocket))
+	defer httpServer.Close()
+
+	// Convert http://... to ws://...
+	wsURL := "ws" + strings.TrimPrefix(httpServer.URL, "http") + "/ws"
+
+	// Connect via WebSocket
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("Failed to connect: %v", err)
+	}
+	defer conn.Close()
+
+	// Read and discard connection:established message
+	_, _, err = conn.ReadMessage()
+	if err != nil {
+		t.Fatalf("Failed to read handshake: %v", err)
+	}
+
+	// Send message with wrong version
+	testMsg := map[string]interface{}{
+		"version": "2.0",
+		"type":    "test:echo",
+	}
+	if err := conn.WriteJSON(testMsg); err != nil {
+		t.Fatalf("Failed to send message: %v", err)
+	}
+
+	// Read error response
+	_, response, err := conn.ReadMessage()
+	if err != nil {
+		t.Fatalf("Failed to read error response: %v", err)
+	}
+
+	// Parse error message
+	var errorMsg ErrorMessage
+	if err := json.Unmarshal(response, &errorMsg); err != nil {
+		t.Fatalf("Failed to parse error message: %v", err)
+	}
+
+	// Verify error structure
+	if errorMsg.Type != "error" {
+		t.Errorf("expected type error, got %s", errorMsg.Type)
+	}
+	if errorMsg.Error.Code != "VERSION_MISMATCH" {
+		t.Errorf("expected code VERSION_MISMATCH, got %s", errorMsg.Error.Code)
+	}
+	if errorMsg.Error.Recoverable {
+		t.Error("expected recoverable=false for version mismatch")
+	}
+
+	// Verify connection is closed
+	// Try to read again, should get EOF or close error
+	_, _, err = conn.ReadMessage()
+	if err == nil {
+		t.Error("expected connection to be closed after version mismatch")
+	}
+}
+
+func TestServer_MissingRequiredField(t *testing.T) {
+	// Create server
+	server := NewServer()
+
+	// Create test HTTP server
+	httpServer := httptest.NewServer(http.HandlerFunc(server.HandleWebSocket))
+	defer httpServer.Close()
+
+	// Convert http://... to ws://...
+	wsURL := "ws" + strings.TrimPrefix(httpServer.URL, "http") + "/ws"
+
+	// Connect via WebSocket
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("Failed to connect: %v", err)
+	}
+	defer conn.Close()
+
+	// Read and discard connection:established message
+	_, _, err = conn.ReadMessage()
+	if err != nil {
+		t.Fatalf("Failed to read handshake: %v", err)
+	}
+
+	// Send message without version
+	testMsg := map[string]interface{}{
+		"type":    "test:echo",
+		"message": "test",
+	}
+	if err := conn.WriteJSON(testMsg); err != nil {
+		t.Fatalf("Failed to send message: %v", err)
+	}
+
+	// Read error response
+	_, response, err := conn.ReadMessage()
+	if err != nil {
+		t.Fatalf("Failed to read error response: %v", err)
+	}
+
+	// Parse error message
+	var errorMsg ErrorMessage
+	if err := json.Unmarshal(response, &errorMsg); err != nil {
+		t.Fatalf("Failed to parse error message: %v", err)
+	}
+
+	// Verify error structure
+	if errorMsg.Type != "error" {
+		t.Errorf("expected type error, got %s", errorMsg.Type)
+	}
+	if errorMsg.Error.Code != "INVALID_MESSAGE" {
+		t.Errorf("expected code INVALID_MESSAGE, got %s", errorMsg.Error.Code)
+	}
+	if !errorMsg.Error.Recoverable {
+		t.Error("expected recoverable=true for missing field")
+	}
+
+	// Verify connection stays open - send a valid message
+	validMsg := map[string]interface{}{
+		"version": "1.0",
+		"type":    "test:echo",
+		"message": "recovered",
+	}
+	if err := conn.WriteJSON(validMsg); err != nil {
+		t.Fatalf("Failed to send valid message after error: %v", err)
+	}
+
+	// Should receive echo
+	_, response, err = conn.ReadMessage()
+	if err != nil {
+		t.Fatalf("Connection should still be open after recoverable error: %v", err)
+	}
+
+	var echoMsg map[string]interface{}
+	if err := json.Unmarshal(response, &echoMsg); err != nil {
+		t.Fatalf("Failed to parse echo: %v", err)
+	}
+
+	if echoMsg["message"] != "recovered" {
+		t.Errorf("expected echo of recovered message, got %v", echoMsg["message"])
+	}
+}
+
+func TestServer_InvalidJSON(t *testing.T) {
+	// Create server
+	server := NewServer()
+
+	// Create test HTTP server
+	httpServer := httptest.NewServer(http.HandlerFunc(server.HandleWebSocket))
+	defer httpServer.Close()
+
+	// Convert http://... to ws://...
+	wsURL := "ws" + strings.TrimPrefix(httpServer.URL, "http") + "/ws"
+
+	// Connect via WebSocket
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("Failed to connect: %v", err)
+	}
+	defer conn.Close()
+
+	// Read and discard connection:established message
+	_, _, err = conn.ReadMessage()
+	if err != nil {
+		t.Fatalf("Failed to read handshake: %v", err)
+	}
+
+	// Send invalid JSON
+	if err := conn.WriteMessage(websocket.TextMessage, []byte("{invalid json}")); err != nil {
+		t.Fatalf("Failed to send message: %v", err)
+	}
+
+	// Read error response
+	_, response, err := conn.ReadMessage()
+	if err != nil {
+		t.Fatalf("Failed to read error response: %v", err)
+	}
+
+	// Parse error message
+	var errorMsg ErrorMessage
+	if err := json.Unmarshal(response, &errorMsg); err != nil {
+		t.Fatalf("Failed to parse error message: %v", err)
+	}
+
+	// Verify error structure
+	if errorMsg.Type != "error" {
+		t.Errorf("expected type error, got %s", errorMsg.Type)
+	}
+	if errorMsg.Error.Code != "INVALID_MESSAGE" {
+		t.Errorf("expected code INVALID_MESSAGE, got %s", errorMsg.Error.Code)
+	}
+	if !errorMsg.Error.Recoverable {
+		t.Error("expected recoverable=true for invalid JSON")
+	}
+
+	// Verify connection stays open - send a valid message
+	validMsg := map[string]interface{}{
+		"version": "1.0",
+		"type":    "test:echo",
+		"message": "recovered",
+	}
+	if err := conn.WriteJSON(validMsg); err != nil {
+		t.Fatalf("Failed to send valid message after error: %v", err)
+	}
+
+	// Should receive echo
+	_, response, err = conn.ReadMessage()
+	if err != nil {
+		t.Fatalf("Connection should still be open after recoverable error: %v", err)
+	}
+
+	var echoMsg map[string]interface{}
+	if err := json.Unmarshal(response, &echoMsg); err != nil {
+		t.Fatalf("Failed to parse echo: %v", err)
+	}
+
+	if echoMsg["message"] != "recovered" {
+		t.Errorf("expected echo of recovered message, got %v", echoMsg["message"])
+	}
+}

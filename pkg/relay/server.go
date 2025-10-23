@@ -60,7 +60,31 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		// Validate message
 		if err := ValidateMessage(message); err != nil {
 			log.Printf("Invalid message: %v", err)
-			// TODO: Send error response (will add in future iteration)
+
+			// Send error response
+			var validationErr ValidationError
+			if verr, ok := err.(ValidationError); ok {
+				validationErr = verr
+			} else {
+				// Fallback for unexpected errors
+				validationErr = ValidationError{
+					Code:        "INVALID_MESSAGE",
+					Message:     err.Error(),
+					Recoverable: true,
+				}
+			}
+
+			errorMsg := NewErrorMessage(validationErr.Code, validationErr.Message, validationErr.Recoverable)
+			if err := conn.WriteJSON(errorMsg); err != nil {
+				log.Printf("Failed to send error response: %v", err)
+			}
+
+			// Close connection if error is not recoverable
+			if !validationErr.Recoverable {
+				log.Printf("Closing connection due to non-recoverable error: %s", validationErr.Code)
+				break
+			}
+
 			continue
 		}
 
