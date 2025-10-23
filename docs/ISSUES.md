@@ -109,6 +109,11 @@ All issues are in the **"Phase 1: Foundation"** milestone with due date: Dec 15,
 
 Track progress: https://github.com/2389-research/ourocodus/milestone/1
 
+## Detailed Briefs
+
+- [#6 Relay Session Management](issues/06-relay-session-management.md)
+- [#7 Relay ACP Integration](issues/07-relay-acp-integration.md)
+
 ## Questions?
 
 See [docs/PHASE1.md](https://github.com/2389-research/ourocodus/blob/main/docs/PHASE1.md) for detailed implementation specification.
