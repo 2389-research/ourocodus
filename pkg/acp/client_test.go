@@ -1,14 +1,47 @@
 package acp_test
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/2389-research/ourocodus/pkg/acp"
 )
+
+type capturingLogger struct {
+	mu    sync.Mutex
+	lines []string
+}
+
+func (l *capturingLogger) Printf(format string, v ...interface{}) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.lines = append(l.lines, fmt.Sprintf(format, v...))
+}
+
+func (l *capturingLogger) contains(substring string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for _, line := range l.lines {
+		if strings.Contains(line, substring) {
+			return true
+		}
+	}
+	return false
+}
+
+func (l *capturingLogger) snapshot() []string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	cp := make([]string, len(l.lines))
+	copy(cp, l.lines)
+	return cp
+}
 
 // getEchoAgentPath returns the path to the echo-agent binary for testing
 func getEchoAgentPath(t *testing.T) string {
@@ -182,6 +215,48 @@ func TestSendMessage_AfterClose(t *testing.T) {
 	expectedMsg := "client is closed"
 	if !strings.Contains(err.Error(), expectedMsg) {
 		t.Errorf("Expected error containing %q, got %q", expectedMsg, err.Error())
+	}
+}
+
+func TestClient_WithLogger(t *testing.T) {
+	t.Parallel()
+
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping on Windows: mock shell script requires Unix-like environment")
+	}
+
+	workspace := t.TempDir()
+	scriptPath := filepath.Join(t.TempDir(), "stderr-agent.sh")
+
+	script := "#!/bin/sh\n" +
+		"echo \"mock stderr line\" >&2\n" +
+		"sleep 0.2\n"
+
+	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("Failed to write mock script: %v", err)
+	}
+
+	logger := &capturingLogger{}
+
+	client, err := acp.NewClient(workspace, "test-api-key",
+		acp.WithCommand(scriptPath),
+		acp.WithLogger(logger),
+	)
+	if err != nil {
+		t.Fatalf("Failed to create client: %v", err)
+	}
+	defer client.Close()
+
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if logger.contains("mock stderr line") {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if !logger.contains("mock stderr line") {
+		t.Fatalf("Expected logger to capture stderr output, lines=%v", logger.snapshot())
 	}
 }
 

@@ -18,6 +18,7 @@ type Client struct {
 	stdout   io.ReadCloser
 	stderr   io.ReadCloser
 	scanner  *bufio.Scanner
+	logger   Logger
 	closedMu sync.RWMutex
 	reqMu    sync.Mutex // Protects entire request/response cycle
 	nextID   int
@@ -30,6 +31,7 @@ type ClientOption func(*clientConfig)
 type clientConfig struct {
 	commandPath string
 	commandArgs []string
+	logger      Logger
 }
 
 // WithCommand sets a custom command path and args for the ACP process
@@ -38,6 +40,17 @@ func WithCommand(path string, args ...string) ClientOption {
 	return func(c *clientConfig) {
 		c.commandPath = path
 		c.commandArgs = args
+	}
+}
+
+// WithLogger sets a custom logger for ACP stderr output
+func WithLogger(logger Logger) ClientOption {
+	return func(c *clientConfig) {
+		if logger == nil {
+			c.logger = noOpLogger{}
+			return
+		}
+		c.logger = logger
 	}
 }
 
@@ -54,9 +67,13 @@ func NewClient(workspace string, apiKey string, opts ...ClientOption) (*Client, 
 	cfg := &clientConfig{
 		commandPath: "claude-code-acp",
 		commandArgs: []string{"--workspace", workspace},
+		logger:      noOpLogger{},
 	}
 	for _, opt := range opts {
 		opt(cfg)
+	}
+	if cfg.logger == nil {
+		cfg.logger = noOpLogger{}
 	}
 
 	// Create command to spawn ACP process
@@ -104,6 +121,7 @@ func NewClient(workspace string, apiKey string, opts ...ClientOption) (*Client, 
 		stdout:  stdout,
 		stderr:  stderr,
 		scanner: bufio.NewScanner(stdout),
+		logger:  cfg.logger,
 		nextID:  1,
 		closed:  false,
 	}
@@ -121,14 +139,22 @@ func NewClient(workspace string, apiKey string, opts ...ClientOption) (*Client, 
 func (c *Client) logStderr() {
 	scanner := bufio.NewScanner(c.stderr)
 	for scanner.Scan() {
-		// In production, use proper logging. For now, just ignore stderr.
-		// fmt.Fprintf(os.Stderr, "[ACP stderr] %s\n", scanner.Text())
-		_ = scanner.Text()
+		c.logger.Printf("[ACP stderr] %s", scanner.Text())
+	}
+	if err := scanner.Err(); err != nil {
+		c.logger.Printf("[ACP stderr] scanner error: %v", err)
 	}
 }
 
-// SendMessage sends a message to the agent and returns the response
-// This method is thread-safe - the entire request/response cycle is protected by a mutex
+// SendMessage sends a message to the agent and returns the response.
+// Thread safety: Uses two-level locking strategy:
+//  1. closedMu (RLock) - Quick check if client is closed
+//  2. reqMu (Lock) - Protects entire request/response cycle
+//
+// Why two locks?
+//   - closedMu allows concurrent Close() checks without blocking active requests
+//   - reqMu serializes request/response pairs to prevent interleaving
+//   - Example: Thread A sends request ID=1, Thread B sends ID=2; without reqMu, responses could mismatch
 func (c *Client) SendMessage(content string) (*AgentMessage, error) {
 	c.closedMu.RLock()
 	if c.closed {

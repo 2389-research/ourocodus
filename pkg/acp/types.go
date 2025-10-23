@@ -50,3 +50,13 @@ type ToolCall struct {
 	Args map[string]interface{} `json:"args"`
 	Name string                 `json:"name"`
 }
+
+// Logger abstracts logging operations for the ACP client
+type Logger interface {
+	Printf(format string, v ...interface{})
+}
+
+// noOpLogger discards all log output when no logger is provided
+type noOpLogger struct{}
+
+func (noOpLogger) Printf(format string, v ...interface{}) {}
