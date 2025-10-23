@@ -37,20 +37,17 @@ clean:
 # Run linter (requires golangci-lint)
 lint:
 	@echo "Running linter..."
-	@command -v golangci-lint >/dev/null 2>&1 || { echo >&2 "golangci-lint not installed. Install via mise or manually."; exit 1; }
-	golangci-lint run --timeout=5m
+	mise exec -- golangci-lint run --timeout=5m
 
 # Format code (requires gofumpt)
 fmt:
 	@echo "Formatting code..."
-	@command -v gofumpt >/dev/null 2>&1 || { echo >&2 "gofumpt not installed. Install via mise or manually."; exit 1; }
-	gofumpt -l -w .
+	mise exec -- gofumpt -l -w .
 
 # Run static analysis (requires staticcheck)
 check:
 	@echo "Running static analysis..."
-	@command -v staticcheck >/dev/null 2>&1 || { echo >&2 "staticcheck not installed. Install via mise or manually."; exit 1; }
-	staticcheck ./...
+	mise exec -- staticcheck ./...
 
 # Run all pre-commit checks
 pre-commit: fmt
