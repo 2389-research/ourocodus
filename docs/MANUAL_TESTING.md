@@ -46,7 +46,9 @@ Expected response:
 {"version":"2.0","type":"test:echo"}
 ```
 
-Expected: No response (message rejected, check server logs for error)
+Expected response:
+```json
+{"version":"1.0","type":"error","code":"VERSION_MISMATCH","message":"Unsupported protocol version","timestamp":"2025-10-22T..."}
 
 ### Test 4: Missing Version Field
 ```json
