@@ -72,6 +72,22 @@ make build
 make test
 # → Runs: go test ./...
 
+# Format code
+make fmt
+# → Runs: gofumpt -l -w .
+
+# Run linter
+make lint
+# → Runs: golangci-lint run
+
+# Run static analysis
+make check
+# → Runs: staticcheck ./...
+
+# Run all checks
+make pre-commit
+# → Runs: fmt, vet, lint, tidy, build, test
+
 # Start system (when implemented)
 make run
 # → Starts relay server

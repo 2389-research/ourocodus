@@ -98,6 +98,9 @@ go install mvdan.cc/gofumpt@latest
 Run the linter before committing:
 
 ```bash
+# Using make (recommended)
+make lint
+
 # Using mise
 mise run lint
 
@@ -116,6 +119,9 @@ The linter configuration is in `.golangci.yml` and includes:
 We use `gofumpt` for stricter formatting than `gofmt`:
 
 ```bash
+# Using make (recommended)
+make fmt
+
 # Using mise
 mise run fmt
 
@@ -128,11 +134,26 @@ gofumpt -l -w .
 Run staticcheck for advanced static analysis:
 
 ```bash
+# Using make (recommended)
+make check
+
 # Using mise
 mise run check
 
 # Or directly
 staticcheck ./...
+```
+
+### Run All Checks
+
+To run all quality checks at once:
+
+```bash
+# Using make (recommended)
+make pre-commit
+
+# Using mise
+mise run pre-commit
 ```
 
 ### Pre-commit Hooks
