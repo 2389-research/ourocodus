@@ -7,10 +7,10 @@ import (
 
 // Server handles WebSocket connections with injected dependencies
 type Server struct {
-	serverID    string
-	logger      Logger
-	clock       Clock
-	upgrader    Upgrader
+	serverID string
+	logger   Logger
+	clock    Clock
+	upgrader Upgrader
 }
 
 // NewServer creates a new relay server with dependency injection
