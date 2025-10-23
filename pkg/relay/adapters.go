@@ -57,7 +57,7 @@ func (u *GorillaUpgrader) Upgrade(w interface{}, r interface{}, responseHeader i
 	if responseHeader != nil {
 		headers, ok = responseHeader.(http.Header)
 		if !ok {
-			panic("responseHeader must be http.Header")
+			panic("Upgrade: type assertion failed - responseHeader must be http.Header")
 		}
 	}
 
