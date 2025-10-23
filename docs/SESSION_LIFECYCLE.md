@@ -80,22 +80,25 @@ A **session** represents one user conversation with one AI agent. Each session h
 
 ```go
 type Session struct {
-    ID          string            // UUID v4
-    AgentID     string            // "auth", "db", "tests"
-    WorktreeDir string            // "/path/to/agent/auth"
+    // Immutable fields (set at creation)
+    ID      string // UUID v4
+    AgentID string // Role identifier ("auth", "db", "tests")
 
-    WebSocket   *websocket.Conn   // Connection to PWA
+    // Mutable fields (guarded by internal mutex)
+    state        SessionState
+    worktreeDir  string
+    handle       *Handle
+    createdAt    time.Time
+    lastActive   time.Time
+    messageCount int
 
-    ACPClient   *acp.Client       // Wrapper around ACP process
+    mu sync.RWMutex
+}
 
-    State       SessionState      // CREATED, SPAWNING, ACTIVE, TERMINATING, CLEANED
-
-    CreatedAt   time.Time
-    LastActive  time.Time         // Updated on each message
-
-    MessageCount int              // Total messages sent to agent
-
-    mu          sync.RWMutex      // Protects state changes
+type Handle struct {
+    WebSocket  WebSocketConn // Connection to PWA
+    ACPClient  ACPClient     // ACP process wrapper
+    CancelFunc func()        // Context cancel for shutdown
 }
 
 type SessionState string
@@ -108,6 +111,8 @@ const (
     StateCleaned     SessionState = "CLEANED"
 )
 ```
+
+All mutation flows through the `Manager`. Callers observe session state using accessors such as `session.GetState()` and `session.GetHandle()`. For implementation details see `pkg/relay/session/README.md`.
 
 ---
 
@@ -123,20 +128,17 @@ const (
 }
 ```
 
-### 2. Relay Creates Session Object
+### 2. Relay Creates Session via Manager
 
 ```go
-sessionID := uuid.New().String()
-session := &Session{
-    ID:        sessionID,
-    AgentID:   agentID,
-    WebSocket: ws,
-    State:     StateCreated,
-    CreatedAt: time.Now(),
+// session.Manager.Create attaches the WebSocket handle and persists the session
+sess, err := manager.Create(ctx, agentID, ws)
+if err != nil {
+    return fmt.Errorf("create session failed: %w", err)
 }
-
-relay.sessions.Store(sessionID, session)
 ```
+
+The manager generates the session ID, attaches the WebSocket handle, and persists the session through the injected store.
 
 ### 3. Relay Sends Acknowledgement
 
@@ -150,41 +152,45 @@ relay.sessions.Store(sessionID, session)
 }
 ```
 
-### 4. Relay Spawns ACP Process (Async)
+### 4. Relay Initiates Spawn via Manager
 
 ```go
-session.State = StateSpawning
+// session.Manager.BeginSpawn transitions CREATED → SPAWNING
+if err := manager.BeginSpawn(ctx, sess.GetID()); err != nil {
+    return fmt.Errorf("begin spawn failed: %w", err)
+}
 
-go func() {
-    // Create git worktree
-    worktreeDir := filepath.Join("agent", agentID)
-    if err := createWorktree(worktreeDir, agentID); err != nil {
-        session.handleError("worktree creation failed", err)
-        return
-    }
-
-    session.WorktreeDir = worktreeDir
-
-    // Spawn ACP process
-    client, err := acp.NewClient(worktreeDir, os.Getenv("ANTHROPIC_API_KEY"))
+go func(sessionID string) {
+    worktreeDir, err := createWorktree(agentID)
     if err != nil {
-        session.handleError("ACP spawn failed", err)
+        manager.MarkTerminating(ctx, sessionID, fmt.Sprintf("worktree failed: %v", err))
+        manager.CompleteCleanup(ctx, sessionID)
         return
     }
 
-    session.ACPClient = client
-    session.State = StateActive
-    session.LastActive = time.Now()
+    acpClient, err := acp.NewClient(worktreeDir, os.Getenv("ANTHROPIC_API_KEY"))
+    if err != nil {
+        manager.MarkTerminating(ctx, sessionID, fmt.Sprintf("acp spawn failed: %v", err))
+        manager.CompleteCleanup(ctx, sessionID)
+        return
+    }
 
-    // Notify PWA
-    session.WebSocket.WriteJSON(map[string]interface{}{
-        "type": "session:ready",
-        "sessionId": session.ID,
+    // session.Manager.AttachAgent transitions SPAWNING → ACTIVE
+    if err := manager.AttachAgent(ctx, sessionID, worktreeDir, acpClient); err != nil {
+        manager.MarkTerminating(ctx, sessionID, fmt.Sprintf("attach failed: %v", err))
+        manager.CompleteCleanup(ctx, sessionID)
+        return
+    }
+
+    session := manager.Get(sessionID)
+    handle := session.GetHandle()
+    handle.WebSocket.WriteJSON(map[string]interface{}{
+        "type":      "session:ready",
+        "sessionId": sessionID,
     })
 
-    // Start reading from ACP stdout
-    go session.readACPOutput()
-}()
+    go readACPOutput(ctx, session)
+}(sess.GetID())
 ```
 
 ### 5. PWA Receives Ready Notification
@@ -215,46 +221,36 @@ go func() {
 ```
 
 ```go
-// Relay validates and forwards
-session.mu.RLock()
-if session.State != StateActive {
-    session.mu.RUnlock()
+handle := session.GetHandle()
+if session.GetState() != StateActive {
     return fmt.Errorf("session not active")
 }
-session.mu.RUnlock()
+if handle == nil || handle.ACPClient == nil {
+    return fmt.Errorf("session not ready")
+}
 
-// Send to ACP via JSON-RPC
-err := session.ACPClient.SendMessage(message.Content)
+agentResp, err := handle.ACPClient.SendMessage(message.Content)
 if err != nil {
-    session.handleError("failed to send message", err)
+    manager.MarkTerminating(ctx, session.GetID(), fmt.Sprintf("send failed: %v", err))
+    manager.CompleteCleanup(ctx, session.GetID())
     return
 }
 
-session.MessageCount++
-session.LastActive = time.Now()
-```
-
-### Receiving Agent Response
-
-```go
-// Relay reads from ACP stdout (goroutine)
-for {
-    response, err := session.ACPClient.ReadResponse()
-    if err != nil {
-        session.handleError("ACP read failed", err)
-        break
-    }
-
-    // Forward to PWA
-    session.WebSocket.WriteJSON(map[string]interface{}{
-        "type": "agent:response",
-        "sessionId": session.ID,
-        "content": response.Content,
-        "timestamp": time.Now(),
-    })
-
-    session.LastActive = time.Now()
+payload := map[string]interface{}{
+    "type":      "agent:response",
+    "sessionId": session.GetID(),
+    "content":   agentResp.Content,
+    "timestamp": time.Now(),
 }
+
+if err := handle.WebSocket.WriteJSON(payload); err != nil {
+    manager.MarkTerminating(ctx, session.GetID(), fmt.Sprintf("write failed: %v", err))
+    manager.CompleteCleanup(ctx, session.GetID())
+    return
+}
+
+_ = manager.IncrementMessageCount(ctx, session.GetID())
+_ = manager.RecordHeartbeat(ctx, session.GetID())
 ```
 
 ---
@@ -274,8 +270,12 @@ for {
 ### Initiated by Error
 
 ```go
-// Inside session.handleError()
-session.terminate(fmt.Sprintf("Error: %v", err))
+if err := manager.MarkTerminating(ctx, session.GetID(), fmt.Sprintf("error: %v", err)); err != nil {
+    logger.Printf("Failed to mark terminating: %v", err)
+}
+if err := manager.CompleteCleanup(ctx, session.GetID()); err != nil {
+    logger.Printf("Cleanup failed: %v", err)
+}
 ```
 
 ### Initiated by WebSocket Disconnect
@@ -283,49 +283,27 @@ session.terminate(fmt.Sprintf("Error: %v", err))
 ```go
 // Relay detects disconnect in ReadMessage loop
 if err != nil {
-    log.Info("WebSocket disconnected for session %s", sessionID)
-    session.terminate("client disconnected")
+    logger.Printf("WebSocket disconnected for session %s", sessionID)
+    if err := manager.MarkTerminating(ctx, sessionID, "client disconnected"); err != nil {
+        logger.Printf("Failed to mark terminating: %v", err)
+    }
+    if err := manager.CompleteCleanup(ctx, sessionID); err != nil {
+        logger.Printf("Cleanup failed: %v", err)
+    }
 }
 ```
 
 ### Termination Implementation
 
 ```go
-func (s *Session) terminate(reason string) {
-    s.mu.Lock()
-    if s.State == StateTerminating || s.State == StateCleaned {
-        s.mu.Unlock()
-        return // Already terminating
-    }
-    s.State = StateTerminating
-    s.mu.Unlock()
-
-    log.Info("Terminating session %s: %s", s.ID, reason)
-
-    // 1. Stop ACP process gracefully
-    if s.ACPClient != nil {
-        s.ACPClient.Close() // Sends SIGTERM, waits 5s, then SIGKILL
+func terminateSession(ctx context.Context, manager *session.Manager, logger session.Logger, sessionID string, reason string) {
+    if err := manager.MarkTerminating(ctx, sessionID, reason); err != nil {
+        logger.Printf("MarkTerminating failed: %v", err)
     }
 
-    // 2. Close WebSocket
-    if s.WebSocket != nil {
-        s.WebSocket.WriteJSON(map[string]interface{}{
-            "type": "session:terminated",
-            "sessionId": s.ID,
-            "reason": reason,
-        })
-        s.WebSocket.Close()
+    if err := manager.CompleteCleanup(ctx, sessionID); err != nil {
+        logger.Printf("CompleteCleanup failed: %v", err)
     }
-
-    // 3. Clean up state
-    s.mu.Lock()
-    s.State = StateCleaned
-    s.mu.Unlock()
-
-    // 4. Remove from session map
-    relay.sessions.Delete(s.ID)
-
-    log.Info("Session %s cleaned up", s.ID)
 }
 ```
 
@@ -388,12 +366,8 @@ type Relay struct {
 ### Session State
 
 ```go
-// In session.go
-session.mu.RLock()
-state := session.State
-session.mu.RUnlock()
-
-if state != StateActive {
+state := sess.GetState()
+if state != session.StateActive {
     return errors.New("session not active")
 }
 ```
