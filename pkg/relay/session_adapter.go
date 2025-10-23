@@ -8,6 +8,11 @@ import (
 
 // SessionClockAdapter adapts relay.Clock to session.Clock
 // Bridges the two packages until they are unified
+//
+// Note: This adapter parses RFC3339 timestamps on every call.
+// The relay package uses string timestamps for JSON serialization in protocol messages,
+// while the session package uses time.Time for internal state management.
+// This design keeps the relay protocol layer decoupled from internal time handling.
 type SessionClockAdapter struct {
 	clock Clock
 }

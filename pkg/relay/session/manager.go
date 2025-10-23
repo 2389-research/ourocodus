@@ -240,9 +240,10 @@ func (m *Manager) CompleteCleanup(ctx context.Context, sessionID string) error {
 	// Transition to CLEANED
 	if err := m.transition(session, EventClean, "cleanup complete"); err != nil {
 		m.logger.Printf("Transition error during cleanup: %v", err)
+		return fmt.Errorf("failed to transition to CLEANED state: %w", err)
 	}
 
-	// Remove from store
+	// Remove from store only after successful transition
 	m.store.Delete(sessionID)
 
 	m.logger.Printf("Session cleaned: id=%s", sessionID)
