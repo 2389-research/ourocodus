@@ -48,7 +48,10 @@ Expected response:
 
 Expected response:
 ```json
-{"version":"1.0","type":"error","code":"VERSION_MISMATCH","message":"Unsupported protocol version","timestamp":"2025-10-22T..."}
+{"version":"1.0","type":"error","error":{"code":"VERSION_MISMATCH","message":"Protocol version 2.0 not supported (server supports 1.0)","recoverable":false},"timestamp":"2025-10-22T..."}
+```
+
+Then the connection will be closed by the server (non-recoverable error).
 
 ### Test 4: Missing Version Field
 ```json
@@ -57,7 +60,10 @@ Expected response:
 
 Expected response:
 ```json
-{"type":"error","code":"INVALID_MESSAGE","message":"Missing required field: version"}
+{"version":"1.0","type":"error","error":{"code":"INVALID_MESSAGE","message":"Missing required field: version","recoverable":true},"timestamp":"2025-10-22T..."}
+```
+
+The connection stays open (recoverable error). You can send a valid message afterward and it will be processed normally.
 
 ### Test 5: Graceful Shutdown
 Press `Ctrl+C` in the server terminal.
