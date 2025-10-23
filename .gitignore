@@ -5,6 +5,11 @@ bin/
 *.so
 *.dylib
 
+# Built binaries in root (from go build)
+/relay
+/cli
+/echo-agent
+
 # Test binary, built with `go test -c`
 *.test
 
