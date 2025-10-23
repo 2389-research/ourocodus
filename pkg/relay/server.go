@@ -113,7 +113,11 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		s.logger.Printf("Failed to upgrade connection: %v", err)
 		return
 	}
-	defer conn.Close()
+	defer func() {
+		if err := conn.Close(); err != nil {
+			s.logger.Printf("Error closing connection: %v", err)
+		}
+	}()
 
 	s.logger.Printf("WebSocket connection established from %s", r.RemoteAddr)
 

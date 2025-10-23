@@ -102,19 +102,22 @@ func TestServer_Echo(t *testing.T) {
 		"type":    "test:echo",
 		"message": "hello",
 	}
-	if err := conn.WriteJSON(testMsg); err != nil {
+	err = conn.WriteJSON(testMsg)
+	if err != nil {
 		t.Fatalf("Failed to send message: %v", err)
 	}
 
 	// Read echo response
-	_, response, err := conn.ReadMessage()
+	var response []byte
+	_, response, err = conn.ReadMessage()
 	if err != nil {
 		t.Fatalf("Failed to read response: %v", err)
 	}
 
 	// Parse response
 	var echoMsg map[string]interface{}
-	if err := json.Unmarshal(response, &echoMsg); err != nil {
+	err = json.Unmarshal(response, &echoMsg)
+	if err != nil {
 		t.Fatalf("Failed to parse response: %v", err)
 	}
 
@@ -162,19 +165,22 @@ func TestServer_VersionMismatch(t *testing.T) {
 		"version": "2.0",
 		"type":    "test:echo",
 	}
-	if err := conn.WriteJSON(testMsg); err != nil {
+	err = conn.WriteJSON(testMsg)
+	if err != nil {
 		t.Fatalf("Failed to send message: %v", err)
 	}
 
 	// Read error response
-	_, response, err := conn.ReadMessage()
+	var response []byte
+	_, response, err = conn.ReadMessage()
 	if err != nil {
 		t.Fatalf("Failed to read error response: %v", err)
 	}
 
 	// Parse error message
 	var errorMsg ErrorMessage
-	if err := json.Unmarshal(response, &errorMsg); err != nil {
+	err = json.Unmarshal(response, &errorMsg)
+	if err != nil {
 		t.Fatalf("Failed to parse error message: %v", err)
 	}
 
@@ -226,19 +232,22 @@ func TestServer_MissingRequiredField(t *testing.T) {
 		"type":    "test:echo",
 		"message": "test",
 	}
-	if err := conn.WriteJSON(testMsg); err != nil {
+	err = conn.WriteJSON(testMsg)
+	if err != nil {
 		t.Fatalf("Failed to send message: %v", err)
 	}
 
 	// Read error response
-	_, response, err := conn.ReadMessage()
+	var response []byte
+	_, response, err = conn.ReadMessage()
 	if err != nil {
 		t.Fatalf("Failed to read error response: %v", err)
 	}
 
 	// Parse error message
 	var errorMsg ErrorMessage
-	if err := json.Unmarshal(response, &errorMsg); err != nil {
+	err = json.Unmarshal(response, &errorMsg)
+	if err != nil {
 		t.Fatalf("Failed to parse error message: %v", err)
 	}
 
@@ -259,7 +268,8 @@ func TestServer_MissingRequiredField(t *testing.T) {
 		"type":    "test:echo",
 		"message": "recovered",
 	}
-	if err := conn.WriteJSON(validMsg); err != nil {
+	err = conn.WriteJSON(validMsg)
+	if err != nil {
 		t.Fatalf("Failed to send valid message after error: %v", err)
 	}
 
@@ -270,7 +280,8 @@ func TestServer_MissingRequiredField(t *testing.T) {
 	}
 
 	var echoMsg map[string]interface{}
-	if err := json.Unmarshal(response, &echoMsg); err != nil {
+	err = json.Unmarshal(response, &echoMsg)
+	if err != nil {
 		t.Fatalf("Failed to parse echo: %v", err)
 	}
 
@@ -304,19 +315,22 @@ func TestServer_InvalidJSON(t *testing.T) {
 	}
 
 	// Send invalid JSON
-	if err := conn.WriteMessage(websocket.TextMessage, []byte("{invalid json}")); err != nil {
+	err = conn.WriteMessage(websocket.TextMessage, []byte("{invalid json}"))
+	if err != nil {
 		t.Fatalf("Failed to send message: %v", err)
 	}
 
 	// Read error response
-	_, response, err := conn.ReadMessage()
+	var response []byte
+	_, response, err = conn.ReadMessage()
 	if err != nil {
 		t.Fatalf("Failed to read error response: %v", err)
 	}
 
 	// Parse error message
 	var errorMsg ErrorMessage
-	if err := json.Unmarshal(response, &errorMsg); err != nil {
+	err = json.Unmarshal(response, &errorMsg)
+	if err != nil {
 		t.Fatalf("Failed to parse error message: %v", err)
 	}
 
@@ -337,7 +351,8 @@ func TestServer_InvalidJSON(t *testing.T) {
 		"type":    "test:echo",
 		"message": "recovered",
 	}
-	if err := conn.WriteJSON(validMsg); err != nil {
+	err = conn.WriteJSON(validMsg)
+	if err != nil {
 		t.Fatalf("Failed to send valid message after error: %v", err)
 	}
 
@@ -348,7 +363,8 @@ func TestServer_InvalidJSON(t *testing.T) {
 	}
 
 	var echoMsg map[string]interface{}
-	if err := json.Unmarshal(response, &echoMsg); err != nil {
+	err = json.Unmarshal(response, &echoMsg)
+	if err != nil {
 		t.Fatalf("Failed to parse echo: %v", err)
 	}
 

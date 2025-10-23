@@ -35,8 +35,9 @@ func main() {
 	mux.HandleFunc("/ws", server.HandleWebSocket)
 
 	httpServer := &http.Server{
-		Addr:    fmt.Sprintf(":%d", port),
-		Handler: mux,
+		Addr:              fmt.Sprintf(":%d", port),
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second, // Prevent Slowloris attacks
 	}
 
 	// Start server in goroutine

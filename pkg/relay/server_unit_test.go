@@ -32,6 +32,15 @@ func (m *mockIDGenerator) Generate() string {
 	return m.id
 }
 
+type mockUpgrader struct {
+	conn  WebSocketConn
+	error error
+}
+
+func (m *mockUpgrader) Upgrade(w interface{}, r interface{}, responseHeader interface{}) (WebSocketConn, error) {
+	return m.conn, m.error
+}
+
 type mockWebSocketConn struct {
 	written       []interface{}
 	messageToRead []byte
@@ -55,15 +64,6 @@ func (m *mockWebSocketConn) ReadMessage() (int, []byte, error) {
 func (m *mockWebSocketConn) Close() error {
 	m.closed = true
 	return nil
-}
-
-type mockUpgrader struct {
-	conn  WebSocketConn
-	error error
-}
-
-func (m *mockUpgrader) Upgrade(w interface{}, r interface{}, responseHeader interface{}) (WebSocketConn, error) {
-	return m.conn, m.error
 }
 
 // Unit tests for server methods
@@ -402,5 +402,38 @@ func TestHandleMessage_VersionMismatch(t *testing.T) {
 	// Should write error message
 	if len(conn.written) != 1 {
 		t.Fatalf("expected 1 error message written, got %d", len(conn.written))
+	}
+}
+
+func TestNewServer_UsesIDGenerator(t *testing.T) {
+	idGen := &mockIDGenerator{id: "test-server-123"}
+	logger := &mockLogger{}
+	clock := &mockClock{timestamp: "2025-10-23T12:00:00Z"}
+	upgrader := &mockUpgrader{}
+
+	server := NewServer(idGen, logger, clock, upgrader)
+
+	if server.serverID != "test-server-123" {
+		t.Errorf("expected serverID test-server-123, got %s", server.serverID)
+	}
+}
+
+func TestNewServer_InjectsDependencies(t *testing.T) {
+	idGen := &mockIDGenerator{id: "test-id"}
+	logger := &mockLogger{}
+	clock := &mockClock{timestamp: "2025-10-23T12:00:00Z"}
+	upgrader := &mockUpgrader{}
+
+	server := NewServer(idGen, logger, clock, upgrader)
+
+	// Verify all dependencies are set
+	if server.logger == nil {
+		t.Error("expected logger to be set")
+	}
+	if server.clock == nil {
+		t.Error("expected clock to be set")
+	}
+	if server.upgrader == nil {
+		t.Error("expected upgrader to be set")
 	}
 }
