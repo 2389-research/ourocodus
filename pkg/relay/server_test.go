@@ -10,9 +10,19 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+// Test helpers for dependency injection
+func newTestServer() *Server {
+	return NewServer(
+		&UUIDGenerator{},
+		&StdLogger{},
+		&SystemClock{},
+		NewGorillaUpgrader(func(r *http.Request) bool { return true }),
+	)
+}
+
 func TestServer_ConnectionHandshake(t *testing.T) {
 	// Create server
-	server := NewServer()
+	server := newTestServer()
 
 	// Create test HTTP server
 	httpServer := httptest.NewServer(http.HandlerFunc(server.HandleWebSocket))
@@ -64,7 +74,7 @@ func TestServer_ConnectionHandshake(t *testing.T) {
 
 func TestServer_Echo(t *testing.T) {
 	// Create server
-	server := NewServer()
+	server := newTestServer()
 
 	// Create test HTTP server
 	httpServer := httptest.NewServer(http.HandlerFunc(server.HandleWebSocket))
@@ -125,7 +135,7 @@ func TestServer_Echo(t *testing.T) {
 
 func TestServer_VersionMismatch(t *testing.T) {
 	// Create server
-	server := NewServer()
+	server := newTestServer()
 
 	// Create test HTTP server
 	httpServer := httptest.NewServer(http.HandlerFunc(server.HandleWebSocket))
@@ -189,7 +199,7 @@ func TestServer_VersionMismatch(t *testing.T) {
 
 func TestServer_MissingRequiredField(t *testing.T) {
 	// Create server
-	server := NewServer()
+	server := newTestServer()
 
 	// Create test HTTP server
 	httpServer := httptest.NewServer(http.HandlerFunc(server.HandleWebSocket))
@@ -271,7 +281,7 @@ func TestServer_MissingRequiredField(t *testing.T) {
 
 func TestServer_InvalidJSON(t *testing.T) {
 	// Create server
-	server := NewServer()
+	server := newTestServer()
 
 	// Create test HTTP server
 	httpServer := httptest.NewServer(http.HandlerFunc(server.HandleWebSocket))

@@ -19,8 +19,16 @@ const (
 )
 
 func main() {
-	// Create relay server
-	server := relay.NewServer()
+	// Create relay server with dependency injection
+	server := relay.NewServer(
+		&relay.UUIDGenerator{},
+		&relay.StdLogger{},
+		&relay.SystemClock{},
+		relay.NewGorillaUpgrader(func(r *http.Request) bool {
+			// Allow all origins for development (Phase 1)
+			return true
+		}),
+	)
 
 	// Create HTTP server
 	mux := http.NewServeMux()

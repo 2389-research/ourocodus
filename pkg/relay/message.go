@@ -3,7 +3,6 @@ package relay
 import (
 	"encoding/json"
 	"fmt"
-	"time"
 )
 
 const (
@@ -35,17 +34,21 @@ func (e ValidationError) Error() string {
 	return e.Message
 }
 
-// ValidateMessage checks if a message has required fields and valid version
-func ValidateMessage(data []byte) error {
+// parseMessage parses JSON into BaseMessage (pure function)
+func parseMessage(data []byte) (BaseMessage, error) {
 	var base BaseMessage
 	if err := json.Unmarshal(data, &base); err != nil {
-		return ValidationError{
+		return base, ValidationError{
 			Code:        "INVALID_MESSAGE",
 			Message:     fmt.Sprintf("Invalid JSON: %v", err),
 			Recoverable: true,
 		}
 	}
+	return base, nil
+}
 
+// validateRequiredFields checks for required fields (pure function)
+func validateRequiredFields(base BaseMessage) error {
 	if base.Version == "" {
 		return ValidationError{
 			Code:        "INVALID_MESSAGE",
@@ -62,12 +65,35 @@ func ValidateMessage(data []byte) error {
 		}
 	}
 
-	if base.Version != ProtocolVersion {
+	return nil
+}
+
+// validateVersion checks protocol version compatibility (pure function)
+func validateVersion(version string) error {
+	if version != ProtocolVersion {
 		return ValidationError{
 			Code:        "VERSION_MISMATCH",
-			Message:     fmt.Sprintf("Protocol version %s not supported (server supports %s)", base.Version, ProtocolVersion),
+			Message:     fmt.Sprintf("Protocol version %s not supported (server supports %s)", version, ProtocolVersion),
 			Recoverable: false,
 		}
+	}
+	return nil
+}
+
+// ValidateMessage checks if a message has required fields and valid version
+// Composes pure validation functions
+func ValidateMessage(data []byte) error {
+	base, err := parseMessage(data)
+	if err != nil {
+		return err
+	}
+
+	if err := validateRequiredFields(base); err != nil {
+		return err
+	}
+
+	if err := validateVersion(base.Version); err != nil {
+		return err
 	}
 
 	return nil
@@ -86,15 +112,15 @@ type ErrorMessage struct {
 	Error ErrorDetail `json:"error"`
 }
 
-// NewConnectionEstablished creates a connection established message
-func NewConnectionEstablished(serverID string) ConnectionEstablishedMessage {
+// NewConnectionEstablished creates a connection established message (pure function)
+func NewConnectionEstablished(serverID, timestamp string) ConnectionEstablishedMessage {
 	return ConnectionEstablishedMessage{
 		BaseMessage: BaseMessage{
 			Version: ProtocolVersion,
 			Type:    "connection:established",
 		},
 		ServerID:  serverID,
-		Timestamp: time.Now().UTC().Format(time.RFC3339),
+		Timestamp: timestamp,
 	}
 }
 
