@@ -39,7 +39,16 @@ type Manager struct {
 	logger  Logger
 }
 
-// NewManager creates a session manager with injected dependencies
+// NewManager creates a session manager with injected dependencies.
+//
+// All dependencies are required and must be non-nil. This constructor panics on
+// nil collaborators (instead of returning errors) because:
+//  1. Missing dependencies indicate programmer configuration bugs, not runtime failures.
+//  2. Fail-fast initialization catches problems before serving traffic.
+//  3. Callers use dependency injection containers that guarantee dependencies exist.
+//
+// If future phases require graceful degradation, update the signature to return
+// (*Manager, error) and propagate validation through callers.
 func NewManager(store Store, idGen IDGenerator, clock Clock, cleaner Cleaner, logger Logger) *Manager {
 	if store == nil {
 		panic("store cannot be nil")
