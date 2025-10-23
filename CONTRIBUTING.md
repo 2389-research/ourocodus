@@ -45,7 +45,7 @@ mise install
 ```
 
 This will automatically install:
-- **Go 1.23** - Programming language
+- **Go 1.23.0** - Programming language
 - **golangci-lint** - Comprehensive linter
 - **staticcheck** - Advanced static analysis
 - **gofumpt** - Stricter Go formatter

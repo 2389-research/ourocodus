@@ -13,7 +13,7 @@ go = "1.23.0"
 [env]
 # Set Go environment variables
 # Copy .envrc.example to .envrc and customize as needed
-_.file = [".envrc", { path = ".envrc.example", optional = true }]
+_.file = ".envrc"
 
 [tasks.lint]
 description = "Run golangci-lint"
