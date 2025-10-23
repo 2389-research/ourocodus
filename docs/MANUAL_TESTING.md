@@ -55,7 +55,9 @@ Expected response:
 {"type":"test:echo","message":"test"}
 ```
 
-Expected: No response (message rejected, check server logs for error)
+Expected response:
+```json
+{"type":"error","code":"INVALID_MESSAGE","message":"Missing required field: version"}
 
 ### Test 5: Graceful Shutdown
 Press `Ctrl+C` in the server terminal.
