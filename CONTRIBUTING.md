@@ -50,6 +50,20 @@ This will automatically install:
 - **staticcheck** - Advanced static analysis
 - **gofumpt** - Stricter Go formatter
 
+#### Configure Environment (Optional)
+
+For custom environment variables:
+
+```bash
+# Copy the example file
+cp .envrc.example .envrc
+
+# Edit with your settings
+vim .envrc
+
+# mise will automatically load it
+```
+
 #### Verify Installation
 
 ```bash
