@@ -143,10 +143,14 @@ golangci-lint run --fix
 
 ## Contributing
 
-1. Check [GitHub Issues](https://github.com/2389-research/ourocodus/issues)
-2. Issues are ordered by dependency (work top-down)
-3. Each issue has clear acceptance criteria
-4. See labels for component/type/priority
+See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed setup instructions using mise for consistent development environments.
+
+Quick overview:
+1. Install [mise](https://mise.jdx.dev/) and run `mise install` to get all dev tools
+2. Check [GitHub Issues](https://github.com/2389-research/ourocodus/issues)
+3. Issues are ordered by dependency (work top-down)
+4. Each issue has clear acceptance criteria
+5. See labels for component/type/priority
 
 ## License
 

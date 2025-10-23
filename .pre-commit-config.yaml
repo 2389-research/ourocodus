@@ -12,7 +12,6 @@ repos:
   - repo: https://github.com/dnephin/pre-commit-golang
     rev: v0.5.1
     hooks:
-      - id: go-fmt
       - id: go-vet
       - id: go-imports
       - id: go-mod-tidy
@@ -21,6 +20,11 @@ repos:
 
   - repo: local
     hooks:
+      - id: gofumpt
+        name: gofumpt
+        entry: gofumpt -l -w
+        language: system
+        types: [go]
       - id: go-build
         name: go-build
         entry: make build

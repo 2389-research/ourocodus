@@ -1,0 +1,37 @@
+# mise configuration for development tooling
+# https://mise.jdx.dev/
+
+[tools]
+# Go programming language
+go = "1.23.0"
+
+# Go development tools
+"go:github.com/golangci/golangci-lint/cmd/golangci-lint" = "latest"
+"go:honnef.co/go/tools/cmd/staticcheck" = "latest"
+"go:mvdan.cc/gofumpt" = "latest"
+
+[env]
+# Set Go environment variables
+_.file = ".envrc"
+
+[tasks.lint]
+description = "Run golangci-lint"
+run = "golangci-lint run --timeout=5m"
+
+[tasks.fmt]
+description = "Format code with gofumpt"
+run = "gofumpt -l -w ."
+
+[tasks.check]
+description = "Run staticcheck"
+run = "staticcheck ./..."
+
+[tasks.pre-commit]
+description = "Run all pre-commit checks"
+run = [
+  "gofumpt -l -w .",
+  "go vet ./...",
+  "golangci-lint run --timeout=5m",
+  "go mod tidy",
+  "make build"
+]
