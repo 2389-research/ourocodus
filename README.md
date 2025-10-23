@@ -72,6 +72,22 @@ make build
 make test
 # → Runs: go test ./...
 
+# Format code
+make fmt
+# → Runs: gofumpt -l -w .
+
+# Run linter
+make lint
+# → Runs: golangci-lint run
+
+# Run static analysis
+make check
+# → Runs: staticcheck ./...
+
+# Run all checks
+make pre-commit
+# → Runs: fmt, vet, lint, tidy, build, test
+
 # Start system (when implemented)
 make run
 # → Starts relay server
@@ -107,7 +123,7 @@ The project uses automated quality gates:
 - Builds on all PRs and pushes to main
 - Runs full test suite
 - Lints code with golangci-lint
-- Checks formatting with gofmt
+- Checks formatting with gofmt (Note: local dev uses gofumpt for stricter formatting)
 
 **Pre-commit Hooks (Optional)**
 ```bash
@@ -122,7 +138,7 @@ pre-commit run --all-files
 ```
 
 Hooks run:
-- `gofmt` - Format Go code
+- `gofumpt` - Format Go code (stricter than gofmt)
 - `go vet` - Static analysis
 - `golangci-lint` - Comprehensive linting
 - `go mod tidy` - Clean dependencies
@@ -143,10 +159,14 @@ golangci-lint run --fix
 
 ## Contributing
 
-1. Check [GitHub Issues](https://github.com/2389-research/ourocodus/issues)
-2. Issues are ordered by dependency (work top-down)
-3. Each issue has clear acceptance criteria
-4. See labels for component/type/priority
+See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed setup instructions using mise for consistent development environments.
+
+Quick overview:
+1. Install [mise](https://mise.jdx.dev/) and run `mise install` to get all dev tools
+2. Check [GitHub Issues](https://github.com/2389-research/ourocodus/issues)
+3. Issues are ordered by dependency (work top-down)
+4. Each issue has clear acceptance criteria
+5. See labels for component/type/priority
 
 ## License
 
