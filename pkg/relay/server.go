@@ -11,6 +11,8 @@ type Server struct {
 	logger   Logger
 	clock    Clock
 	upgrader Upgrader
+	// TODO(Issue #7): Add sessionManager *session.Manager here
+	// sessionManager will coordinate session lifecycle when ACP integration is added
 }
 
 // NewServer creates a new relay server with dependency injection
@@ -125,6 +127,12 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	if err := s.sendHandshake(conn); err != nil {
 		return
 	}
+
+	// TODO(Issue #7): After handshake, create session:
+	// 1. Parse agent ID from initial message or URL path
+	// 2. session, err := s.sessionManager.Create(ctx, agentID, conn)
+	// 3. Handle session lifecycle through manager
+	// 4. Remove echo logic below, replace with actual message routing
 
 	// Handle incoming messages
 	for {
