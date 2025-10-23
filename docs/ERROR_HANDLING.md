@@ -1,5 +1,8 @@
 # Error Handling Strategy - Phase 1
 
+> **Phase 1 Status:** Basic error handling implemented.  
+> Structured error codes described below are planned for Phase 2.
+
 ## Overview
 
 Phase 1 error handling is **fail-fast** with minimal recovery. The goal is to surface problems quickly so we can validate assumptions and understand failure modes.
@@ -106,9 +109,37 @@ return fmt.Errorf("operation failed after 3 retries")
 
 ## Error Response Format
 
-### WebSocket Error Messages
+### Phase 1 Behavior
 
-All error messages sent to PWA follow this format:
+Phase 1 surfaces validation failures using `ValidationError` from `pkg/relay/message.go`. Each `ValidationError` includes:
+
+- `Code` (`string`): machine readable identifier (currently `INVALID_MESSAGE` or `VERSION_MISMATCH`)
+- `Message` (`string`): human readable description
+- `Recoverable` (`bool`): whether the client should close the connection (false means disconnect)
+
+The relay converts these errors into `NewErrorMessage` payloads:
+
+```json
+{
+  "version": "1.0",
+  "type": "error",
+  "error": {
+    "code": "INVALID_MESSAGE",
+    "message": "Missing required field: type",
+    "recoverable": true
+  }
+}
+```
+
+**Current codes:**
+- `INVALID_MESSAGE` — malformed JSON or missing required fields (recoverable)
+- `VERSION_MISMATCH` — protocol version mismatch (non-recoverable; connection closes)
+
+See `pkg/relay/message.go` for the Phase 1 implementation details.
+
+### WebSocket Error Messages (Planned for Phase 2)
+
+Phase 1 uses the simple `ValidationError` shape above. The structured error format below will be implemented in Phase 2 to support richer diagnostics (agent ID context, timestamps, detailed error metadata).
 
 ```json
 {
@@ -124,17 +155,6 @@ All error messages sent to PWA follow this format:
   }
 }
 ```
-
-**Error Codes:**
-- `INVALID_MESSAGE` - Malformed WebSocket message
-- `ACP_SPAWN_FAILED` - Failed to start ACP process
-- `ACP_PROCESS_CRASHED` - ACP process exited during operation
-- `ACP_TIMEOUT` - No response from ACP within timeout
-- `API_KEY_INVALID` - Anthropic API key rejected
-- `WORKTREE_ERROR` - Git worktree operation failed
-- `RATE_LIMIT` - Too many messages too quickly
-- `MESSAGE_TOO_LARGE` - Message exceeds size limit
-- `SESSION_NOT_FOUND` - Session ID doesn't exist
 
 ---
 
