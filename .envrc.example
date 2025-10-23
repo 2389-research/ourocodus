@@ -1,0 +1,9 @@
+# Environment variables for Ourocodus development
+# This file is loaded by mise automatically
+
+# Go environment
+export GOPATH="${HOME}/go"
+export PATH="${GOPATH}/bin:${PATH}"
+
+# Project-specific environment variables can be added here
+# export ANTHROPIC_API_KEY=your-key-here
