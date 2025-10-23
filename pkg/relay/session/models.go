@@ -124,7 +124,7 @@ func (s *Session) GetWorktreeDir() string {
 	return s.worktreeDir
 }
 
-// GetCreatedAt returns the session creation timestamp (immutable)
+// GetCreatedAt returns the session creation timestamp (immutable, no lock needed)
 func (s *Session) GetCreatedAt() time.Time {
 	return s.createdAt
 }
