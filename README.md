@@ -123,7 +123,7 @@ The project uses automated quality gates:
 - Builds on all PRs and pushes to main
 - Runs full test suite
 - Lints code with golangci-lint
-- Checks formatting with gofmt
+- Checks formatting with gofmt (Note: local dev uses gofumpt for stricter formatting)
 
 **Pre-commit Hooks (Optional)**
 ```bash
@@ -138,7 +138,7 @@ pre-commit run --all-files
 ```
 
 Hooks run:
-- `gofmt` - Format Go code
+- `gofumpt` - Format Go code (stricter than gofmt)
 - `go vet` - Static analysis
 - `golangci-lint` - Comprehensive linting
 - `go mod tidy` - Clean dependencies
