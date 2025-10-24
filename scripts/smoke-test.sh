@@ -24,7 +24,7 @@ if [[ ! -x "${REPO_ROOT}/bin/relay" ]]; then
 fi
 
 say "🚀" "Launching the dramatic production known as 'relay smoke test'."
-if mise exec -- go run ./scripts/smoketest; then
+if mise exec -- go run ./scripts/smoketest "$@"; then
   yay "🎉" "Relay is alive, responsive, and only mildly sarcastic."
 else
   die "😵" "Smoke test reported doom. Scroll up for the gory details."

@@ -16,6 +16,7 @@
   3. Recoverable validation errors stay connected.
   4. Non-recoverable errors close the connection.
   5. Bonus chaos: 100 fuzzed payloads exercise echo/validation paths.
+  6. Add `--verbose` to echo every request/response pair (useful for demos or debugging).
 
 ## Integration Test Gaps (Future Work)
 

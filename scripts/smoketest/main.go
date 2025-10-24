@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"math/rand"
@@ -30,6 +31,9 @@ const (
 
 func main() {
 	rand.Seed(time.Now().UnixNano())
+
+	verbose := flag.Bool("verbose", false, "emit every payload/response pair")
+	flag.Parse()
 
 	root, err := findRepoRoot()
 	if err != nil {
@@ -75,14 +79,14 @@ func main() {
 		fail("⌛", "Relay never opened %s: %v", relayAddr, err)
 	}
 
-	if err := runSmokeTest(); err != nil {
+	if err := runSmokeTest(*verbose); err != nil {
 		fail("😬", "Smoke test imploded: %v", err)
 	}
 
 	success("🎉", "Smoke test passed. Confidence restored (for now).")
 }
 
-func runSmokeTest() error {
+func runSmokeTest(verbose bool) error {
 	u := url.URL{Scheme: "ws", Host: relayAddr, Path: websocketPath}
 
 	dialer := *websocket.DefaultDialer
@@ -100,6 +104,7 @@ func runSmokeTest() error {
 	if err := conn.ReadJSON(&handshake); err != nil {
 		return fmt.Errorf("failed to read handshake: %w", err)
 	}
+	debug(verbose, "📥", "Handshake payload: %s", stringify(handshake))
 	if handshake["type"] != defaultHandshake {
 		return fmt.Errorf("unexpected handshake type: %+v", handshake)
 	}
@@ -111,6 +116,7 @@ func runSmokeTest() error {
 		"type":    "echo",
 		"payload": "smoke test message",
 	}
+	debug(verbose, "📤", "Sending echo payload: %s", stringify(echoPayload))
 	if err := writeJSON(conn, echoPayload); err != nil {
 		return fmt.Errorf("failed to send echo: %w", err)
 	}
@@ -119,6 +125,7 @@ func runSmokeTest() error {
 	if err != nil {
 		return fmt.Errorf("failed to read echo response: %w", err)
 	}
+	debug(verbose, "📬", "Echo response: %s", stringify(resp))
 	if resp["type"] != "echo" || resp["payload"] != echoPayload["payload"] {
 		return fmt.Errorf("unexpected echo response: %s", stringify(resp))
 	}
@@ -132,6 +139,7 @@ func runSmokeTest() error {
 		"type":    "echo",
 		"payload": "missing version field",
 	}
+	debug(verbose, "📤", "Sending recoverable invalid payload: %s", stringify(badPayload))
 	if err := writeJSON(conn, badPayload); err != nil {
 		return fmt.Errorf("failed to send invalid payload: %w", err)
 	}
@@ -140,6 +148,7 @@ func runSmokeTest() error {
 	if err != nil {
 		return fmt.Errorf("failed to read validation error: %w", err)
 	}
+	debug(verbose, "📬", "Recoverable error response: %s", stringify(errResp))
 	if errType := errResp["type"]; errType != "error" {
 		return fmt.Errorf("expected error response, got: %s", stringify(errResp))
 	}
@@ -152,7 +161,7 @@ func runSmokeTest() error {
 	}
 	warn("🩹", "Recoverable error looked correct: %s", stringify(errResp))
 
-	if err := fuzzMessages(conn, 100); err != nil {
+	if err := fuzzMessages(conn, 100, verbose); err != nil {
 		return err
 	}
 
@@ -162,6 +171,7 @@ func runSmokeTest() error {
 		"type":    "echo",
 		"payload": "old protocol version",
 	}
+	debug(verbose, "📤", "Sending non-recoverable payload: %s", stringify(versionMismatch))
 	if err := writeJSON(conn, versionMismatch); err != nil {
 		return fmt.Errorf("failed to send version mismatch payload: %w", err)
 	}
@@ -170,6 +180,7 @@ func runSmokeTest() error {
 	if err != nil {
 		return fmt.Errorf("failed to read version mismatch response: %w", err)
 	}
+	debug(verbose, "📬", "Non-recoverable response: %s", stringify(closeResp))
 	closeDetail, ok := closeResp["error"].(map[string]interface{})
 	if !(ok && closeDetail["code"] == "VERSION_MISMATCH" && closeDetail["recoverable"] == false) {
 		return fmt.Errorf("unexpected version mismatch response: %s", stringify(closeResp))
@@ -259,6 +270,7 @@ const (
 	colorGreen  = "\033[32m"
 	colorYellow = "\033[33m"
 	colorRed    = "\033[31m"
+	colorBlue   = "\033[34m"
 )
 
 func announce(icon, format string, args ...interface{}) {
@@ -278,6 +290,13 @@ func fail(icon, format string, args ...interface{}) {
 	os.Exit(1)
 }
 
+func debug(verbose bool, icon, format string, args ...interface{}) {
+	if !verbose {
+		return
+	}
+	fmt.Printf("%s%s %s%s\n", colorBlue, icon, fmt.Sprintf(format, args...), colorReset)
+}
+
 type fuzzCase struct {
 	ProvideVersion bool
 	ProvideType    bool
@@ -286,7 +305,7 @@ type fuzzCase struct {
 	Payload        string
 }
 
-func fuzzMessages(conn *websocket.Conn, count int) error {
+func fuzzMessages(conn *websocket.Conn, count int, verbose bool) error {
 	fuzzer := newPayloadFuzzer()
 	var echoes, recoverables int
 
@@ -335,6 +354,7 @@ func fuzzMessages(conn *websocket.Conn, count int) error {
 				msg["payload"] = fmt.Sprintf("auto-echo-%02d", i)
 			}
 
+			debug(verbose, "📤", "Fuzz #%d send (echo candidate): %s", i, stringify(msg))
 			if err := writeJSON(conn, msg); err != nil {
 				return fmt.Errorf("fuzz #%d failed to write echo candidate: %w", i, err)
 			}
@@ -342,6 +362,7 @@ func fuzzMessages(conn *websocket.Conn, count int) error {
 			if err != nil {
 				return fmt.Errorf("fuzz #%d failed to read echo response: %w", i, err)
 			}
+			debug(verbose, "📬", "Fuzz #%d recv (echo): %s", i, stringify(resp))
 
 			if resp["type"] != c.Type {
 				return fmt.Errorf("fuzz #%d expected type %q, got %s", i, c.Type, stringify(resp))
@@ -357,6 +378,7 @@ func fuzzMessages(conn *websocket.Conn, count int) error {
 		}
 
 		// Invalid path: expect recoverable validation error.
+		debug(verbose, "📤", "Fuzz #%d send (invalid): %s", i, stringify(msg))
 		if err := writeJSON(conn, msg); err != nil {
 			return fmt.Errorf("fuzz #%d failed to write invalid payload: %w", i, err)
 		}
@@ -364,6 +386,7 @@ func fuzzMessages(conn *websocket.Conn, count int) error {
 		if err != nil {
 			return fmt.Errorf("fuzz #%d failed to read invalid response: %w", i, err)
 		}
+		debug(verbose, "📬", "Fuzz #%d recv (invalid): %s", i, stringify(resp))
 		if !isRecoverableInvalid(resp) {
 			return fmt.Errorf("fuzz #%d expected recoverable validation error, got %s", i, stringify(resp))
 		}
