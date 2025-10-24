@@ -1,479 +1,436 @@
-# Session Lifecycle - Phase 1
+# Session Lifecycle - Phase 1 (PR7 Implementation)
 
 ## Overview
 
-A **session** represents one user conversation with one AI agent. Each session has:
-- Unique session ID (UUID)
-- WebSocket connection (user ↔ relay)
-- ACP process (relay ↔ agent)
-- Git worktree (agent workspace)
+**UserSession** is a container for 0-N agent processes. Each agent is independent and has its own lifecycle.
 
-**Lifecycle:** Create → Active → Terminate → Cleanup
+- **UserSession**: WebSocket connection container with 2 states (ACTIVE, TERMINATED)
+- **AgentSession**: Individual ACP process with 4 states (SPAWNING, ACTIVE, FAILED, TERMINATED)
+
+**Key Design Principles:**
+- UserSession can have 0 to N agents
+- Agents can be spawned/terminated independently
+- Agent failure doesn't terminate the UserSession
+- Roles are dynamic (user-specified, not hardcoded)
 
 **State Storage:** In-memory only (no persistence across relay restarts)
 
 ---
 
-## Session States
+## Session Architecture
+
+```
+UserSession (ID: uuid)
+├── State: ACTIVE | TERMINATED
+├── WebSocket Connection (to PWA)
+├── Created At: time.Time
+├── Last Active: time.Time
+└── Agents: map[role]AgentSession
+    ├── AgentSession (role: "auth")
+    │   ├── State: SPAWNING | ACTIVE | FAILED | TERMINATED
+    │   ├── Workspace: string (git worktree path)
+    │   ├── ACPClient: *acp.Client
+    │   ├── Created At: time.Time
+    │   ├── Last Active: time.Time
+    │   └── Error: string (if FAILED)
+    │
+    ├── AgentSession (role: "db")
+    │   └── ...
+    │
+    └── AgentSession (role: "tests")
+        └── ...
+```
+
+---
+
+## UserSession States
 
 ```
    ┌─────────┐
-   │ CREATED │  User clicks "Start" in PWA
+   │ ACTIVE  │  Session created, WebSocket connected
    └────┬────┘
+        │ Can spawn agents
+        │ Can send messages
+        │ Can terminate agents
         │
         v
-   ┌─────────┐
-   │SPAWNING │  Relay spawning ACP process
-   └────┬────┘
-        │
-        v
-   ┌─────────┐
-   │  ACTIVE │  Process running, accepting messages
-   └────┬────┘
-        │
-        v
-   ┌───────────┐
-   │TERMINATING│  User clicked "Stop" or error occurred
-   └────┬──────┘
-        │
-        v
-   ┌─────────┐
-   │ CLEANED │  Resources freed, session removed
-   └─────────┘
+   ┌─────────────┐
+   │ TERMINATED  │  Session stopped, resources cleaned
+   └─────────────┘
 ```
-
-### State Definitions
-
-**CREATED:**
-- Session ID generated
-- WebSocket connection established
-- Session added to relay's session map
-- No ACP process yet
-
-**SPAWNING:**
-- Git worktree being created
-- ACP process being spawned
-- stdin/stdout pipes being set up
-- May fail and transition to TERMINATING
 
 **ACTIVE:**
-- ACP process running (cmd.Process.Pid > 0)
-- stdin/stdout pipes open
-- Accepting messages from WebSocket
-- Relaying responses back to WebSocket
+- WebSocket connection established
+- Can spawn 0-N agents
+- Agents can be added/removed dynamically
+- Session stays ACTIVE even if all agents fail
 
-**TERMINATING:**
-- SIGTERM sent to ACP process
-- Waiting for graceful shutdown (5 second timeout)
-- stdin/stdout pipes being closed
-- WebSocket connection being closed
-
-**CLEANED:**
-- Session removed from session map
-- All resources freed
-- Session ID now invalid
-- No further operations possible
+**TERMINATED:**
+- All agents terminated
+- WebSocket closed
+- Session removed from store
+- Resources freed
 
 ---
 
-## Session Data Structure
+## AgentSession States
 
-```go
-type Session struct {
-    // Immutable fields (set at creation)
-    ID      string // UUID v4
-    AgentID string // Role identifier ("auth", "db", "tests")
-
-    // Mutable fields (guarded by internal mutex)
-    state        SessionState
-    worktreeDir  string
-    handle       *Handle
-    createdAt    time.Time
-    lastActive   time.Time
-    messageCount int
-
-    mu sync.RWMutex
-}
-
-type Handle struct {
-    WebSocket  WebSocketConn // Connection to PWA
-    ACPClient  ACPClient     // ACP process wrapper
-    CancelFunc func()        // Context cancel for shutdown
-}
-
-type SessionState string
-
-const (
-    StateCreated     SessionState = "CREATED"
-    StateSpawning    SessionState = "SPAWNING"
-    StateActive      SessionState = "ACTIVE"
-    StateTerminating SessionState = "TERMINATING"
-    StateCleaned     SessionState = "CLEANED"
-)
+```
+   ┌──────────┐
+   │ SPAWNING │  Worktree + ACP process being created
+   └────┬─────┘
+        │
+        ├──> Success
+        │         v
+        │    ┌────────┐
+        │    │ ACTIVE │  Process running, accepting messages
+        │    └───┬────┘
+        │        │
+        │        v
+        │    ┌─────────────┐
+        │    │ TERMINATED  │  Gracefully stopped
+        │    └─────────────┘
+        │
+        └──> Failure
+                  v
+             ┌────────┐
+             │ FAILED │  Spawn/connect failed
+             └───┬────┘
+                 │
+                 v
+             ┌─────────────┐
+             │ TERMINATED  │  Cleaned up
+             └─────────────┘
 ```
 
-All mutation flows through the `Manager`. Callers observe session state using accessors such as `session.GetState()` and `session.GetHandle()`. For implementation details see `pkg/relay/session/README.md`.
+**SPAWNING:**
+- Workspace directory being created
+- ACP process being spawned
+- May transition to ACTIVE or FAILED
+- Session remains ACTIVE during spawn
+
+**ACTIVE:**
+- ACP process running (has ACPClient)
+- Can send/receive messages
+- Workspace ready for git operations
+
+**FAILED:**
+- Spawn failed or process crashed
+- Error message recorded
+- UserSession stays ACTIVE
+- Can retry with new agent
+
+**TERMINATED:**
+- Agent stopped gracefully
+- ACP process terminated
+- Resources cleaned
+- Agent removed from session
 
 ---
 
-## Session Creation Flow
+## UserSession Creation Flow
 
-### 1. PWA Requests New Session
-
-```json
-// WebSocket message from PWA to Relay
-{
-  "type": "session:create",
-  "agentId": "auth"
-}
-```
-
-### 2. Relay Creates Session via Manager
+### 1. Create UserSession
 
 ```go
-// session.Manager.Create attaches the WebSocket handle and persists the session
-sess, err := manager.Create(ctx, agentID, ws)
-if err != nil {
-    return fmt.Errorf("create session failed: %w", err)
-}
+manager.CreateUserSession(ctx, websocketConn)
 ```
 
-The manager generates the session ID, attaches the WebSocket handle, and persists the session through the injected store.
+**What happens:**
+1. Generate unique session ID
+2. Create UserSession with ACTIVE state
+3. Attach WebSocket connection
+4. Store in session manager
+5. Return UserSession
 
-### 3. Relay Sends Acknowledgement
+**Result:** Empty session with 0 agents, ready to spawn agents
+
+### 2. WebSocket Notification
 
 ```json
-// WebSocket message from Relay to PWA
 {
   "type": "session:created",
   "sessionId": "550e8400-e29b-41d4-a716-446655440000",
-  "agentId": "auth",
-  "timestamp": "2025-10-22T12:34:56Z"
+  "timestamp": "2025-10-24T12:34:56Z"
 }
 ```
 
-### 4. Relay Initiates Spawn via Manager
+---
+
+## Agent Spawn Flow
+
+### 1. Spawn Agent Request
 
 ```go
-// session.Manager.BeginSpawn transitions CREATED → SPAWNING
-if err := manager.BeginSpawn(ctx, sess.GetID()); err != nil {
-    return fmt.Errorf("begin spawn failed: %w", err)
-}
-
-go func(sessionID string) {
-    worktreeDir, err := createWorktree(agentID)
-    if err != nil {
-        manager.MarkTerminating(ctx, sessionID, fmt.Sprintf("worktree failed: %v", err))
-        manager.CompleteCleanup(ctx, sessionID)
-        return
-    }
-
-    acpClient, err := acp.NewClient(worktreeDir, os.Getenv("ANTHROPIC_API_KEY"))
-    if err != nil {
-        manager.MarkTerminating(ctx, sessionID, fmt.Sprintf("acp spawn failed: %v", err))
-        manager.CompleteCleanup(ctx, sessionID)
-        return
-    }
-
-    // session.Manager.AttachAgent transitions SPAWNING → ACTIVE
-    if err := manager.AttachAgent(ctx, sessionID, worktreeDir, acpClient); err != nil {
-        manager.MarkTerminating(ctx, sessionID, fmt.Sprintf("attach failed: %v", err))
-        manager.CompleteCleanup(ctx, sessionID)
-        return
-    }
-
-    session := manager.Get(sessionID)
-    handle := session.GetHandle()
-    handle.WebSocket.WriteJSON(map[string]interface{}{
-        "type":      "session:ready",
-        "sessionId": sessionID,
-    })
-
-    go readACPOutput(ctx, session)
-}(sess.GetID())
+manager.SpawnAgent(ctx, sessionID, role, workspace)
 ```
 
-### 5. PWA Receives Ready Notification
+**Validation:**
+- Session must exist
+- Session must be ACTIVE
+- Role must not already exist
+- Role and workspace must be non-empty
+
+### 2. Agent Creation (SPAWNING)
+
+**What happens:**
+1. Create AgentSession in SPAWNING state
+2. Create workspace directory (0o750 permissions)
+3. Spawn ACP client process
+4. Transition to ACTIVE on success
+5. Transition to FAILED on error
+
+### 3. Agent Ready
 
 ```json
-// WebSocket message from Relay to PWA
 {
-  "type": "session:ready",
-  "sessionId": "550e8400-e29b-41d4-a716-446655440000"
+  "type": "agent:ready",
+  "sessionId": "550e8400-e29b-41d4-a716-446655440000",
+  "role": "auth",
+  "workspace": "/path/to/agent/auth"
 }
 ```
 
-**Now the user can send messages.**
+### 4. Spawn Failure (Independent)
+
+**If agent fails to spawn:**
+- Agent transitions to FAILED state
+- Error message recorded in agent
+- **UserSession remains ACTIVE**
+- Other agents unaffected
+- Can retry or spawn different agent
 
 ---
 
 ## Active Session Operations
 
-### Sending User Message
+### Send Message to Agent
 
 ```json
-// PWA → Relay (WebSocket)
+// PWA → Relay
 {
   "type": "agent:message",
   "sessionId": "550e8400-e29b-41d4-a716-446655440000",
+  "role": "auth",
   "content": "Create a user authentication module"
 }
 ```
 
-```go
-handle := session.GetHandle()
-if session.GetState() != StateActive {
-    return fmt.Errorf("session not active")
-}
-if handle == nil || handle.ACPClient == nil {
-    return fmt.Errorf("session not ready")
-}
+**Validation:**
+- Session must exist and be ACTIVE
+- Agent must exist for given role
+- Agent must be in ACTIVE state
 
-agentResp, err := handle.ACPClient.SendMessage(message.Content)
-if err != nil {
-    manager.MarkTerminating(ctx, session.GetID(), fmt.Sprintf("send failed: %v", err))
-    manager.CompleteCleanup(ctx, session.GetID())
-    return
+**Response:**
+```json
+// Relay → PWA
+{
+  "type": "agent:response",
+  "sessionId": "550e8400-e29b-41d4-a716-446655440000",
+  "role": "auth",
+  "content": "I've created auth.go with JWT implementation...",
+  "timestamp": "2025-10-24T12:34:57Z"
 }
-
-payload := map[string]interface{}{
-    "type":      "agent:response",
-    "sessionId": session.GetID(),
-    "content":   agentResp.Content,
-    "timestamp": time.Now(),
-}
-
-if err := handle.WebSocket.WriteJSON(payload); err != nil {
-    manager.MarkTerminating(ctx, session.GetID(), fmt.Sprintf("write failed: %v", err))
-    manager.CompleteCleanup(ctx, session.GetID())
-    return
-}
-
-_ = manager.IncrementMessageCount(ctx, session.GetID())
-_ = manager.RecordHeartbeat(ctx, session.GetID())
 ```
+
+### List Agents
+
+```go
+agents, err := manager.ListAgents(sessionID)
+```
+
+Returns all agents for the session with their current states.
+
+### Get Specific Agent
+
+```go
+agent, err := manager.GetAgent(sessionID, role)
+```
+
+Returns single agent by role.
 
 ---
 
-## Session Termination Flow
+## Agent Termination Flow
 
-### Initiated by User
+### 1. Terminate Agent Request
+
+```go
+manager.TerminateAgent(ctx, sessionID, role)
+```
+
+**What happens:**
+1. Find agent by role
+2. Close ACP client connection
+3. Set agent state to TERMINATED
+4. Remove agent from session
+5. **UserSession remains ACTIVE**
+
+**Idempotent:** Safe to call multiple times
+
+### 2. Agent Terminated Notification
 
 ```json
-// PWA → Relay (WebSocket)
 {
-  "type": "session:stop",
-  "sessionId": "550e8400-e29b-41d4-a716-446655440000"
+  "type": "agent:terminated",
+  "sessionId": "550e8400-e29b-41d4-a716-446655440000",
+  "role": "auth",
+  "reason": "user requested"
 }
 ```
 
-### Initiated by Error
+### 3. Other Agents Unaffected
 
-```go
-if err := manager.MarkTerminating(ctx, session.GetID(), fmt.Sprintf("error: %v", err)); err != nil {
-    logger.Printf("Failed to mark terminating: %v", err)
-}
-if err := manager.CompleteCleanup(ctx, session.GetID()); err != nil {
-    logger.Printf("Cleanup failed: %v", err)
-}
-```
-
-### Initiated by WebSocket Disconnect
-
-```go
-// Relay detects disconnect in ReadMessage loop
-if err != nil {
-    logger.Printf("WebSocket disconnected for session %s", sessionID)
-    if err := manager.MarkTerminating(ctx, sessionID, "client disconnected"); err != nil {
-        logger.Printf("Failed to mark terminating: %v", err)
-    }
-    if err := manager.CompleteCleanup(ctx, sessionID); err != nil {
-        logger.Printf("Cleanup failed: %v", err)
-    }
-}
-```
-
-### Termination Implementation
-
-```go
-func terminateSession(ctx context.Context, manager *session.Manager, logger session.Logger, sessionID string, reason string) {
-    if err := manager.MarkTerminating(ctx, sessionID, reason); err != nil {
-        logger.Printf("MarkTerminating failed: %v", err)
-    }
-
-    if err := manager.CompleteCleanup(ctx, sessionID); err != nil {
-        logger.Printf("CompleteCleanup failed: %v", err)
-    }
-}
-```
+**Independent lifecycles:**
+- Terminating "auth" doesn't affect "db" agent
+- Session continues with remaining agents
+- Can spawn new agents after termination
 
 ---
 
-## Session Cleanup
+## UserSession Termination Flow
 
-### What Gets Cleaned
+### 1. Terminate Session Request
 
-**In Memory:**
-- Session object removed from `relay.sessions` map
-- WebSocket connection closed
-- ACP client stdin/stdout closed
-
-**Processes:**
-- ACP process terminated (SIGTERM → wait 5s → SIGKILL if needed)
-
-**Git Worktrees:**
-- **NOT cleaned up in Phase 1** (worktrees persist for inspection)
-- **Future:** Add `--cleanup` flag to remove worktrees on exit
-
-### What Persists
-
-**After session termination:**
-- Git worktree directory (`agent/auth/`, `agent/db/`, etc.)
-- All commits made by agent
-- All files created by agent
-
-**Rationale:** User may want to inspect agent's work after session ends.
-
-**Manual Cleanup:**
-```bash
-# Remove all agent worktrees
-./scripts/cleanup-worktrees.sh
-
-# Or manually:
-rm -rf agent/
-git worktree prune
+```go
+manager.TerminateUserSession(ctx, sessionID)
 ```
+
+**What happens:**
+1. Mark session as TERMINATED
+2. Terminate all active agents in parallel (with timeout)
+3. Close WebSocket connection
+4. Run cleaner (workspace cleanup)
+5. Remove session from store
+
+**Parallel Termination:**
+- All agents closed concurrently
+- 5-second timeout per agent
+- Continues even if some agents fail to close
+
+### 2. Session Terminated Notification
+
+```json
+{
+  "type": "session:terminated",
+  "sessionId": "550e8400-e29b-41d4-a716-446655440000",
+  "reason": "user requested",
+  "agentsTerminated": 3
+}
+```
+
+### 3. Cleanup
+
+**What gets cleaned:**
+- All ACP processes terminated
+- WebSocket connection closed
+- Session removed from memory
+
+**What persists:**
+- Git worktrees (for inspection)
+- Committed work
+
+---
+
+## Error Handling
+
+### Agent Spawn Failure
+
+**Scenario:** Workspace creation fails
+
+**Behavior:**
+- Agent enters FAILED state
+- Error message recorded
+- Session remains ACTIVE
+- User can retry or spawn different agent
+
+### Agent Process Crash
+
+**Scenario:** ACP process exits unexpectedly
+
+**Behavior:**
+- Agent marked as FAILED
+- Error logged
+- Session remains ACTIVE
+- Other agents unaffected
+
+### Session Termination During Spawn
+
+**Scenario:** User terminates session while agent is SPAWNING
+
+**Behavior:**
+- Spawn continues or is cancelled
+- Agent transitions to TERMINATED
+- Session cleanup proceeds normally
 
 ---
 
 ## Concurrency and Thread Safety
 
-### Session Map
+### Session Manager
 
 ```go
-// In relay.go
-type Relay struct {
-    sessions sync.Map  // map[string]*Session (thread-safe)
+type Manager struct {
+    store         Store  // Thread-safe operations
+    clientFactory ClientFactory
+    // ... other dependencies
 }
 ```
 
-**Operations:**
-- `sessions.Store(id, session)` - Add new session
-- `sessions.Load(id)` - Get session by ID
-- `sessions.Delete(id)` - Remove session
-- `sessions.Range(func)` - Iterate all sessions
+**Thread-safe operations:**
+- CreateUserSession
+- SpawnAgent
+- TerminateAgent
+- TerminateUserSession
+- Get/List/Count
 
-### Session State
+### UserSession
 
 ```go
-state := sess.GetState()
-if state != session.StateActive {
-    return errors.New("session not active")
+type UserSession struct {
+    // Immutable
+    ID        string
+    createdAt time.Time
+
+    // Mutable (protected by mu)
+    state      UserSessionState
+    agents     map[string]*AgentSession
+    lastActive time.Time
+
+    mu sync.RWMutex
 }
 ```
 
-**Protected by mutex:**
-- State transitions
-- ACPClient pointer assignment
-- WorktreeDir assignment
+### AgentSession
 
-**NOT protected (no concurrent writes):**
-- ID, AgentID (immutable after creation)
-- CreatedAt (written once)
+```go
+type AgentSession struct {
+    // Immutable
+    Role      string
+    Workspace string
+    createdAt time.Time
+
+    // Mutable (protected by mu)
+    state      AgentState
+    acpClient  ACPClient
+    lastActive time.Time
+    errorMsg   string
+
+    mu sync.RWMutex
+}
+```
 
 ---
 
-## Session Limits (Phase 1)
-
-### Hard Limits
-
-**Max concurrent sessions:** 3 (one per agent)
-- Enforced by agent ID uniqueness
-- User cannot start second "auth" session while first is active
-
-**Max session duration:** None (runs until user stops or error occurs)
-
-**Max messages per session:** None
-
-**Max message size:** 1MB (enforced at WebSocket layer)
-
-### Soft Limits (Warnings)
-
-**Session idle timeout:** None in Phase 1
-- **Future:** Phase 2 adds 30 minute idle timeout
-
-**Message rate:** None enforced
-- **Future:** Add 10 messages/second rate limit
-
----
-
-## Session Observability
-
-### Logs
-
-**Session Created:**
-```json
-{
-  "level": "INFO",
-  "timestamp": "2025-10-22T12:34:56Z",
-  "event": "session.created",
-  "sessionId": "uuid",
-  "agentId": "auth"
-}
-```
-
-**Session Ready:**
-```json
-{
-  "level": "INFO",
-  "event": "session.ready",
-  "sessionId": "uuid",
-  "agentId": "auth",
-  "worktreeDir": "/path/to/agent/auth"
-}
-```
-
-**Message Sent:**
-```json
-{
-  "level": "INFO",
-  "event": "session.message_sent",
-  "sessionId": "uuid",
-  "messageCount": 5
-}
-```
-
-**Session Terminated:**
-```json
-{
-  "level": "INFO",
-  "event": "session.terminated",
-  "sessionId": "uuid",
-  "reason": "client disconnected",
-  "duration": "15m32s",
-  "messageCount": 12
-}
-```
-
-### Metrics (Future)
-
-**Phase 2 additions:**
-- Active session count (gauge)
-- Session duration histogram
-- Messages per session histogram
-- Session error rate by reason
-
----
-
-## Known Issues and Limitations
+## Known Limitations (POC Trade-offs)
 
 ### No Session Persistence
 
 **Issue:** Relay restart = all sessions lost
 
-**Impact:** User must recreate sessions after relay crashes
+**Impact:** User must recreate sessions
 
-**Mitigation:** Phase 1 POC, acceptable for testing
+**Mitigation:** Acceptable for Phase 1 POC
 
 **Future:** Phase 4 adds SQLite event store
 
@@ -483,185 +440,71 @@ if state != session.StateActive {
 
 **Issue:** WebSocket disconnect = session terminates
 
-**Impact:** Browser refresh loses conversation history
+**Impact:** Browser refresh loses session
 
-**Mitigation:** User can restart session, worktree persists
+**Mitigation:** Worktrees persist for inspection
 
 **Future:** Phase 2 adds session resumption
 
 ---
 
-### Race Condition: Terminate During Spawn
+### Agent Lifecycle Complexity
 
-**Issue:** User can click "Stop" while agent is still spawning
+**Issue:** Managing multiple independent agent lifecycles
 
-**Scenario:**
-1. User clicks "Start" (session enters SPAWNING)
-2. User immediately clicks "Stop"
-3. Terminate called before ACPClient assigned
+**Current:** Each agent has own state machine
 
-**Mitigation:**
-```go
-func (s *Session) terminate(reason string) {
-    s.mu.Lock()
-    defer s.mu.Unlock()
+**Complexity:** Session can have mix of SPAWNING/ACTIVE/FAILED agents
 
-    if s.ACPClient != nil {
-        s.ACPClient.Close() // Safe, client exists
-    } else if s.State == StateSpawning {
-        // Mark for cancellation, spawn goroutine will check
-        s.State = StateTerminating
-    }
-}
-```
+**Benefit:** Isolation - one agent failure doesn't affect others
 
 ---
 
-### Session ID Collision
+## Testing Scenarios
 
-**Issue:** UUID collision (astronomically unlikely but theoretically possible)
+### Happy Path
+- [ ] Create session → Verify ACTIVE state
+- [ ] Spawn agent → Verify agent ACTIVE
+- [ ] Send message → Verify response
+- [ ] Terminate agent → Verify agent removed, session ACTIVE
+- [ ] Terminate session → Verify all cleaned
 
-**Mitigation:** Check if ID exists before adding to map
+### Multiple Agents
+- [ ] Spawn 3 agents → All ACTIVE
+- [ ] Terminate 1 agent → Others unaffected
+- [ ] Send messages to remaining agents
+- [ ] Terminate session → All agents cleaned
 
-```go
-sessionID := uuid.New().String()
-for {
-    _, exists := relay.sessions.Load(sessionID)
-    if !exists {
-        break
-    }
-    sessionID = uuid.New().String() // Generate new ID
-}
-```
+### Failure Scenarios
+- [ ] Spawn agent with invalid workspace → Agent FAILED, session ACTIVE
+- [ ] Terminate agent during spawn → Graceful handling
+- [ ] Terminate session with SPAWNING agents → All cleaned
+- [ ] Agent process crashes → Session stays ACTIVE
 
----
-
-## Testing Session Lifecycle
-
-### Manual Test Cases
-
-- [ ] Create session → Verify ready notification
-- [ ] Send message → Verify agent response
-- [ ] Stop session → Verify clean termination
-- [ ] Create session → Disconnect WebSocket → Verify ACP process killed
-- [ ] Create 3 sessions (all agents) → Stop 1 → Verify others unaffected
-- [ ] Try to create duplicate agent session → Verify rejected
-- [ ] Stop session during spawn → Verify no zombie process
-- [ ] Relay restart → Verify all sessions lost (expected)
-
-### Automated Tests (Issue #13)
-
-```go
-func TestSessionLifecycle(t *testing.T) {
-    relay := NewRelay()
-    go relay.Start()
-    defer relay.Stop()
-
-    // Connect WebSocket
-    ws := connectWebSocket(t, "ws://localhost:3000/ws")
-    defer ws.Close()
-
-    // Create session
-    ws.WriteJSON(map[string]interface{}{
-        "type": "session:create",
-        "agentId": "auth",
-    })
-
-    // Wait for ready
-    var msg map[string]interface{}
-    ws.ReadJSON(&msg)
-    assert.Equal(t, "session:created", msg["type"])
-    sessionID := msg["sessionId"].(string)
-
-    ws.ReadJSON(&msg)
-    assert.Equal(t, "session:ready", msg["type"])
-
-    // Send message
-    ws.WriteJSON(map[string]interface{}{
-        "type": "agent:message",
-        "sessionId": sessionID,
-        "content": "hello",
-    })
-
-    // Read response
-    ws.ReadJSON(&msg)
-    assert.Equal(t, "agent:response", msg["type"])
-
-    // Stop session
-    ws.WriteJSON(map[string]interface{}{
-        "type": "session:stop",
-        "sessionId": sessionID,
-    })
-
-    // Verify terminated
-    ws.ReadJSON(&msg)
-    assert.Equal(t, "session:terminated", msg["type"])
-}
-```
-
----
-
-## Session Lifecycle Diagram
-
-```
-USER ACTION          RELAY STATE           ACP PROCESS        GIT WORKTREE
-───────────────────────────────────────────────────────────────────────────
-
-"Start Agent" ──────> CREATED
-                      │
-                      ├─> Create UUID
-                      ├─> Store session
-                      └─> Send "created"
-                      │
-                      v
-                      SPAWNING ──────────> (spawning)      ───> Create worktree
-                      │                                          on branch "auth"
-                      │                     │
-                      │                     v
-                      │                   Running
-                      │                   (pid 12345)
-                      v
-"Send message" ────> ACTIVE
-                      │
-                      ├─> Relay to stdin ─> Process
-                      │                     │
-                      │                     └─> Response
-                      └─< Read from stdout <─
-                      │
-                      └─> Forward to WS
-
-
-"Stop" ─────────────> TERMINATING
-                      │
-                      ├─> SIGTERM ────────> Process exits  ───> Files committed
-                      │                     (graceful)          (by ACP)
-                      │   (wait 5s)
-                      │
-                      ├─> SIGKILL ────────> Force quit
-                      │   (if needed)       (if stuck)
-                      │
-                      └─> Close WS
-                      │
-                      v
-                      CLEANED
-                      │
-                      └─> Remove from map
-                                                             ───> Worktree remains
-                                                                  (not deleted)
-```
+### Edge Cases
+- [ ] Spawn duplicate role → Error returned
+- [ ] Send message to non-existent agent → Error
+- [ ] Terminate already-terminated agent → Idempotent
+- [ ] Create session after session terminated → New session
 
 ---
 
 ## Summary
 
-**Session = User ↔ Agent Conversation**
+**Architecture:**
+- UserSession (container) → 0-N AgentSessions
+- Independent agent lifecycles
+- Dynamic roles (not hardcoded)
 
-**Lifecycle:** Create → Spawn → Active → Terminate → Cleanup
+**States:**
+- UserSession: ACTIVE → TERMINATED
+- AgentSession: SPAWNING → ACTIVE/FAILED → TERMINATED
 
-**Storage:** In-memory only (no persistence)
+**Key Benefits:**
+- Agent isolation (failures don't cascade)
+- Flexibility (variable agent count)
+- Simplicity (only 2 states for UserSession)
 
-**Concurrency:** Thread-safe with sync.Map and mutexes
+**Storage:** In-memory (no persistence)
 
-**Cleanup:** Processes terminated, worktrees preserved
-
-**Future:** Add persistence, reconnection, timeouts in later phases
+**Future:** Add persistence, reconnection, monitoring in later phases
