@@ -15,8 +15,9 @@
   2. Echo responses include timestamps.
   3. Recoverable validation errors stay connected.
   4. Non-recoverable errors close the connection.
-  5. Bonus chaos: 100 fuzzed payloads exercise echo/validation paths.
-  6. Add `--verbose` to echo every request/response pair (useful for demos or debugging).
+  5. Bonus chaos: configurable fuzzing (default 100 cases) now mixes oversized payloads, malformed JSON/UTF-8, duplicate-key echoes, binary frames, and type violations.
+  6. Flags: `--fuzz N`, `--max-payload BYTES`, and `--seed VALUE` tune intensity/reproducibility; `--verbose` prints every frame for debugging/demos.
+  7. Any fuzz discrepancies are logged (⚠️) and summarized at the end instead of aborting mid-run.
 
 ## Integration Test Gaps (Future Work)
 
