@@ -29,7 +29,7 @@ const (
 	defaultHandshake = "connection:established"
 )
 
-var rng = rand.New(rand.NewSource(time.Now().UnixNano()))
+var rng = rand.New(rand.NewSource(time.Now().UnixNano())) // #nosec G404 -- non-crypto RNG is sufficient for fuzzing
 
 func main() {
 	verbose := flag.Bool("verbose", false, "emit every payload/response pair")
@@ -41,7 +41,7 @@ func main() {
 	if *seed == 0 {
 		*seed = time.Now().UnixNano()
 	}
-	rng = rand.New(rand.NewSource(*seed))
+	rng = rand.New(rand.NewSource(*seed)) // #nosec G404 -- deterministic fuzzing seed
 
 	debug(*verbose, "🧮", "Fuzz seed=%d maxPayload=%d fuzzCount=%d", *seed, *maxPayload, *fuzzCount)
 
@@ -106,16 +106,12 @@ func main() {
 }
 
 // runSmokeTest orchestrates the full WebSocket → fuzz → teardown flow.
+//
 //nolint:gocyclo // High complexity is expected due to the sequential scenario orchestration.
 func runSmokeTest(verbose bool, fuzzCount int, maxPayload int) error {
-	u := url.URL{Scheme: "ws", Host: relayAddr, Path: websocketPath}
-
-	dialer := *websocket.DefaultDialer
-	dialer.HandshakeTimeout = requestTimeout
-
-	conn, _, err := dialer.Dial(u.String(), nil)
+	conn, err := dialRelay()
 	if err != nil {
-		return fmt.Errorf("failed to dial relay: %w", err)
+		return err
 	}
 	defer func() {
 		if cerr := conn.Close(); cerr != nil {
@@ -123,26 +119,71 @@ func runSmokeTest(verbose bool, fuzzCount int, maxPayload int) error {
 		}
 	}()
 
-	_ = conn.SetReadDeadline(time.Now().Add(requestTimeout))
+	if handshakeErr := verifyHandshake(conn, verbose); handshakeErr != nil {
+		return handshakeErr
+	}
+	if echoErr := verifyEchoPath(conn, verbose); echoErr != nil {
+		return echoErr
+	}
+	if recoverErr := verifyRecoverablePath(conn, verbose); recoverErr != nil {
+		return recoverErr
+	}
 
-	var handshake map[string]interface{}
-	if err := conn.ReadJSON(&handshake); err != nil {
+	if fuzzCount < 0 {
+		fuzzCount = 0
+	}
+
+	result := fuzzMessages(conn, fuzzCount, verbose, maxPayload)
+	for _, fuzzErr := range result.errors {
+		warn("⚠️", "Fuzz issue: %v", fuzzErr)
+	}
+
+	if nonRecoverErr := verifyNonRecoverablePath(conn, verbose); nonRecoverErr != nil {
+		return nonRecoverErr
+	}
+	if closedErr := ensureClosedAfterTermination(conn); closedErr != nil {
+		return closedErr
+	}
+
+	if len(result.errors) > 0 {
+		return fmt.Errorf("%d fuzz cases failed (see warnings above)", len(result.errors))
+	}
+
+	return nil
+}
+
+func dialRelay() (*websocket.Conn, error) {
+	u := url.URL{Scheme: "ws", Host: relayAddr, Path: websocketPath}
+	dialer := *websocket.DefaultDialer
+	dialer.HandshakeTimeout = requestTimeout
+	conn, _, err := dialer.Dial(u.String(), nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to dial relay: %w", err)
+	}
+	return conn, nil
+}
+
+func verifyHandshake(conn *websocket.Conn, verbose bool) error {
+	resp, err := readJSON(conn)
+	if err != nil {
 		return fmt.Errorf("failed to read handshake: %w", err)
 	}
-	debug(verbose, "📥", "Handshake payload: %s", stringify(handshake))
-	if handshake["type"] != defaultHandshake {
-		return fmt.Errorf("unexpected handshake type: %+v", handshake)
+	debug(verbose, "📥", "Handshake payload: %s", stringify(resp))
+	if resp["type"] != defaultHandshake {
+		return fmt.Errorf("unexpected handshake type: %+v", resp)
 	}
-	success("🤝", "Handshake received: %s", stringify(handshake))
+	success("🤝", "Handshake received: %s", stringify(resp))
+	return nil
+}
 
-	// 1. Echo happy path
-	echoPayload := map[string]interface{}{
+func verifyEchoPath(conn *websocket.Conn, verbose bool) error {
+	payload := map[string]interface{}{
 		"version": "1.0",
 		"type":    "echo",
 		"payload": "smoke test message",
 	}
-	debug(verbose, "📤", "Sending echo payload: %s", stringify(echoPayload))
-	if err := writeJSON(conn, echoPayload); err != nil {
+	debug(verbose, "📤", "Sending echo payload: %s", stringify(payload))
+	if err := writeJSON(conn, payload); err != nil {
 		return fmt.Errorf("failed to send echo: %w", err)
 	}
 
@@ -151,54 +192,47 @@ func runSmokeTest(verbose bool, fuzzCount int, maxPayload int) error {
 		return fmt.Errorf("failed to read echo response: %w", err)
 	}
 	debug(verbose, "📬", "Echo response: %s", stringify(resp))
-	if resp["type"] != "echo" || resp["payload"] != echoPayload["payload"] {
+	if resp["type"] != "echo" || resp["payload"] != payload["payload"] {
 		return fmt.Errorf("unexpected echo response: %s", stringify(resp))
 	}
 	if _, ok := resp["timestamp"].(string); !ok {
 		return fmt.Errorf("echo response missing timestamp: %s", stringify(resp))
 	}
 	success("🔁", "Echo behaved as advertised: %s", stringify(resp))
+	return nil
+}
 
-	// 2. Recoverable validation error (missing version)
-	badPayload := map[string]interface{}{
+func verifyRecoverablePath(conn *websocket.Conn, verbose bool) error {
+	payload := map[string]interface{}{
 		"type":    "echo",
 		"payload": "missing version field",
 	}
-	debug(verbose, "📤", "Sending recoverable invalid payload: %s", stringify(badPayload))
-	if err := writeJSON(conn, badPayload); err != nil {
+	debug(verbose, "📤", "Sending recoverable invalid payload: %s", stringify(payload))
+	if err := writeJSON(conn, payload); err != nil {
 		return fmt.Errorf("failed to send invalid payload: %w", err)
 	}
 
-	errResp, err := readJSON(conn)
+	resp, err := readJSON(conn)
 	if err != nil {
 		return fmt.Errorf("failed to read validation error: %w", err)
 	}
-	debug(verbose, "📬", "Recoverable error response: %s", stringify(errResp))
-	if errType := errResp["type"]; errType != "error" {
-		return fmt.Errorf("expected error response, got: %s", stringify(errResp))
+	debug(verbose, "📬", "Recoverable error response: %s", stringify(resp))
+
+	if errType := resp["type"]; errType != "error" {
+		return fmt.Errorf("expected error response, got: %s", stringify(resp))
 	}
-	errorDetail, ok := errResp["error"].(map[string]interface{})
+	errorDetail, ok := resp["error"].(map[string]interface{})
 	if !ok {
-		return fmt.Errorf("error payload missing detail: %s", stringify(errResp))
+		return fmt.Errorf("error payload missing detail: %s", stringify(resp))
 	}
 	if errorDetail["code"] != "INVALID_MESSAGE" || errorDetail["recoverable"] != true {
-		return fmt.Errorf("unexpected validation error: %s", stringify(errResp))
+		return fmt.Errorf("unexpected validation error: %s", stringify(resp))
 	}
-	warn("🩹", "Recoverable error looked correct: %s", stringify(errResp))
+	warn("🩹", "Recoverable error looked correct: %s", stringify(resp))
+	return nil
+}
 
-	if fuzzCount < 0 {
-		fuzzCount = 0
-	}
-
-	result, err := fuzzMessages(conn, fuzzCount, verbose, maxPayload)
-	if err != nil {
-		return err
-	}
-	for _, fuzzErr := range result.errors {
-		warn("⚠️", "Fuzz issue: %v", fuzzErr)
-	}
-
-	// 3. Non-recoverable error (version mismatch) should close connection
+func verifyNonRecoverablePath(conn *websocket.Conn, verbose bool) error {
 	versionMismatch := map[string]interface{}{
 		"version": "0.9",
 		"type":    "echo",
@@ -209,28 +243,25 @@ func runSmokeTest(verbose bool, fuzzCount int, maxPayload int) error {
 		return fmt.Errorf("failed to send version mismatch payload: %w", err)
 	}
 
-	closeResp, err := readJSON(conn)
+	resp, err := readJSON(conn)
 	if err != nil {
 		return fmt.Errorf("failed to read version mismatch response: %w", err)
 	}
-	debug(verbose, "📬", "Non-recoverable response: %s", stringify(closeResp))
-	closeDetail, ok := closeResp["error"].(map[string]interface{})
+	debug(verbose, "📬", "Non-recoverable response: %s", stringify(resp))
+	closeDetail, ok := resp["error"].(map[string]interface{})
 	if !(ok && closeDetail["code"] == "VERSION_MISMATCH" && closeDetail["recoverable"] == false) {
-		return fmt.Errorf("unexpected version mismatch response: %s", stringify(closeResp))
+		return fmt.Errorf("unexpected version mismatch response: %s", stringify(resp))
 	}
-	warn("🧨", "Non-recoverable error triggered correctly: %s", stringify(closeResp))
+	warn("🧨", "Non-recoverable error triggered correctly: %s", stringify(resp))
+	return nil
+}
 
-	// Connection should now be closed by the server — next read should fail
+func ensureClosedAfterTermination(conn *websocket.Conn) error {
 	if _, err := readJSON(conn); err == nil {
 		return errors.New("expected connection closure after non-recoverable error, but read succeeded")
 	} else if !isClosedError(err) {
 		return fmt.Errorf("expected close error after non-recoverable response, got %v", err)
 	}
-
-	if len(result.errors) > 0 {
-		return fmt.Errorf("%d fuzz cases failed (see warnings above)", len(result.errors))
-	}
-
 	return nil
 }
 
@@ -291,11 +322,11 @@ func findRepoRoot() (string, error) {
 }
 
 func isClosedError(err error) bool {
-    if errors.Is(err, net.ErrClosed) || errors.Is(err, io.EOF) {
-        return true
-    }
-    var closeErr *websocket.CloseError
-    return errors.As(err, &closeErr)
+	if errors.Is(err, net.ErrClosed) || errors.Is(err, io.EOF) {
+		return true
+	}
+	var closeErr *websocket.CloseError
+	return errors.As(err, &closeErr)
 }
 
 const (
@@ -346,117 +377,51 @@ type fuzzSummary struct {
 	errors []error
 }
 
+type fuzzIteration struct {
+	conn       *websocket.Conn
+	verbose    bool
+	maxPayload int
+	idx        int
+	summary    *fuzzSummary
+}
+
 // fuzzMessages blasts randomized payloads covering numerous failure classes.
-//nolint:gocyclo // Intentionally explores many branches to exercise the relay.
-func fuzzMessages(conn *websocket.Conn, count int, verbose bool, maxPayload int) (fuzzSummary, error) {
+func fuzzMessages(conn *websocket.Conn, count int, verbose bool, maxPayload int) fuzzSummary {
 	summary := fuzzSummary{}
 	if count == 0 {
 		success("🌀", "Skipped fuzzing (count=0).")
-		return summary, nil
+		return summary
 	}
 
 	if maxPayload < 1024 {
 		maxPayload = 1024
 	}
+	handlers := []func(*fuzzIteration) error{
+		handleValidEcho,
+		handleValidEcho, // extra weighting for happy path
+		handleMissingVersion,
+		handleMissingType,
+		handleMissingBoth,
+		handleWrongTypes,
+		handleOversizedPayload,
+		func(it *fuzzIteration) error { return handleMalformedJSON(it, false) },
+		func(it *fuzzIteration) error { return handleMalformedJSON(it, true) },
+		handleDuplicateKeys,
+		handleRootArray,
+		handleBinaryFrame,
+	}
 
 	for i := 0; i < count; i++ {
-		mode := rng.Intn(12)
-		var caseErr error
-
-		switch mode {
-		case 0, 1: // Valid echo with extra chaos
-			msg := buildValidMessage(maxPayload)
-			debug(verbose, "📤", "Fuzz #%d send (echo w/ extras): %s", i, stringify(msg))
-			if e := writeJSON(conn, msg); e != nil {
-				caseErr = fmt.Errorf("fuzz #%d failed to write echo message: %w", i, e)
-			} else if resp, e := readJSON(conn); e != nil {
-				caseErr = fmt.Errorf("fuzz #%d failed to read echo response: %w", i, e)
-			} else if e := ensureEchoMatch(msg, resp); e != nil {
-				caseErr = fmt.Errorf("fuzz #%d echo mismatch: %w", i, e)
-			} else {
-				summary.stats.echoes++
-			}
-
-		case 2: // Missing version
-			msg := buildInvalidMessage(false, true)
-			if e := expectInvalid(conn, msg, verbose, i); e != nil {
-				caseErr = fmt.Errorf("fuzz #%d %w", i, e)
-			} else {
-				summary.stats.recoverables++
-			}
-
-		case 3: // Missing type
-			msg := buildInvalidMessage(true, false)
-			if e := expectInvalid(conn, msg, verbose, i); e != nil {
-				caseErr = fmt.Errorf("fuzz #%d %w", i, e)
-			} else {
-				summary.stats.recoverables++
-			}
-
-		case 4: // Missing both
-			msg := buildInvalidMessage(false, false)
-			if e := expectInvalid(conn, msg, verbose, i); e != nil {
-				caseErr = fmt.Errorf("fuzz #%d %w", i, e)
-			} else {
-				summary.stats.recoverables++
-			}
-
-		case 5: // Wrong types + junk fields
-			msg := buildTypeViolatingMessage()
-			if e := expectInvalid(conn, msg, verbose, i); e != nil {
-				caseErr = fmt.Errorf("fuzz #%d %w", i, e)
-			} else {
-				summary.stats.recoverables++
-			}
-
-		case 6: // Oversized payload missing required fields
-			msg := buildOversizedMessage(maxPayload)
-			if e := expectInvalid(conn, msg, verbose, i); e != nil {
-				caseErr = fmt.Errorf("fuzz #%d %w", i, e)
-			} else {
-				summary.stats.oversized++
-			}
-
-		case 7: // Malformed JSON (broken syntax)
-			if e := sendMalformedFrame(conn, verbose, i, maxPayload, false); e != nil {
-				caseErr = fmt.Errorf("fuzz #%d %w", i, e)
-			} else {
-				summary.stats.malformedJSON++
-			}
-
-		case 8: // Malformed UTF-8 inside JSON
-			if e := sendMalformedFrame(conn, verbose, i, maxPayload, true); e != nil {
-				caseErr = fmt.Errorf("fuzz #%d %w", i, e)
-			} else {
-				summary.stats.malformedUTF8++
-			}
-
-		case 9: // Duplicate keys via raw string
-			if e := sendDuplicateKeyJSON(conn, verbose, i); e != nil {
-				caseErr = fmt.Errorf("fuzz #%d %w", i, e)
-			} else {
-				summary.stats.duplicateKeys++
-			}
-
-		case 10: // Root array of mixed junk
-			msg := buildArrayMessage(maxPayload)
-			if e := expectInvalid(conn, msg, verbose, i); e != nil {
-				caseErr = fmt.Errorf("fuzz #%d %w", i, e)
-			} else {
-				summary.stats.recoverables++
-			}
-
-		case 11: // Binary frame with random bytes
-			if e := sendBinaryFrame(conn, verbose, i, maxPayload); e != nil {
-				caseErr = fmt.Errorf("fuzz #%d %w", i, e)
-			} else {
-				summary.stats.binary++
-			}
+		iter := &fuzzIteration{
+			conn:       conn,
+			verbose:    verbose,
+			maxPayload: maxPayload,
+			idx:        i,
+			summary:    &summary,
 		}
-
-		if caseErr != nil {
-			summary.errors = append(summary.errors, caseErr)
-			if isClosedError(caseErr) {
+		if err := handlers[rng.Intn(len(handlers))](iter); err != nil {
+			summary.errors = append(summary.errors, err)
+			if isClosedError(err) {
 				break
 			}
 		}
@@ -473,7 +438,107 @@ func fuzzMessages(conn *websocket.Conn, count int, verbose bool, maxPayload int)
 		summary.stats.binary,
 		summary.stats.oversized,
 	)
-	return summary, nil
+	return summary
+}
+
+func handleValidEcho(iter *fuzzIteration) error {
+	msg := buildValidMessage(iter.maxPayload)
+	debug(iter.verbose, "📤", "Fuzz #%d send (echo w/ extras): %s", iter.idx, stringify(msg))
+
+	if err := writeJSON(iter.conn, msg); err != nil {
+		return fmt.Errorf("fuzz #%d failed to write echo message: %w", iter.idx, err)
+	}
+	resp, err := readJSON(iter.conn)
+	if err != nil {
+		return fmt.Errorf("fuzz #%d failed to read echo response: %w", iter.idx, err)
+	}
+	if err := ensureEchoMatch(msg, resp); err != nil {
+		return fmt.Errorf("fuzz #%d echo mismatch: %w", iter.idx, err)
+	}
+	iter.summary.stats.echoes++
+	return nil
+}
+
+func handleMissingVersion(iter *fuzzIteration) error {
+	msg := buildInvalidMessage(false, true)
+	if err := expectInvalid(iter, msg); err != nil {
+		return fmt.Errorf("fuzz #%d %w", iter.idx, err)
+	}
+	iter.summary.stats.recoverables++
+	return nil
+}
+
+func handleMissingType(iter *fuzzIteration) error {
+	msg := buildInvalidMessage(true, false)
+	if err := expectInvalid(iter, msg); err != nil {
+		return fmt.Errorf("fuzz #%d %w", iter.idx, err)
+	}
+	iter.summary.stats.recoverables++
+	return nil
+}
+
+func handleMissingBoth(iter *fuzzIteration) error {
+	msg := buildInvalidMessage(false, false)
+	if err := expectInvalid(iter, msg); err != nil {
+		return fmt.Errorf("fuzz #%d %w", iter.idx, err)
+	}
+	iter.summary.stats.recoverables++
+	return nil
+}
+
+func handleWrongTypes(iter *fuzzIteration) error {
+	msg := buildTypeViolatingMessage()
+	if err := expectInvalid(iter, msg); err != nil {
+		return fmt.Errorf("fuzz #%d %w", iter.idx, err)
+	}
+	iter.summary.stats.recoverables++
+	return nil
+}
+
+func handleOversizedPayload(iter *fuzzIteration) error {
+	msg := buildOversizedMessage(iter.maxPayload)
+	if err := expectInvalid(iter, msg); err != nil {
+		return fmt.Errorf("fuzz #%d %w", iter.idx, err)
+	}
+	iter.summary.stats.oversized++
+	return nil
+}
+
+func handleMalformedJSON(iter *fuzzIteration, badUTF8 bool) error {
+	if err := sendMalformedFrame(iter, badUTF8); err != nil {
+		return fmt.Errorf("fuzz #%d %w", iter.idx, err)
+	}
+	if badUTF8 {
+		iter.summary.stats.malformedUTF8++
+	} else {
+		iter.summary.stats.malformedJSON++
+	}
+	return nil
+}
+
+func handleDuplicateKeys(iter *fuzzIteration) error {
+	if err := sendDuplicateKeyJSON(iter); err != nil {
+		return fmt.Errorf("fuzz #%d %w", iter.idx, err)
+	}
+	iter.summary.stats.duplicateKeys++
+	return nil
+}
+
+func handleRootArray(iter *fuzzIteration) error {
+	msg := buildArrayMessage()
+	if err := expectInvalid(iter, msg); err != nil {
+		return fmt.Errorf("fuzz #%d %w", iter.idx, err)
+	}
+	iter.summary.stats.recoverables++
+	return nil
+}
+
+func handleBinaryFrame(iter *fuzzIteration) error {
+	if err := sendBinaryFrame(iter); err != nil {
+		return fmt.Errorf("fuzz #%d %w", iter.idx, err)
+	}
+	iter.summary.stats.binary++
+	return nil
 }
 
 func buildValidMessage(maxPayload int) map[string]interface{} {
@@ -529,44 +594,96 @@ func buildOversizedMessage(maxPayload int) map[string]interface{} {
 	return msg
 }
 
-func expectInvalid(conn *websocket.Conn, msg map[string]interface{}, verbose bool, idx int) error {
-	debug(verbose, "📤", "Fuzz #%d send (invalid): %s", idx, stringify(msg))
-	if err := writeJSON(conn, msg); err != nil {
-		return fmt.Errorf("fuzz #%d failed to write invalid payload: %w", idx, err)
+func expectInvalid(iter *fuzzIteration, msg map[string]interface{}) error {
+	debug(iter.verbose, "📤", "Fuzz #%d send (invalid): %s", iter.idx, stringify(msg))
+	if err := writeJSON(iter.conn, msg); err != nil {
+		return fmt.Errorf("fuzz #%d failed to write invalid payload: %w", iter.idx, err)
 	}
-	resp, err := readJSON(conn)
+	resp, err := readJSON(iter.conn)
 	if err != nil {
-		return fmt.Errorf("fuzz #%d failed to read invalid response: %w", idx, err)
+		return fmt.Errorf("fuzz #%d failed to read invalid response: %w", iter.idx, err)
 	}
-	debug(verbose, "📬", "Fuzz #%d recv (invalid): %s", idx, stringify(resp))
+	debug(iter.verbose, "📬", "Fuzz #%d recv (invalid): %s", iter.idx, stringify(resp))
 	if !isRecoverableInvalid(resp) {
-		return fmt.Errorf("fuzz #%d expected recoverable validation error, got %s", idx, stringify(resp))
+		return fmt.Errorf("fuzz #%d expected recoverable validation error, got %s", iter.idx, stringify(resp))
 	}
 	return nil
 }
 
-func sendMalformedFrame(conn *websocket.Conn, verbose bool, idx int, maxPayload int, badUTF8 bool) error {
-	size := clamp(rng.Intn(256)+64, 64, maxPayload)
+func sendMalformedFrame(iter *fuzzIteration, badUTF8 bool) error {
+	size := clamp(rng.Intn(256)+64, 64, iter.maxPayload)
 	var garbage string
 	if badUTF8 {
 		garbage = string([]byte{'{', '"', 'v', 'e', 'r', 's', 'i', 'o', 'n', '"', ':', '"', 0xff, 0xfe, '"', '}'})
 	} else {
 		garbage = randomString(size, size+1, false)
 	}
-	debug(verbose, "📤", "Fuzz #%d send (malformed json=%t): %q", idx, !badUTF8, garbage)
+	debug(iter.verbose, "📤", "Fuzz #%d send (malformed json=%t): %q", iter.idx, !badUTF8, garbage)
 
-	_ = conn.SetWriteDeadline(time.Now().Add(requestTimeout))
-	if err := conn.WriteMessage(websocket.TextMessage, []byte(garbage)); err != nil {
-		return fmt.Errorf("fuzz #%d failed to write malformed frame: %w", idx, err)
+	_ = iter.conn.SetWriteDeadline(time.Now().Add(requestTimeout))
+	if err := iter.conn.WriteMessage(websocket.TextMessage, []byte(garbage)); err != nil {
+		return fmt.Errorf("fuzz #%d failed to write malformed frame: %w", iter.idx, err)
 	}
 
-	resp, err := readJSON(conn)
+	resp, err := readJSON(iter.conn)
 	if err != nil {
-		return fmt.Errorf("fuzz #%d failed to read malformed response: %w", idx, err)
+		return fmt.Errorf("fuzz #%d failed to read malformed response: %w", iter.idx, err)
 	}
-	debug(verbose, "📬", "Fuzz #%d recv (malformed): %s", idx, stringify(resp))
+	debug(iter.verbose, "📬", "Fuzz #%d recv (malformed): %s", iter.idx, stringify(resp))
 	if !isRecoverableInvalid(resp) {
-		return fmt.Errorf("fuzz #%d expected invalid response to malformed frame, got %s", idx, stringify(resp))
+		return fmt.Errorf("fuzz #%d expected invalid response to malformed frame, got %s", iter.idx, stringify(resp))
+	}
+	return nil
+}
+
+func sendDuplicateKeyJSON(iter *fuzzIteration) error {
+	raw := fmt.Sprintf("{\"version\":\"1.0\",\"type\":\"echo\",\"type\":\"shadow\",\"payload\":\"dup-%d\"}", iter.idx)
+	debug(iter.verbose, "📤", "Fuzz #%d send (duplicate keys): %s", iter.idx, raw)
+
+	_ = iter.conn.SetWriteDeadline(time.Now().Add(requestTimeout))
+	if err := iter.conn.WriteMessage(websocket.TextMessage, []byte(raw)); err != nil {
+		return fmt.Errorf("fuzz #%d failed to write duplicate-key payload: %w", iter.idx, err)
+	}
+
+	resp, err := readJSON(iter.conn)
+	if err != nil {
+		return fmt.Errorf("fuzz #%d failed to read duplicate-key response: %w", iter.idx, err)
+	}
+	debug(iter.verbose, "📬", "Fuzz #%d recv (duplicate keys): %s", iter.idx, stringify(resp))
+
+	expected := map[string]interface{}{
+		"version": "1.0",
+		"type":    "shadow",
+		"payload": fmt.Sprintf("dup-%d", iter.idx),
+	}
+
+	if err := ensureEchoMatch(expected, resp); err != nil {
+		return fmt.Errorf("fuzz #%d duplicate-key echo mismatch: %w", iter.idx, err)
+	}
+
+	return nil
+}
+
+func sendBinaryFrame(iter *fuzzIteration) error {
+	size := clamp(rng.Intn(256)+32, 32, iter.maxPayload)
+	buf := make([]byte, size)
+	if _, err := rng.Read(buf); err != nil {
+		return fmt.Errorf("fuzz #%d failed to generate binary blob: %w", iter.idx, err)
+	}
+	debug(iter.verbose, "📤", "Fuzz #%d send (binary %d bytes)", iter.idx, size)
+
+	_ = iter.conn.SetWriteDeadline(time.Now().Add(requestTimeout))
+	if err := iter.conn.WriteMessage(websocket.BinaryMessage, buf); err != nil {
+		return fmt.Errorf("fuzz #%d failed to write binary frame: %w", iter.idx, err)
+	}
+
+	resp, err := readJSON(iter.conn)
+	if err != nil {
+		return fmt.Errorf("fuzz #%d failed to read binary response: %w", iter.idx, err)
+	}
+	debug(iter.verbose, "📬", "Fuzz #%d recv (binary): %s", iter.idx, stringify(resp))
+	if !isRecoverableInvalid(resp) {
+		return fmt.Errorf("fuzz #%d expected invalid response to binary frame, got %s", iter.idx, stringify(resp))
 	}
 	return nil
 }
@@ -624,7 +741,7 @@ func ensurePortAvailable(addr string) error {
 }
 
 func lookupPortOwner(port string) (string, error) {
-	lsofCmd := exec.Command("lsof", "-iTCP:"+port, "-sTCP:LISTEN", "-n", "-P")
+	lsofCmd := exec.Command("lsof", "-iTCP:"+port, "-sTCP:LISTEN", "-n", "-P") // #nosec G204 -- diagnostic tooling requires dynamic args
 	var stdout bytes.Buffer
 	lsofCmd.Stdout = &stdout
 	if err := lsofCmd.Run(); err == nil {
@@ -634,7 +751,7 @@ func lookupPortOwner(port string) (string, error) {
 		}
 	}
 
-	ssCmd := exec.Command("ss", "-tulpn")
+	ssCmd := exec.Command("ss", "-tulpn") // #nosec G204 -- diagnostic tooling requires dynamic args
 	stdout.Reset()
 	ssCmd.Stdout = &stdout
 	if err := ssCmd.Run(); err == nil {
@@ -651,7 +768,7 @@ func lookupPortOwner(port string) (string, error) {
 		}
 	}
 
-	netstatCmd := exec.Command("netstat", "-anp")
+	netstatCmd := exec.Command("netstat", "-anp") // #nosec G204 -- diagnostic tooling requires dynamic args
 	stdout.Reset()
 	netstatCmd.Stdout = &stdout
 	if err := netstatCmd.Run(); err == nil {
@@ -694,7 +811,7 @@ func randomKey() string {
 	return randomString(3, 10, true)
 }
 
-func buildArrayMessage(maxPayload int) map[string]interface{} {
+func buildArrayMessage() map[string]interface{} {
 	arrLen := clamp(rng.Intn(5)+1, 1, 8)
 	arr := make([]interface{}, arrLen)
 	for i := range arr {
@@ -704,58 +821,6 @@ func buildArrayMessage(maxPayload int) map[string]interface{} {
 		"version": "1.0",
 		"payload": arr,
 	}
-}
-
-func sendDuplicateKeyJSON(conn *websocket.Conn, verbose bool, idx int) error {
-	raw := fmt.Sprintf("{\"version\":\"1.0\",\"type\":\"echo\",\"type\":\"shadow\",\"payload\":\"dup-%d\"}", idx)
-	debug(verbose, "📤", "Fuzz #%d send (duplicate keys): %s", idx, raw)
-
-	_ = conn.SetWriteDeadline(time.Now().Add(requestTimeout))
-	if err := conn.WriteMessage(websocket.TextMessage, []byte(raw)); err != nil {
-		return fmt.Errorf("fuzz #%d failed to write duplicate-key payload: %w", idx, err)
-	}
-
-	resp, err := readJSON(conn)
-	if err != nil {
-		return fmt.Errorf("fuzz #%d failed to read duplicate-key response: %w", idx, err)
-	}
-	debug(verbose, "📬", "Fuzz #%d recv (duplicate keys): %s", idx, stringify(resp))
-
-	expected := map[string]interface{}{
-		"version": "1.0",
-		"type":    "shadow",
-		"payload": fmt.Sprintf("dup-%d", idx),
-	}
-
-	if err := ensureEchoMatch(expected, resp); err != nil {
-		return fmt.Errorf("fuzz #%d duplicate-key echo mismatch: %w", idx, err)
-	}
-
-	return nil
-}
-
-func sendBinaryFrame(conn *websocket.Conn, verbose bool, idx int, maxPayload int) error {
-	size := clamp(rng.Intn(256)+32, 32, maxPayload)
-	buf := make([]byte, size)
-	if _, err := rng.Read(buf); err != nil {
-		return fmt.Errorf("fuzz #%d failed to generate binary blob: %w", idx, err)
-	}
-	debug(verbose, "📤", "Fuzz #%d send (binary %d bytes)", idx, size)
-
-	_ = conn.SetWriteDeadline(time.Now().Add(requestTimeout))
-	if err := conn.WriteMessage(websocket.BinaryMessage, buf); err != nil {
-		return fmt.Errorf("fuzz #%d failed to write binary frame: %w", idx, err)
-	}
-
-	resp, err := readJSON(conn)
-	if err != nil {
-		return fmt.Errorf("fuzz #%d failed to read binary response: %w", idx, err)
-	}
-	debug(verbose, "📬", "Fuzz #%d recv (binary): %s", idx, stringify(resp))
-	if !isRecoverableInvalid(resp) {
-		return fmt.Errorf("fuzz #%d expected invalid response to binary frame, got %s", idx, stringify(resp))
-	}
-	return nil
 }
 
 func randomJSONValue(depth int) interface{} {
