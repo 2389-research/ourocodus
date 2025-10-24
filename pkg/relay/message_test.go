@@ -115,7 +115,6 @@ func TestValidateMessage_ValidMessage(t *testing.T) {
 	data := []byte(`{"version":"1.0","type":"test:echo","message":"hello"}`)
 
 	err := ValidateMessage(data)
-
 	if err != nil {
 		t.Fatalf("expected no error for valid message, got: %v", err)
 	}

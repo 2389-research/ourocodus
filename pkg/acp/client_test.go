@@ -283,7 +283,7 @@ func TestSendMessage_ProcessCrash(t *testing.T) {
 	// Create a mock process that exits immediately
 	mockScript := filepath.Join(tmpDir, "crash-agent.sh")
 	scriptContent := "#!/bin/bash\nexit 1\n"
-	if err := os.WriteFile(mockScript, []byte(scriptContent), 0755); err != nil {
+	if err := os.WriteFile(mockScript, []byte(scriptContent), 0o755); err != nil {
 		t.Fatalf("Failed to create crash script: %v", err)
 	}
 	// Sync to ensure file is fully written before execution
@@ -312,7 +312,7 @@ func TestSendMessage_InvalidJSON(t *testing.T) {
 	// Create a mock process that returns invalid JSON
 	mockScript := filepath.Join(tmpDir, "invalid-json-agent.sh")
 	scriptContent := "#!/bin/bash\nwhile read line; do\n  echo 'not valid json'\ndone\n"
-	if err := os.WriteFile(mockScript, []byte(scriptContent), 0755); err != nil {
+	if err := os.WriteFile(mockScript, []byte(scriptContent), 0o755); err != nil {
 		t.Fatalf("Failed to create invalid-json script: %v", err)
 	}
 	// Sync to ensure file is fully written before execution

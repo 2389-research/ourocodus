@@ -139,7 +139,7 @@ func (m *Manager) SpawnAgent(ctx context.Context, sessionID, role, workspace str
 	m.logger.Printf("Spawning agent: session=%s role=%s workspace=%s", sessionID, role, workspace)
 
 	// Create workspace directory if needed
-	if err := os.MkdirAll(workspace, 0755); err != nil {
+	if err := os.MkdirAll(workspace, 0o750); err != nil {
 		return fmt.Errorf("failed to create workspace directory: %w", err)
 	}
 

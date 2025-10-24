@@ -136,7 +136,6 @@ func TestCreateUserSession_EmptySession(t *testing.T) {
 
 	// Create empty user session
 	session, err := manager.CreateUserSession(ctx, ws)
-
 	// Assertions
 	if err != nil {
 		t.Fatalf("Expected no error, got: %v", err)
