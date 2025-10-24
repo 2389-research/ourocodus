@@ -3,6 +3,8 @@ package session
 import (
 	"context"
 	"fmt"
+	"os"
+	"sync"
 	"time"
 )
 
@@ -17,11 +19,10 @@ type Clock interface {
 }
 
 // Cleaner abstracts cleanup operations for session termination
-// Allows pluggable strategies (no-op for Phase 1, real cleanup later)
 type Cleaner interface {
-	// Cleanup performs idempotent cleanup of session resources
+	// Cleanup performs idempotent cleanup of user session resources
 	// Called during session termination
-	Cleanup(ctx context.Context, session *Session) error
+	Cleanup(ctx context.Context, session *UserSession) error
 }
 
 // Logger abstracts logging operations
@@ -29,27 +30,23 @@ type Logger interface {
 	Printf(format string, v ...interface{})
 }
 
-// Manager coordinates session lifecycle with dependency injection
-// Composes Store + StateMachine + Cleaner for testable orchestration
+// Manager coordinates user session and agent lifecycle with dependency injection
+// Composes Store + ClientFactory + Cleaner for testable orchestration
 type Manager struct {
-	store   Store
-	idGen   IDGenerator
-	clock   Clock
-	cleaner Cleaner
-	logger  Logger
+	store         Store
+	idGen         IDGenerator
+	clock         Clock
+	cleaner       Cleaner
+	logger        Logger
+	clientFactory ClientFactory
 }
 
 // NewManager creates a session manager with injected dependencies.
 //
 // All dependencies are required and must be non-nil. This constructor panics on
-// nil collaborators (instead of returning errors) because:
-//  1. Missing dependencies indicate programmer configuration bugs, not runtime failures.
-//  2. Fail-fast initialization catches problems before serving traffic.
-//  3. Callers use dependency injection containers that guarantee dependencies exist.
-//
-// If future phases require graceful degradation, update the signature to return
-// (*Manager, error) and propagate validation through callers.
-func NewManager(store Store, idGen IDGenerator, clock Clock, cleaner Cleaner, logger Logger) *Manager {
+// nil collaborators because missing dependencies indicate programmer configuration
+// bugs, not runtime failures.
+func NewManager(store Store, idGen IDGenerator, clock Clock, cleaner Cleaner, logger Logger, clientFactory ClientFactory) *Manager {
 	if store == nil {
 		panic("store cannot be nil")
 	}
@@ -65,122 +62,276 @@ func NewManager(store Store, idGen IDGenerator, clock Clock, cleaner Cleaner, lo
 	if logger == nil {
 		panic("logger cannot be nil")
 	}
+	if clientFactory == nil {
+		panic("clientFactory cannot be nil")
+	}
 
 	return &Manager{
-		store:   store,
-		idGen:   idGen,
-		clock:   clock,
-		cleaner: cleaner,
-		logger:  logger,
+		store:         store,
+		idGen:         idGen,
+		clock:         clock,
+		cleaner:       cleaner,
+		logger:        logger,
+		clientFactory: clientFactory,
 	}
 }
 
-// Create creates a new session in CREATED state
-// Returns error if session for this agent role already exists
-func (m *Manager) Create(ctx context.Context, agentID string, ws WebSocketConn) (*Session, error) {
-	// Validate inputs
-	if agentID == "" {
-		return nil, fmt.Errorf("agentID cannot be empty")
-	}
+// CreateUserSession creates a new user session in ACTIVE state with no agents
+// Session starts empty - agents are spawned separately via SpawnAgent
+func (m *Manager) CreateUserSession(ctx context.Context, ws WebSocketConn) (*UserSession, error) {
+	// Validate input
 	if ws == nil {
 		return nil, fmt.Errorf("websocket connection cannot be nil")
-	}
-
-	// Check if session already exists for this role
-	if existing := m.store.GetByRole(agentID); existing != nil {
-		return nil, fmt.Errorf("session already exists for agent %s (session_id=%s)",
-			agentID, existing.GetID())
 	}
 
 	// Generate unique ID and create session
 	sessionID := m.idGen.Generate()
 	now := m.clock.Now()
-	session := NewSession(sessionID, agentID, now)
-
-	// Create handle with WebSocket connection
-	handle := &Handle{
-		WebSocket: ws,
-	}
-
-	// Attach handle to session
-	session.mu.Lock()
-	session.setHandle(handle)
-	session.mu.Unlock()
+	session := NewUserSession(sessionID, ws, now)
 
 	// Store session
 	if err := m.store.Create(session); err != nil {
 		return nil, fmt.Errorf("failed to store session: %w", err)
 	}
 
-	m.logger.Printf("Session created: id=%s agent=%s", sessionID, agentID)
+	m.logger.Printf("User session created: id=%s state=ACTIVE agents=0", sessionID)
 	return session, nil
 }
 
-// Get retrieves a session by ID
-func (m *Manager) Get(id string) *Session {
+// Get retrieves a user session by ID
+func (m *Manager) Get(id string) *UserSession {
 	return m.store.Get(id)
 }
 
-// GetByRole retrieves a session by agent role
-func (m *Manager) GetByRole(agentID string) *Session {
-	return m.store.GetByRole(agentID)
-}
-
-// List returns all sessions matching the filter
-func (m *Manager) List(filter *SessionFilter) []*Session {
+// List returns all user sessions matching the filter
+func (m *Manager) List(filter *SessionFilter) []*UserSession {
 	return m.store.List(filter)
 }
 
-// BeginSpawn transitions session from CREATED to SPAWNING
-// Caller is responsible for actually spawning the ACP process
-func (m *Manager) BeginSpawn(ctx context.Context, sessionID string) error {
-	session := m.store.Get(sessionID)
-	if session == nil {
-		return fmt.Errorf("session not found: %s", sessionID)
-	}
-
-	return m.transition(session, EventSpawn, "begin spawn")
-}
-
-// AttachAgent attaches ACP client and transitions to ACTIVE
-// Called after ACP process successfully spawned
-func (m *Manager) AttachAgent(ctx context.Context, sessionID, worktreeDir string, acpClient ACPClient) error {
-	session := m.store.Get(sessionID)
-	if session == nil {
-		return fmt.Errorf("session not found: %s", sessionID)
-	}
-
+// SpawnAgent spawns ONE agent into an existing user session
+// Creates workspace directory if needed, spawns ACP client, adds to session
+// Returns error if spawn fails, but user session stays ACTIVE
+func (m *Manager) SpawnAgent(ctx context.Context, sessionID, role, workspace string) error {
 	// Validate inputs
-	if worktreeDir == "" {
-		return fmt.Errorf("worktreeDir cannot be empty")
+	if role == "" {
+		return fmt.Errorf("role cannot be empty")
 	}
-	if acpClient == nil {
-		return fmt.Errorf("acpClient cannot be nil")
+	if workspace == "" {
+		return fmt.Errorf("workspace cannot be empty")
 	}
 
-	// Update session with ACP client and worktree
-	session.mu.Lock()
-	handle := session.handle
-	if handle == nil {
-		session.mu.Unlock()
-		return fmt.Errorf("session has no handle")
+	// Get user session
+	session := m.store.Get(sessionID)
+	if session == nil {
+		return fmt.Errorf("session not found: %s", sessionID)
 	}
-	handle.ACPClient = acpClient
-	session.setWorktreeDir(worktreeDir)
-	session.setLastActive(m.clock.Now())
+
+	// Check if session is active
+	if session.GetState() != StateActive {
+		return fmt.Errorf("session %s is not active (state=%s)", sessionID, session.GetState())
+	}
+
+	// Check if agent already exists
+	if session.GetAgent(role) != nil {
+		return fmt.Errorf("agent %s already exists in session %s", role, sessionID)
+	}
+
+	m.logger.Printf("Spawning agent: session=%s role=%s workspace=%s", sessionID, role, workspace)
+
+	// Create workspace directory if needed
+	if err := os.MkdirAll(workspace, 0755); err != nil {
+		return fmt.Errorf("failed to create workspace directory: %w", err)
+	}
+
+	// Create agent session in SPAWNING state
+	now := m.clock.Now()
+	agent := NewAgentSession(role, workspace, now)
+
+	// Add agent to session (in SPAWNING state)
+	session.mu.Lock()
+	session.addAgent(agent)
+	session.setLastActive(now)
 	session.mu.Unlock()
 
-	// Transition to ACTIVE
-	if err := m.transition(session, EventActivate, "attach agent"); err != nil {
-		return err
+	// Spawn ACP client
+	acpClient, err := m.clientFactory.NewClient(workspace)
+	if err != nil {
+		// Mark agent as FAILED
+		agent.mu.Lock()
+		agent.setAgentState(AgentFailed)
+		agent.setError(err.Error())
+		agent.mu.Unlock()
+
+		m.logger.Printf("Agent spawn failed: session=%s role=%s error=%v", sessionID, role, err)
+		return fmt.Errorf("failed to spawn ACP client: %w", err)
 	}
 
-	m.logger.Printf("Agent attached: session=%s worktree=%s", sessionID, worktreeDir)
+	// Transition agent to ACTIVE
+	agent.mu.Lock()
+	agent.setACPClient(acpClient)
+	agent.setAgentState(AgentActive)
+	agent.setAgentLastActive(m.clock.Now())
+	agent.mu.Unlock()
+
+	m.logger.Printf("Agent spawned: session=%s role=%s state=ACTIVE", sessionID, role)
 	return nil
 }
 
-// RecordHeartbeat updates the last activity timestamp
-// Used to track session liveness
+// GetAgent returns the agent session for a given role within a user session
+func (m *Manager) GetAgent(sessionID, role string) (*AgentSession, error) {
+	session := m.store.Get(sessionID)
+	if session == nil {
+		return nil, fmt.Errorf("session not found: %s", sessionID)
+	}
+
+	agent := session.GetAgent(role)
+	if agent == nil {
+		return nil, fmt.Errorf("agent %s not found in session %s", role, sessionID)
+	}
+
+	return agent, nil
+}
+
+// ListAgents returns all agents in a user session
+func (m *Manager) ListAgents(sessionID string) (map[string]*AgentSession, error) {
+	session := m.store.Get(sessionID)
+	if session == nil {
+		return nil, fmt.Errorf("session not found: %s", sessionID)
+	}
+
+	return session.ListAgents(), nil
+}
+
+// TerminateAgent terminates ONE agent in a user session
+// User session stays ACTIVE, other agents unaffected
+func (m *Manager) TerminateAgent(ctx context.Context, sessionID, role string) error {
+	session := m.store.Get(sessionID)
+	if session == nil {
+		// Already cleaned up - idempotent
+		m.logger.Printf("Session not found during agent termination: %s (already cleaned?)", sessionID)
+		return nil
+	}
+
+	agent := session.GetAgent(role)
+	if agent == nil {
+		// Already removed - idempotent
+		m.logger.Printf("Agent not found during termination: session=%s role=%s (already terminated?)", sessionID, role)
+		return nil
+	}
+
+	m.logger.Printf("Terminating agent: session=%s role=%s", sessionID, role)
+
+	// Close ACP client if present
+	if acpClient := agent.GetACPClient(); acpClient != nil {
+		if err := acpClient.Close(); err != nil {
+			m.logger.Printf("Error closing ACP client: session=%s role=%s error=%v", sessionID, role, err)
+			// Continue with cleanup even if close fails
+		}
+	}
+
+	// Mark agent as terminated and remove from session
+	agent.mu.Lock()
+	agent.setAgentState(AgentTerminated)
+	agent.mu.Unlock()
+
+	session.mu.Lock()
+	session.removeAgent(role)
+	session.setLastActive(m.clock.Now())
+	session.mu.Unlock()
+
+	m.logger.Printf("Agent terminated: session=%s role=%s", sessionID, role)
+	return nil
+}
+
+// TerminateUserSession terminates ALL agents in parallel, then terminates the session
+// Idempotent - safe to call multiple times
+func (m *Manager) TerminateUserSession(ctx context.Context, sessionID string) error {
+	session := m.store.Get(sessionID)
+	if session == nil {
+		// Already cleaned up - idempotent
+		m.logger.Printf("Session not found during termination: %s (already cleaned?)", sessionID)
+		return nil
+	}
+
+	m.logger.Printf("Terminating user session: id=%s", sessionID)
+
+	// Get all agents
+	agents := session.ListAgents()
+
+	// Terminate all agents in parallel with timeout
+	if len(agents) > 0 {
+		m.logger.Printf("Terminating %d agents in parallel: session=%s", len(agents), sessionID)
+
+		var wg sync.WaitGroup
+		agentTimeout := 5 * time.Second
+
+		for role, agent := range agents {
+			wg.Add(1)
+			go func(r string, a *AgentSession) {
+				defer wg.Done()
+
+				// Create context with timeout for this agent
+				agentCtx, cancel := context.WithTimeout(ctx, agentTimeout)
+				defer cancel()
+
+				// Close ACP client
+				if acpClient := a.GetACPClient(); acpClient != nil {
+					done := make(chan error, 1)
+					go func() {
+						done <- acpClient.Close()
+					}()
+
+					select {
+					case err := <-done:
+						if err != nil {
+							m.logger.Printf("Error closing agent: session=%s role=%s error=%v", sessionID, r, err)
+						}
+					case <-agentCtx.Done():
+						m.logger.Printf("Agent close timeout: session=%s role=%s", sessionID, r)
+					}
+				}
+
+				// Mark agent as terminated
+				a.mu.Lock()
+				a.setAgentState(AgentTerminated)
+				a.mu.Unlock()
+			}(role, agent)
+		}
+
+		// Wait for all agents to terminate (with timeout)
+		done := make(chan struct{})
+		go func() {
+			wg.Wait()
+			close(done)
+		}()
+
+		select {
+		case <-done:
+			m.logger.Printf("All agents terminated: session=%s", sessionID)
+		case <-ctx.Done():
+			m.logger.Printf("Session termination timeout: session=%s", sessionID)
+		}
+	}
+
+	// Run cleanup hook
+	if err := m.cleaner.Cleanup(ctx, session); err != nil {
+		m.logger.Printf("Cleanup error for session %s: %v", sessionID, err)
+		// Continue with termination even if hook fails
+	}
+
+	// Mark session as terminated
+	session.mu.Lock()
+	session.setState(StateTerminated)
+	session.mu.Unlock()
+
+	// Remove from store
+	m.store.Delete(sessionID)
+
+	m.logger.Printf("User session terminated: id=%s", sessionID)
+	return nil
+}
+
+// RecordHeartbeat updates the last activity timestamp for a user session
 func (m *Manager) RecordHeartbeat(ctx context.Context, sessionID string) error {
 	session := m.store.Get(sessionID)
 	if session == nil {
@@ -194,95 +345,7 @@ func (m *Manager) RecordHeartbeat(ctx context.Context, sessionID string) error {
 	return nil
 }
 
-// IncrementMessageCount increments the message counter
-func (m *Manager) IncrementMessageCount(ctx context.Context, sessionID string) error {
-	session := m.store.Get(sessionID)
-	if session == nil {
-		return fmt.Errorf("session not found: %s", sessionID)
-	}
-
-	session.mu.Lock()
-	session.incrementMessageCount()
-	session.setLastActive(m.clock.Now())
-	session.mu.Unlock()
-
-	return nil
-}
-
-// MarkTerminating transitions session to TERMINATING state
-// Idempotent - safe to call multiple times
-func (m *Manager) MarkTerminating(ctx context.Context, sessionID string, reason string) error {
-	session := m.store.Get(sessionID)
-	if session == nil {
-		// Session already cleaned up - this is OK
-		m.logger.Printf("Session not found during termination: %s (already cleaned?)", sessionID)
-		return nil
-	}
-
-	m.logger.Printf("Terminating session: id=%s reason=%s", sessionID, reason)
-
-	// Transition to TERMINATING (idempotent)
-	if err := m.transition(session, EventTerminate, reason); err != nil {
-		// Log but don't fail - termination should be best-effort
-		m.logger.Printf("Transition error during termination: %v", err)
-	}
-
-	return nil
-}
-
-// CompleteCleanup performs cleanup and transitions to CLEANED state
-// Removes session from store after cleanup completes
-// Idempotent - safe to call multiple times
-func (m *Manager) CompleteCleanup(ctx context.Context, sessionID string) error {
-	session := m.store.Get(sessionID)
-	if session == nil {
-		// Already cleaned up
-		return nil
-	}
-
-	// Run cleanup hook
-	if err := m.cleaner.Cleanup(ctx, session); err != nil {
-		m.logger.Printf("Cleanup error for session %s: %v", sessionID, err)
-		// Continue with cleanup even if hook fails
-	}
-
-	// Transition to CLEANED
-	if err := m.transition(session, EventClean, "cleanup complete"); err != nil {
-		m.logger.Printf("Transition error during cleanup: %v", err)
-		return fmt.Errorf("failed to transition to CLEANED state: %w", err)
-	}
-
-	// Remove from store only after successful transition
-	m.store.Delete(sessionID)
-
-	m.logger.Printf("Session cleaned: id=%s", sessionID)
-	return nil
-}
-
-// transition performs a state transition using the pure state machine
-// Coordinates mutex access with state machine logic
-func (m *Manager) transition(session *Session, event Event, reason string) error {
-	session.mu.Lock()
-	defer session.mu.Unlock()
-
-	currentState := session.state
-
-	// Compute next state using pure state machine
-	nextState, err := NextState(currentState, event)
-	if err != nil {
-		return fmt.Errorf("transition failed: %w", err)
-	}
-
-	// Apply state change
-	session.setState(nextState)
-
-	m.logger.Printf("Session transition: id=%s %s → %s (event=%s reason=%s)",
-		session.ID, currentState, nextState, event, reason)
-
-	return nil
-}
-
-// Count returns total number of sessions
+// Count returns total number of user sessions
 func (m *Manager) Count() int {
 	return m.store.Count()
 }

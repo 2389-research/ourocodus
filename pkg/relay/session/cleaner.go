@@ -16,8 +16,8 @@ func NewNoOpCleaner() *NoOpCleaner {
 // Cleanup does nothing (no-op implementation)
 // Always returns nil to indicate success
 // Idempotent - safe to call multiple times
-func (c *NoOpCleaner) Cleanup(ctx context.Context, session *Session) error {
+func (c *NoOpCleaner) Cleanup(ctx context.Context, session *UserSession) error {
 	// Phase 1: No cleanup operations needed
-	// Future: Close WebSocket, terminate ACP process, remove worktree
+	// Future: Close WebSocket, terminate all ACP processes
 	return nil
 }

@@ -51,7 +51,7 @@ func (a *SessionLoggerAdapter) Printf(format string, v ...interface{}) {
 
 // NewSessionManager creates a session.Manager using relay dependencies
 // Example of how to wire session management into the relay server
-func NewSessionManager(logger Logger, clock Clock, idGen IDGenerator) *session.Manager {
+func NewSessionManager(logger Logger, clock Clock, idGen IDGenerator) (*session.Manager, error) {
 	store := session.NewMemoryStore()
 
 	// Adapt relay dependencies to session interfaces
@@ -60,8 +60,13 @@ func NewSessionManager(logger Logger, clock Clock, idGen IDGenerator) *session.M
 	sessionLogger := &SessionLoggerAdapter{logger: logger}
 
 	// Use no-op cleaner for Phase 1
-	// Issue #7 will provide real cleanup implementation
 	cleaner := session.NewNoOpCleaner()
 
-	return session.NewManager(store, sessionIDGen, sessionClock, cleaner, sessionLogger)
+	// Create ACP client factory (reads ANTHROPIC_API_KEY from environment)
+	clientFactory, err := session.NewACPClientFactory()
+	if err != nil {
+		return nil, err
+	}
+
+	return session.NewManager(store, sessionIDGen, sessionClock, cleaner, sessionLogger, clientFactory), nil
 }

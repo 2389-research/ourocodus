@@ -5,70 +5,95 @@ import (
 	"time"
 )
 
-// SessionState represents the lifecycle state of a session
-type SessionState string
+// UserSessionState represents the lifecycle state of a user session (container)
+type UserSessionState string
 
 const (
-	// StateCreated indicates session ID generated, WebSocket established
-	StateCreated SessionState = "CREATED"
+	// StateActive indicates user session is active (can have 0-N agents)
+	StateActive UserSessionState = "ACTIVE"
 
-	// StateSpawning indicates git worktree being created, ACP process being spawned
-	StateSpawning SessionState = "SPAWNING"
-
-	// StateActive indicates ACP process running, accepting messages
-	StateActive SessionState = "ACTIVE"
-
-	// StateTerminating indicates cleanup in progress, resources being freed
-	StateTerminating SessionState = "TERMINATING"
-
-	// StateCleaned indicates session removed, no further operations possible
-	StateCleaned SessionState = "CLEANED"
+	// StateTerminated indicates user session and all agents have been terminated
+	StateTerminated UserSessionState = "TERMINATED"
 )
 
-// String returns the string representation of SessionState
-func (s SessionState) String() string {
+// String returns the string representation of UserSessionState
+func (s UserSessionState) String() string {
 	return string(s)
 }
 
-// IsValid returns true if the state is a recognized SessionState
-func (s SessionState) IsValid() bool {
+// IsValid returns true if the state is a recognized UserSessionState
+func (s UserSessionState) IsValid() bool {
 	switch s {
-	case StateCreated, StateSpawning, StateActive, StateTerminating, StateCleaned:
+	case StateActive, StateTerminated:
 		return true
 	default:
 		return false
 	}
 }
 
-// Session represents a user conversation with one AI agent
+// AgentState represents the lifecycle state of an individual agent session
+type AgentState string
+
+const (
+	// AgentSpawning indicates ACP process is being spawned
+	AgentSpawning AgentState = "SPAWNING"
+
+	// AgentActive indicates ACP process is running and accepting messages
+	AgentActive AgentState = "ACTIVE"
+
+	// AgentFailed indicates ACP process spawn or operation failed
+	AgentFailed AgentState = "FAILED"
+
+	// AgentTerminated indicates ACP process has been terminated
+	AgentTerminated AgentState = "TERMINATED"
+)
+
+// String returns the string representation of AgentState
+func (a AgentState) String() string {
+	return string(a)
+}
+
+// IsValid returns true if the state is a recognized AgentState
+func (a AgentState) IsValid() bool {
+	switch a {
+	case AgentSpawning, AgentActive, AgentFailed, AgentTerminated:
+		return true
+	default:
+		return false
+	}
+}
+
+// AgentSession represents ONE claude-code-acp process within a user session
 // Immutable after creation except for state transitions through Manager
-type Session struct {
+type AgentSession struct {
 	// Immutable fields (set at creation)
-	ID      string // UUID v4
-	AgentID string // Role: "auth", "db", "tests"
+	Role      string // "auth", "db", "tests", etc.
+	Workspace string // Path to agent workspace directory
 
 	// Mutable fields (protected by mu)
-	state        SessionState
-	worktreeDir  string
-	handle       *Handle
-	createdAt    time.Time
-	lastActive   time.Time
-	messageCount int
+	state      AgentState
+	acpClient  ACPClient
+	createdAt  time.Time
+	lastActive time.Time
+	errorMsg   string // Error message if state is FAILED
 
 	mu sync.RWMutex
 }
 
-// Handle encapsulates runtime resources associated with a session
-// Separates connection/process management from session metadata
-type Handle struct {
-	// WebSocket connection to PWA client
-	WebSocket WebSocketConn
+// UserSession represents a user's workspace container (0-N agents)
+// Immutable after creation except for state transitions through Manager
+type UserSession struct {
+	// Immutable fields (set at creation)
+	ID string // UUID v4
 
-	// ACP client wrapper (set during SPAWNING → ACTIVE transition)
-	ACPClient ACPClient
+	// Mutable fields (protected by mu)
+	state      UserSessionState
+	webSocket  WebSocketConn
+	agents     map[string]*AgentSession // role → agent instance
+	createdAt  time.Time
+	lastActive time.Time
 
-	// Context cancel function for graceful shutdown
-	CancelFunc func()
+	mu sync.RWMutex
 }
 
 // WebSocketConn abstracts WebSocket operations
@@ -80,99 +105,178 @@ type WebSocketConn interface {
 }
 
 // ACPClient abstracts ACP process operations
-// Will be implemented by pkg/acp.Client
+// Implemented by pkg/acp.Client
+// Note: AgentMessage type is defined in pkg/acp
 type ACPClient interface {
-	SendMessage(content string) error
+	SendMessage(content string) (interface{}, error) // Returns *acp.AgentMessage
 	Close() error
 }
 
-// NewSession creates a new session in CREATED state
+// ClientFactory abstracts ACP client creation for testing
+type ClientFactory interface {
+	NewClient(workspace string) (ACPClient, error)
+}
+
+// NewUserSession creates a new user session in ACTIVE state
 // Pure function - no side effects, no I/O
-func NewSession(id, agentID string, createdAt time.Time) *Session {
-	return &Session{
+// Session starts empty with no agents
+func NewUserSession(id string, ws WebSocketConn, createdAt time.Time) *UserSession {
+	return &UserSession{
 		ID:         id,
-		AgentID:    agentID,
-		state:      StateCreated,
+		webSocket:  ws,
+		agents:     make(map[string]*AgentSession),
+		state:      StateActive,
 		createdAt:  createdAt,
 		lastActive: createdAt,
 	}
 }
 
-// --- Read-only accessors (thread-safe) ---
-
-// GetID returns the session ID (immutable, no lock needed)
-func (s *Session) GetID() string {
-	return s.ID
+// NewAgentSession creates a new agent session in SPAWNING state
+// Pure function - no side effects, no I/O
+func NewAgentSession(role, workspace string, createdAt time.Time) *AgentSession {
+	return &AgentSession{
+		Role:       role,
+		Workspace:  workspace,
+		state:      AgentSpawning,
+		createdAt:  createdAt,
+		lastActive: createdAt,
+	}
 }
 
-// GetAgentID returns the agent role (immutable, no lock needed)
-func (s *Session) GetAgentID() string {
-	return s.AgentID
+// --- UserSession accessors (thread-safe) ---
+
+// GetID returns the user session ID (immutable, no lock needed)
+func (u *UserSession) GetID() string {
+	return u.ID
 }
 
-// GetState returns the current session state
-func (s *Session) GetState() SessionState {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.state
+// GetState returns the current user session state
+func (u *UserSession) GetState() UserSessionState {
+	u.mu.RLock()
+	defer u.mu.RUnlock()
+	return u.state
 }
 
-// GetWorktreeDir returns the git worktree directory path
-func (s *Session) GetWorktreeDir() string {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.worktreeDir
+// GetWebSocket returns the WebSocket connection
+func (u *UserSession) GetWebSocket() WebSocketConn {
+	u.mu.RLock()
+	defer u.mu.RUnlock()
+	return u.webSocket
+}
+
+// GetAgent returns the agent session for the given role (may be nil)
+func (u *UserSession) GetAgent(role string) *AgentSession {
+	u.mu.RLock()
+	defer u.mu.RUnlock()
+	return u.agents[role]
+}
+
+// ListAgents returns a copy of the agents map
+func (u *UserSession) ListAgents() map[string]*AgentSession {
+	u.mu.RLock()
+	defer u.mu.RUnlock()
+	agents := make(map[string]*AgentSession, len(u.agents))
+	for k, v := range u.agents {
+		agents[k] = v
+	}
+	return agents
 }
 
 // GetCreatedAt returns the session creation timestamp (immutable, no lock needed)
-func (s *Session) GetCreatedAt() time.Time {
-	return s.createdAt
+func (u *UserSession) GetCreatedAt() time.Time {
+	return u.createdAt
 }
 
 // GetLastActive returns the last activity timestamp
-func (s *Session) GetLastActive() time.Time {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.lastActive
+func (u *UserSession) GetLastActive() time.Time {
+	u.mu.RLock()
+	defer u.mu.RUnlock()
+	return u.lastActive
 }
 
-// GetMessageCount returns the total messages sent to agent
-func (s *Session) GetMessageCount() int {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.messageCount
+// --- AgentSession accessors (thread-safe) ---
+
+// GetRole returns the agent role (immutable, no lock needed)
+func (a *AgentSession) GetRole() string {
+	return a.Role
 }
 
-// GetHandle returns the session handle (may be nil if not attached)
-func (s *Session) GetHandle() *Handle {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.handle
+// GetWorkspace returns the agent workspace path (immutable, no lock needed)
+func (a *AgentSession) GetWorkspace() string {
+	return a.Workspace
+}
+
+// GetState returns the current agent state
+func (a *AgentSession) GetState() AgentState {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.state
+}
+
+// GetACPClient returns the ACP client (may be nil if not spawned)
+func (a *AgentSession) GetACPClient() ACPClient {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.acpClient
+}
+
+// GetError returns the error message if state is FAILED
+func (a *AgentSession) GetError() string {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.errorMsg
+}
+
+// GetCreatedAt returns the agent creation timestamp (immutable, no lock needed)
+func (a *AgentSession) GetCreatedAt() time.Time {
+	return a.createdAt
+}
+
+// GetLastActive returns the last activity timestamp
+func (a *AgentSession) GetLastActive() time.Time {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.lastActive
 }
 
 // --- Package-private mutators (called only by Manager) ---
 
-// setState updates the session state (must hold lock)
-func (s *Session) setState(state SessionState) {
-	s.state = state
+// setState updates the user session state (must hold lock)
+func (u *UserSession) setState(state UserSessionState) {
+	u.state = state
 }
 
-// setWorktreeDir updates the worktree directory path (must hold lock)
-func (s *Session) setWorktreeDir(dir string) {
-	s.worktreeDir = dir
+// addAgent adds an agent to the session (must hold lock)
+func (u *UserSession) addAgent(agent *AgentSession) {
+	u.agents[agent.Role] = agent
 }
 
-// setHandle updates the session handle (must hold lock)
-func (s *Session) setHandle(h *Handle) {
-	s.handle = h
+// removeAgent removes an agent from the session (must hold lock)
+func (u *UserSession) removeAgent(role string) {
+	delete(u.agents, role)
 }
 
 // setLastActive updates the last activity timestamp (must hold lock)
-func (s *Session) setLastActive(t time.Time) {
-	s.lastActive = t
+func (u *UserSession) setLastActive(t time.Time) {
+	u.lastActive = t
 }
 
-// incrementMessageCount increases message counter (must hold lock)
-func (s *Session) incrementMessageCount() {
-	s.messageCount++
+// setAgentState updates the agent state (must hold lock)
+func (a *AgentSession) setAgentState(state AgentState) {
+	a.state = state
+}
+
+// setACPClient updates the ACP client (must hold lock)
+func (a *AgentSession) setACPClient(client ACPClient) {
+	a.acpClient = client
+}
+
+// setError updates the error message (must hold lock)
+func (a *AgentSession) setError(err string) {
+	a.errorMsg = err
+}
+
+// setAgentLastActive updates the last activity timestamp (must hold lock)
+func (a *AgentSession) setAgentLastActive(t time.Time) {
+	a.lastActive = t
 }

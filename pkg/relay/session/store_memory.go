@@ -5,27 +5,22 @@ import (
 	"sync"
 )
 
-// Store defines the interface for session storage
+// Store defines the interface for user session storage
 // Implementations can be in-memory (Phase 1) or persistent (future phases)
 type Store interface {
-	// Create adds a new session to storage
+	// Create adds a new user session to storage
 	// Returns error if session with same ID already exists
-	Create(session *Session) error
+	Create(session *UserSession) error
 
-	// Get retrieves a session by ID
+	// Get retrieves a user session by ID
 	// Returns nil if not found
-	Get(id string) *Session
+	Get(id string) *UserSession
 
-	// GetByRole retrieves a session by agent role
-	// Returns nil if no session found for that role
-	// Phase 1: only one session per role allowed
-	GetByRole(agentID string) *Session
-
-	// List returns all sessions, optionally filtered by state
+	// List returns all user sessions, optionally filtered by state
 	// Pass nil filter to get all sessions
-	List(filter *SessionFilter) []*Session
+	List(filter *SessionFilter) []*UserSession
 
-	// Delete removes a session from storage
+	// Delete removes a user session from storage
 	// Idempotent - no error if session doesn't exist
 	Delete(id string)
 
@@ -33,30 +28,27 @@ type Store interface {
 	Count() int
 }
 
-// SessionFilter defines criteria for filtering sessions
+// SessionFilter defines criteria for filtering user sessions
 type SessionFilter struct {
-	State   *SessionState // Filter by state (nil = no filter)
-	AgentID *string       // Filter by agent role (nil = no filter)
+	State *UserSessionState // Filter by state (nil = no filter)
 }
 
 // MemoryStore implements Store interface with in-memory storage
 // Thread-safe using sync.RWMutex
 type MemoryStore struct {
-	sessions map[string]*Session // session_id → session
-	byRole   map[string]*Session // agent_role → session
+	sessions map[string]*UserSession // session_id → session
 	mu       sync.RWMutex
 }
 
 // NewMemoryStore creates a new in-memory session store
 func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{
-		sessions: make(map[string]*Session),
-		byRole:   make(map[string]*Session),
+		sessions: make(map[string]*UserSession),
 	}
 }
 
-// Create adds a new session to storage
-func (m *MemoryStore) Create(session *Session) error {
+// Create adds a new user session to storage
+func (m *MemoryStore) Create(session *UserSession) error {
 	if session == nil {
 		return fmt.Errorf("session cannot be nil")
 	}
@@ -69,41 +61,26 @@ func (m *MemoryStore) Create(session *Session) error {
 		return fmt.Errorf("session with ID %s already exists", session.ID)
 	}
 
-	// Check for duplicate agent role
-	if existing, hasRole := m.byRole[session.AgentID]; hasRole {
-		return fmt.Errorf("session for agent %s already exists (session_id=%s)",
-			session.AgentID, existing.ID)
-	}
-
-	// Store in both maps
+	// Store session
 	m.sessions[session.ID] = session
-	m.byRole[session.AgentID] = session
 
 	return nil
 }
 
-// Get retrieves a session by ID
-func (m *MemoryStore) Get(id string) *Session {
+// Get retrieves a user session by ID
+func (m *MemoryStore) Get(id string) *UserSession {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
 	return m.sessions[id]
 }
 
-// GetByRole retrieves a session by agent role
-func (m *MemoryStore) GetByRole(agentID string) *Session {
+// List returns all user sessions matching the filter
+func (m *MemoryStore) List(filter *SessionFilter) []*UserSession {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	return m.byRole[agentID]
-}
-
-// List returns all sessions matching the filter
-func (m *MemoryStore) List(filter *SessionFilter) []*Session {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	var result []*Session
+	var result []*UserSession
 
 	for _, session := range m.sessions {
 		if m.matchesFilter(session, filter) {
@@ -116,7 +93,7 @@ func (m *MemoryStore) List(filter *SessionFilter) []*Session {
 
 // matchesFilter checks if session matches filter criteria
 // Pure function - no locks needed (caller holds lock)
-func (m *MemoryStore) matchesFilter(session *Session, filter *SessionFilter) bool {
+func (m *MemoryStore) matchesFilter(session *UserSession, filter *SessionFilter) bool {
 	if filter == nil {
 		return true
 	}
@@ -129,30 +106,16 @@ func (m *MemoryStore) matchesFilter(session *Session, filter *SessionFilter) boo
 		}
 	}
 
-	// Filter by agent ID
-	if filter.AgentID != nil {
-		if session.AgentID != *filter.AgentID {
-			return false
-		}
-	}
-
 	return true
 }
 
-// Delete removes a session from storage
+// Delete removes a user session from storage
 func (m *MemoryStore) Delete(id string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// Get session before deleting to clean up byRole index
-	session, exists := m.sessions[id]
-	if !exists {
-		return // Idempotent - already deleted
-	}
-
-	// Remove from both maps
+	// Idempotent - no error if already deleted
 	delete(m.sessions, id)
-	delete(m.byRole, session.AgentID)
 }
 
 // Count returns total number of stored sessions
