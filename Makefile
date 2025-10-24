@@ -1,4 +1,4 @@
-.PHONY: build test run stop clean lint fmt check pre-commit
+.PHONY: build test smoke-test-session smoke-test run stop clean lint fmt check pre-commit
 
 # Build all binaries
 build:
@@ -13,6 +13,15 @@ build:
 test:
 	@echo "Running tests..."
 	go test ./...
+
+# Run session management smoke tests
+smoke-test-session:
+	@echo "Running session management smoke tests..."
+	go run ./scripts/session-smoketest/main.go -verbose
+
+# Run all smoke tests
+smoke-test: smoke-test-session
+	@echo "All smoke tests passed!"
 
 # Start the system (placeholder for now)
 run:
