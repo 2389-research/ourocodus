@@ -8,6 +8,15 @@
 - `pkg/relay/message.go` — Message validation paths are exercised.
 - `pkg/acp/client.go` — Core client lifecycle, request/response handling, and logger integration covered with mocks.
 
+### Smoke Testing
+
+- `scripts/smoke-test.sh` — Launches the relay, drives a WebSocket session, and verifies:
+  1. Handshake payload is returned.
+  2. Echo responses include timestamps.
+  3. Recoverable validation errors stay connected.
+  4. Non-recoverable errors close the connection.
+  5. Bonus chaos: 100 fuzzed payloads exercise echo/validation paths.
+
 ## Integration Test Gaps (Future Work)
 
 **Gap 1: WebSocket Server Integration**
