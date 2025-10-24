@@ -29,9 +29,6 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-go-
 
-      - name: Install smoke test dependencies
-        run: go install github.com/gorilla/websocket@latest github.com/google/gofuzz@latest
-
       - name: Build relay binary
         run: make build
 
