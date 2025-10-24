@@ -36,4 +36,4 @@ jobs:
         run: make build
 
       - name: Run relay smoke test
-        run: ./scripts/smoke-test.sh
+        run: ./scripts/smoke-test.sh --fuzz 100000
