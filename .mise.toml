@@ -36,3 +36,15 @@ run = [
   "go mod tidy",
   "make build"
 ]
+
+[tasks.build]
+description = "Build relay/cli binaries via Makefile"
+run = "make build"
+
+[tasks.test]
+description = "Run the full Go test suite"
+run = "go test ./..."
+
+[tasks.smoke]
+description = "Run the relay smoke test harness"
+run = "./scripts/smoke-test.sh"

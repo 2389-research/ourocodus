@@ -61,7 +61,23 @@ PWA (Browser) ←WebSocket→ Relay (Go) ←stdio→ 3x Claude Code ACP processe
 
 ### Build System
 
-The project uses a Makefile for building and managing the system:
+The project uses a Makefile for building and managing the system. Common commands are also encapsulated as [mise](https://mise.jdx.dev/) tasks so you can run them without remembering individual binaries. For example:
+
+```bash
+# Build binaries via Makefile
+mise run build
+
+# Run all Go tests
+mise run test
+
+# Execute the relay smoke test harness
+mise run smoke
+
+# Full validation suite
+mise run pre-commit
+```
+
+Under the hood these call the following Make targets/scripts:
 
 ```bash
 # Build all components
