@@ -15,15 +15,22 @@ warn() { printf "%s%s%s %s\n" "${YELLOW}" "$1" "${RESET}" "$2"; }
 die()  { printf "%s%s%s %s\n" "${RED}" "$1" "${RESET}" "$2"; exit 1; }
 yay()  { printf "%s%s%s %s\n" "${GREEN}" "$1" "${RESET}" "$2"; }
 
+# Detect if mise is available
+if command -v mise &> /dev/null; then
+  MISE_EXEC="mise exec --"
+else
+  MISE_EXEC=""
+fi
+
 say "🧪" "Initiating smoke test. Because trust, apparently, must be earned."
 
 if [[ ! -x "${REPO_ROOT}/bin/relay" ]]; then
   warn "🔧" "Relay binary missing. Fine. Building it for you…"
-  (cd "${REPO_ROOT}" && mise exec -- make build) || die "💥" "Build exploded. Fix that then come back."
+  (cd "${REPO_ROOT}" && ${MISE_EXEC} make build) || die "💥" "Build exploded. Fix that then come back."
 fi
 
 say "🚀" "Launching the dramatic production known as 'relay smoke test'."
-if mise exec -- go run ./scripts/smoketest "$@"; then
+if ${MISE_EXEC} go run ./scripts/smoketest "$@"; then
   yay "🎉" "Relay is alive, responsive, and only mildly sarcastic."
 else
   die "😵" "Smoke test reported doom. Scroll up for the gory details."
