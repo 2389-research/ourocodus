@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"time"
 
 	"github.com/2389-research/ourocodus/pkg/acp"
 	"github.com/2389-research/ourocodus/pkg/relay/session"
@@ -19,6 +18,7 @@ type Server struct {
 	serverID       string
 	logger         Logger
 	clock          Clock
+	sessionClock   *SessionClockAdapter // Adapts relay.Clock to time.Time for internal use
 	upgrader       Upgrader
 	sessionManager *session.Manager
 }
@@ -29,6 +29,7 @@ func NewServer(idGen IDGenerator, logger Logger, clock Clock, upgrader Upgrader,
 		serverID:       idGen.Generate(),
 		logger:         logger,
 		clock:          clock,
+		sessionClock:   &SessionClockAdapter{clock: clock},
 		upgrader:       upgrader,
 		sessionManager: sessionManager,
 	}
@@ -400,9 +401,8 @@ func (s *Server) handleAgentMessage(ctx context.Context, conn WebSocketConn, raw
 	responseStr := agentMsg.Content
 
 	// Store both messages in history after successful ACP response
-	// Note: Using time.Now() directly because relay.Clock returns string for protocol messages,
-	// but session layer expects time.Time for internal tracking
-	now := time.Now()
+	// Use sessionClock adapter to get time.Time from injected clock
+	now := s.sessionClock.Now()
 	agent.AddMessage("user", msg.Content, now)
 	agent.AddMessage("agent", responseStr, now)
 
