@@ -49,6 +49,9 @@ logs/
 # Agent worktrees
 agent/
 
+# Development worktrees
+.worktrees/
+
 # Node modules (for PWA tooling)
 node_modules/
 

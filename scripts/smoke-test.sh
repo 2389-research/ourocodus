@@ -22,16 +22,94 @@ else
   MISE_EXEC=""
 fi
 
-say "🧪" "Initiating smoke test. Because trust, apparently, must be earned."
+usage() {
+  cat <<EOF
+Usage: $0 [TEST_TYPE] [OPTIONS]
 
-if [[ ! -x "${REPO_ROOT}/bin/relay" ]]; then
-  warn "🔧" "Relay binary missing. Fine. Building it for you…"
-  (cd "${REPO_ROOT}" && ${MISE_EXEC} make build) || die "💥" "Build exploded. Fix that then come back."
+TEST_TYPE:
+  relay      Run WebSocket relay integration tests (requires relay binary)
+  session    Run session management layer tests (unit tests)
+  all        Run all smoke tests (default)
+
+OPTIONS:
+  -v, --verbose   Enable verbose output
+
+Examples:
+  $0 relay              # Run relay tests only
+  $0 session            # Run session tests only
+  $0 all                # Run all tests
+  $0 relay --verbose    # Run relay tests with verbose output
+EOF
+  exit 0
+}
+
+run_relay_test() {
+  local verbose_flag=""
+  [[ "$VERBOSE" == "true" ]] && verbose_flag="-verbose"
+
+  say "🚀" "Running WebSocket relay integration test..."
+
+  if [[ ! -x "${REPO_ROOT}/bin/relay" ]]; then
+    warn "🔧" "Relay binary missing. Building it..."
+    (cd "${REPO_ROOT}" && ${MISE_EXEC} make build) || die "💥" "Build failed"
+  fi
+
+  if ${MISE_EXEC} go run "${REPO_ROOT}/scripts/smoketest/relay" $verbose_flag; then
+    yay "✅" "Relay integration test passed"
+    return 0
+  else
+    die "❌" "Relay integration test failed"
+  fi
+}
+
+run_session_test() {
+  local verbose_flag=""
+  [[ "$VERBOSE" == "true" ]] && verbose_flag="-verbose"
+
+  say "🧪" "Running session management layer test..."
+
+  if ${MISE_EXEC} go run "${REPO_ROOT}/scripts/smoketest/session" $verbose_flag; then
+    yay "✅" "Session management test passed"
+    return 0
+  else
+    die "❌" "Session management test failed"
+  fi
+}
+
+# Parse arguments
+TEST_TYPE="${1:-all}"
+VERBOSE="false"
+
+# Handle help
+if [[ "$TEST_TYPE" == "-h" ]] || [[ "$TEST_TYPE" == "--help" ]]; then
+  usage
 fi
 
-say "🚀" "Launching the dramatic production known as 'relay smoke test'."
-if ${MISE_EXEC} go run ./scripts/smoketest "$@"; then
-  yay "🎉" "Relay is alive, responsive, and only mildly sarcastic."
-else
-  die "😵" "Smoke test reported doom. Scroll up for the gory details."
-fi
+# Check for verbose flag in any position
+for arg in "$@"; do
+  if [[ "$arg" == "-v" ]] || [[ "$arg" == "--verbose" ]]; then
+    VERBOSE="true"
+  fi
+done
+
+# Run tests
+case "$TEST_TYPE" in
+  relay)
+    run_relay_test
+    ;;
+  session)
+    run_session_test
+    ;;
+  all)
+    say "🧪" "Running all smoke tests..."
+    run_session_test
+    echo ""
+    run_relay_test
+    echo ""
+    yay "🎉" "All smoke tests passed!"
+    ;;
+  *)
+    echo "Unknown test type: $TEST_TYPE"
+    usage
+    ;;
+esac

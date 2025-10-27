@@ -1,4 +1,4 @@
-.PHONY: build test run stop clean lint fmt check pre-commit
+.PHONY: build test smoke-relay smoke-session smoke-all run stop clean lint fmt check pre-commit
 
 # Build all binaries
 build:
@@ -9,10 +9,25 @@ build:
 	go build -o bin/echo-agent ./cmd/echo-agent
 	@echo "Build complete. Binaries in bin/"
 
-# Run tests
+# Run unit tests
 test:
-	@echo "Running tests..."
+	@echo "Running unit tests..."
 	go test ./...
+
+# Run WebSocket relay integration smoke test
+smoke-relay:
+	@echo "Running relay integration smoke test..."
+	./scripts/smoke-test.sh relay --verbose
+
+# Run session management layer smoke test
+smoke-session:
+	@echo "Running session management smoke test..."
+	./scripts/smoke-test.sh session --verbose
+
+# Run all smoke tests
+smoke-all:
+	@echo "Running all smoke tests..."
+	./scripts/smoke-test.sh all --verbose
 
 # Start the system (placeholder for now)
 run:

@@ -5,26 +5,34 @@
 **Goal:** Validate multi-agent communication and concurrent work
 
 ```
-┌──────────────────────┐
-│ PWA (Browser)        │
-│ - 3 agent chat UIs   │
-└──────────┬───────────┘
-           │ WebSocket
-           │
-┌──────────▼───────────┐
-│ Relay (Go)           │
-│ - Routes messages    │
-│ - Spawns processes   │
-│ - In-memory state    │
-└─┬────────┬───────────┬┘
-  │ stdio  │ stdio     │ stdio
-  │        │           │
-┌─▼────┐ ┌─▼────┐ ┌──▼────┐
-│Claude│ │Claude│ │Claude │
-│Code  │ │Code  │ │Code   │
-│ACP   │ │ACP   │ │ACP    │
-│(proc)│ │(proc)│ │(proc) │
-└──────┘ └──────┘ └───────┘
+┌────────────────────────────────┐
+│ PWA (Browser)                  │
+│ - User Session View            │
+│ - 0-N agent chat UIs           │
+└────────────┬───────────────────┘
+             │ WebSocket
+             │
+┌────────────▼───────────────────┐
+│ Relay (Go)                     │
+│ - UserSession (container)      │
+│ - Routes messages              │
+│ - Spawns agent processes       │
+│ - In-memory state              │
+└─┬────────┬────────┬────────────┘
+  │ stdio  │ stdio  │ stdio (0-N)
+  │        │        │
+┌─▼────┐ ┌─▼────┐ ┌─▼────┐
+│Agent │ │Agent │ │Agent │
+│auth  │ │db    │ │test  │
+│Claude│ │Claude│ │Claude│
+│Code  │ │Code  │ │Code  │
+│ACP   │ │ACP   │ │ACP   │
+│(proc)│ │(proc)│ │(proc)│
+└──────┘ └──────┘ └──────┘
+
+Note: Roles are dynamic, not hardcoded
+      Agent failure doesn't terminate session
+      Agents can be spawned/terminated independently
 ```
 
 **Key Characteristics:**
@@ -32,8 +40,9 @@
 - No Coordinator (user drives manually)
 - Processes not containers
 - In-memory session state
-- Concurrent agents (3 at once)
-- Hardcoded roles (auth, db, tests)
+- Variable agent count (0-N agents per session)
+- Dynamic roles (user-specified, not hardcoded)
+- Independent agent lifecycles (agents can fail without affecting session)
 
 **Limitations:**
 - Not fault-tolerant (process crash = lost state)

@@ -115,7 +115,6 @@ func TestSendHandshake_Success(t *testing.T) {
 	}
 
 	err := server.sendHandshake(conn)
-
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
@@ -275,7 +274,6 @@ func TestEchoMessage_Success(t *testing.T) {
 	rawMessage := []byte(`{"version":"1.0","type":"test:echo","message":"hello"}`)
 
 	err := server.echoMessage(conn, rawMessage)
-
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}

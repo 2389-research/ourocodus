@@ -10,7 +10,6 @@ func TestParseMessage_ValidJSON(t *testing.T) {
 	data := []byte(`{"version":"1.0","type":"test:echo","message":"hello"}`)
 
 	base, err := parseMessage(data)
-
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
@@ -47,7 +46,6 @@ func TestParseMessage_EmptyJSON(t *testing.T) {
 	data := []byte(`{}`)
 
 	base, err := parseMessage(data)
-
 	if err != nil {
 		t.Fatalf("expected no error for empty JSON, got: %v", err)
 	}
@@ -66,7 +64,6 @@ func TestValidateRequiredFields_AllPresent(t *testing.T) {
 	}
 
 	err := validateRequiredFields(base)
-
 	if err != nil {
 		t.Errorf("expected no error when all fields present, got: %v", err)
 	}
@@ -150,7 +147,6 @@ func TestValidateRequiredFields_BothMissing(t *testing.T) {
 
 func TestValidateVersion_ValidVersion(t *testing.T) {
 	err := validateVersion("1.0")
-
 	if err != nil {
 		t.Errorf("expected no error for valid version, got: %v", err)
 	}
