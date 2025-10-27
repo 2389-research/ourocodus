@@ -143,7 +143,9 @@ func (m *Manager) SpawnAgent(ctx context.Context, sessionID, role, workspace str
 		return fmt.Errorf("invalid base workspace directory: %w", err)
 	}
 
-	if !strings.HasPrefix(absPath, baseAbs) {
+	// Use filepath.Rel to prevent directory name prefix bypass attacks
+	relPath, err := filepath.Rel(baseAbs, absPath)
+	if err != nil || strings.HasPrefix(relPath, "..") || relPath == ".." {
 		return fmt.Errorf("workspace path must be under base directory %s", m.baseWorkspaceDir)
 	}
 
@@ -347,9 +349,13 @@ func (m *Manager) TerminateUserSession(ctx context.Context, sessionID string) er
 		// Continue with termination even if hook fails
 	}
 
-	// Close WebSocket connection
-	if session.webSocket != nil {
-		if err := session.webSocket.Close(); err != nil {
+	// Close WebSocket connection (with mutex protection)
+	session.mu.Lock()
+	ws := session.webSocket
+	session.mu.Unlock()
+
+	if ws != nil {
+		if err := ws.Close(); err != nil {
 			m.logger.Printf("Error closing WebSocket for session %s: %v", sessionID, err)
 			// Don't fail termination due to WS close error
 		}

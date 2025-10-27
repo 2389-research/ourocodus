@@ -634,7 +634,17 @@ func TestCount(t *testing.T) {
 // --- Security Tests ---
 
 func TestSpawnAgent_RejectsPathTraversal(t *testing.T) {
-	manager, _, _, _, _, _ := setupManager()
+	// Use specific base directory to test prefix bypass
+	store := NewMemoryStore()
+	idGen := &mockIDGenerator{nextID: "test-session"}
+	clock := &mockClock{now: time.Date(2025, 10, 23, 12, 0, 0, 0, time.UTC)}
+	cleaner := &mockCleaner{}
+	logger := &mockLogger{}
+	clientFactory := &mockClientFactory{}
+
+	// Use "./workspaces" as base to test directory name bypass
+	manager := NewManager(store, idGen, clock, cleaner, logger, clientFactory, "./workspaces")
+
 	ctx := context.Background()
 	ws := &mockWebSocket{}
 
@@ -650,6 +660,9 @@ func TestSpawnAgent_RejectsPathTraversal(t *testing.T) {
 		{"absolute path outside base", "/tmp/evil"},
 		{"traversal within path", "workspace/../../escape"},
 		{"traversal with dots", "./workspaces/../../../etc"},
+		{"directory name prefix bypass - workspaces2", "workspaces2/hack"},
+		{"directory name prefix bypass - workspaces-backup", "workspaces-backup/data"},
+		{"directory name prefix bypass - workspaces_evil", "workspaces_evil/../etc"},
 	}
 
 	for _, tt := range tests {
