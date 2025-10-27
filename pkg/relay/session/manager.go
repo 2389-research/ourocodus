@@ -10,6 +10,12 @@ import (
 	"time"
 )
 
+const (
+	// DefaultAgentTerminationTimeout is the maximum time to wait for a single agent to close
+	// during parallel termination. Can be tuned based on deployment needs.
+	DefaultAgentTerminationTimeout = 5 * time.Second
+)
+
 // IDGenerator abstracts unique ID generation
 type IDGenerator interface {
 	Generate() string
@@ -152,7 +158,7 @@ func (m *Manager) SpawnAgent(ctx context.Context, sessionID, role, workspace str
 
 	// Use filepath.Rel to prevent directory traversal with ".."
 	relPath, err := filepath.Rel(baseAbs, absPath)
-	if err != nil || strings.HasPrefix(relPath, "..") || relPath == ".." {
+	if err != nil || strings.HasPrefix(relPath, "..") || relPath == ".." || filepath.IsAbs(relPath) {
 		return fmt.Errorf("workspace path must be under base directory %s", m.baseWorkspaceDir)
 	}
 
@@ -177,7 +183,8 @@ func (m *Manager) SpawnAgent(ctx context.Context, sessionID, role, workspace str
 	m.logger.Printf("Spawning agent: session=%s role=%s workspace=%s", sessionID, role, absPath)
 
 	// Create workspace directory if needed (I/O - no lock held)
-	err = os.MkdirAll(absPath, 0o750)
+	// Use 0o700 for strict workspace isolation (owner-only access)
+	err = os.MkdirAll(absPath, 0o700)
 	if err != nil {
 		return fmt.Errorf("failed to create workspace directory: %w", err)
 	}
@@ -325,7 +332,7 @@ func (m *Manager) TerminateUserSession(ctx context.Context, sessionID string) er
 		m.logger.Printf("Terminating %d agents in parallel: session=%s", len(agents), sessionID)
 
 		var wg sync.WaitGroup
-		agentTimeout := 5 * time.Second
+		agentTimeout := DefaultAgentTerminationTimeout
 
 		for role, agent := range agents {
 			wg.Add(1)
