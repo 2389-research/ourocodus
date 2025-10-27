@@ -338,6 +338,7 @@ const (
 	colorBlue   = "\033[34m"
 )
 
+//nolint:unparam // args may be nil, which is intentional for simple messages
 func announce(icon, format string, args ...interface{}) {
 	fmt.Printf("%s%s %s%s\n", colorCyan, icon, fmt.Sprintf(format, args...), colorReset)
 }
@@ -346,6 +347,7 @@ func warn(icon, format string, args ...interface{}) {
 	fmt.Printf("%s%s %s%s\n", colorYellow, icon, fmt.Sprintf(format, args...), colorReset)
 }
 
+//nolint:unparam // args may be nil, which is intentional for simple messages
 func success(icon, format string, args ...interface{}) {
 	fmt.Printf("%s%s %s%s\n", colorGreen, icon, fmt.Sprintf(format, args...), colorReset)
 }

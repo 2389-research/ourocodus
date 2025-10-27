@@ -83,7 +83,7 @@ func runSessionSmokeTest(verbose bool) error {
 	}
 
 	announce("🧪", "Test 8: List and Filter Sessions")
-	if err := testListAndFilter(ctx, manager, verbose); err != nil {
+	if err := testListAndFilter(ctx, verbose); err != nil {
 		return fmt.Errorf("list and filter: %w", err)
 	}
 
@@ -242,8 +242,12 @@ func testTerminateSingleAgent(ctx context.Context, manager *session.Manager, ver
 	sessionID := userSession.GetID()
 
 	// Spawn two agents
-	manager.SpawnAgent(ctx, sessionID, "auth", "workspace/auth")
-	manager.SpawnAgent(ctx, sessionID, "db", "workspace/db")
+	if err := manager.SpawnAgent(ctx, sessionID, "auth", "workspace/auth"); err != nil {
+		return fmt.Errorf("failed to spawn auth agent: %w", err)
+	}
+	if err := manager.SpawnAgent(ctx, sessionID, "db", "workspace/db"); err != nil {
+		return fmt.Errorf("failed to spawn db agent: %w", err)
+	}
 
 	// Terminate one agent
 	if err := manager.TerminateAgent(ctx, sessionID, "auth"); err != nil {
@@ -284,9 +288,15 @@ func testTerminateSession(ctx context.Context, manager *session.Manager, verbose
 	sessionID := userSession.GetID()
 
 	// Spawn multiple agents
-	manager.SpawnAgent(ctx, sessionID, "auth", "workspace/auth")
-	manager.SpawnAgent(ctx, sessionID, "db", "workspace/db")
-	manager.SpawnAgent(ctx, sessionID, "tests", "workspace/tests")
+	if err := manager.SpawnAgent(ctx, sessionID, "auth", "workspace/auth"); err != nil {
+		return fmt.Errorf("failed to spawn auth agent: %w", err)
+	}
+	if err := manager.SpawnAgent(ctx, sessionID, "db", "workspace/db"); err != nil {
+		return fmt.Errorf("failed to spawn db agent: %w", err)
+	}
+	if err := manager.SpawnAgent(ctx, sessionID, "tests", "workspace/tests"); err != nil {
+		return fmt.Errorf("failed to spawn tests agent: %w", err)
+	}
 
 	// Terminate session
 	if err := manager.TerminateUserSession(ctx, sessionID); err != nil {
@@ -317,7 +327,9 @@ func testIdempotentTermination(ctx context.Context, manager *session.Manager, ve
 	userSession, _ := manager.CreateUserSession(ctx, ws)
 	sessionID := userSession.GetID()
 
-	manager.SpawnAgent(ctx, sessionID, "auth", "workspace/auth")
+	if err := manager.SpawnAgent(ctx, sessionID, "auth", "workspace/auth"); err != nil {
+		return fmt.Errorf("failed to spawn auth agent: %w", err)
+	}
 
 	// Terminate agent twice - both should succeed (idempotent)
 	if err := manager.TerminateAgent(ctx, sessionID, "auth"); err != nil {
@@ -345,7 +357,7 @@ func testIdempotentTermination(ctx context.Context, manager *session.Manager, ve
 	return nil
 }
 
-func testListAndFilter(ctx context.Context, manager *session.Manager, verbose bool) error {
+func testListAndFilter(ctx context.Context, verbose bool) error {
 	// Create fresh manager for isolated testing
 	store := session.NewMemoryStore()
 	idGen := &testIDGenerator{nextID: "list-test-"}
@@ -380,7 +392,9 @@ func testListAndFilter(ctx context.Context, manager *session.Manager, verbose bo
 	}
 
 	// Terminate one session
-	freshManager.TerminateUserSession(ctx, session1.GetID())
+	if err := freshManager.TerminateUserSession(ctx, session1.GetID()); err != nil {
+		return fmt.Errorf("failed to terminate session: %w", err)
+	}
 
 	// List again - should only have one
 	allSessions = freshManager.List(nil)
@@ -463,10 +477,12 @@ func (c *fakeACPClient) Close() error {
 
 // Output helpers
 
+//nolint:unparam // args may be nil, which is intentional for simple messages
 func announce(icon, format string, args ...interface{}) {
 	fmt.Printf("%s%s %s%s\n", colorCyan, icon, fmt.Sprintf(format, args...), colorReset)
 }
 
+//nolint:unparam // args may be nil, which is intentional for simple messages
 func success(icon, format string, args ...interface{}) {
 	fmt.Printf("%s%s %s%s\n", colorGreen, icon, fmt.Sprintf(format, args...), colorReset)
 }

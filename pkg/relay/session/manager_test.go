@@ -303,7 +303,9 @@ func TestSpawnAgent_DuplicateRole(t *testing.T) {
 
 	// Create user session and spawn agent
 	session, _ := manager.CreateUserSession(ctx, ws)
-	_ = manager.SpawnAgent(ctx, session.GetID(), "auth", "testdata/agent/auth")
+	if err := manager.SpawnAgent(ctx, session.GetID(), "auth", "testdata/agent/auth"); err != nil {
+		t.Fatalf("Failed to spawn agent: %v", err)
+	}
 
 	// Try to spawn agent with same role
 	err := manager.SpawnAgent(ctx, session.GetID(), "auth", "testdata/agent/auth2")
@@ -325,7 +327,9 @@ func TestTerminateAgent_SingleAgent(t *testing.T) {
 
 	// Create session and spawn agent
 	session, _ := manager.CreateUserSession(ctx, ws)
-	_ = manager.SpawnAgent(ctx, session.GetID(), "auth", "testdata/agent/auth")
+	if err := manager.SpawnAgent(ctx, session.GetID(), "auth", "testdata/agent/auth"); err != nil {
+		t.Fatalf("Failed to spawn agent: %v", err)
+	}
 
 	// Terminate the agent
 	err := manager.TerminateAgent(ctx, session.GetID(), "auth")
@@ -357,9 +361,15 @@ func TestTerminateAgent_OtherAgentsUnaffected(t *testing.T) {
 
 	// Create session and spawn three agents
 	session, _ := manager.CreateUserSession(ctx, ws)
-	_ = manager.SpawnAgent(ctx, session.GetID(), "auth", "testdata/agent/auth")
-	_ = manager.SpawnAgent(ctx, session.GetID(), "db", "testdata/agent/db")
-	_ = manager.SpawnAgent(ctx, session.GetID(), "tests", "testdata/agent/tests")
+	if err := manager.SpawnAgent(ctx, session.GetID(), "auth", "testdata/agent/auth"); err != nil {
+		t.Fatalf("Failed to spawn auth agent: %v", err)
+	}
+	if err := manager.SpawnAgent(ctx, session.GetID(), "db", "testdata/agent/db"); err != nil {
+		t.Fatalf("Failed to spawn db agent: %v", err)
+	}
+	if err := manager.SpawnAgent(ctx, session.GetID(), "tests", "testdata/agent/tests"); err != nil {
+		t.Fatalf("Failed to spawn tests agent: %v", err)
+	}
 
 	// Terminate one agent
 	err := manager.TerminateAgent(ctx, session.GetID(), "db")
@@ -394,9 +404,15 @@ func TestTerminateUserSession_AllAgentsTerminated(t *testing.T) {
 	// Create session and spawn three agents
 	session, _ := manager.CreateUserSession(ctx, ws)
 	sessionID := session.GetID()
-	_ = manager.SpawnAgent(ctx, sessionID, "auth", "testdata/agent/auth")
-	_ = manager.SpawnAgent(ctx, sessionID, "db", "testdata/agent/db")
-	_ = manager.SpawnAgent(ctx, sessionID, "tests", "testdata/agent/tests")
+	if err := manager.SpawnAgent(ctx, sessionID, "auth", "testdata/agent/auth"); err != nil {
+		t.Fatalf("Failed to spawn auth agent: %v", err)
+	}
+	if err := manager.SpawnAgent(ctx, sessionID, "db", "testdata/agent/db"); err != nil {
+		t.Fatalf("Failed to spawn db agent: %v", err)
+	}
+	if err := manager.SpawnAgent(ctx, sessionID, "tests", "testdata/agent/tests"); err != nil {
+		t.Fatalf("Failed to spawn tests agent: %v", err)
+	}
 
 	// Terminate user session
 	err := manager.TerminateUserSession(ctx, sessionID)
@@ -428,7 +444,9 @@ func TestTerminateUserSession_Idempotent(t *testing.T) {
 	// Create and terminate session
 	session, _ := manager.CreateUserSession(ctx, ws)
 	sessionID := session.GetID()
-	_ = manager.TerminateUserSession(ctx, sessionID)
+	if err := manager.TerminateUserSession(ctx, sessionID); err != nil {
+		t.Fatalf("Failed to terminate session: %v", err)
+	}
 
 	// Terminate again (should not panic or error)
 	err := manager.TerminateUserSession(ctx, sessionID)
@@ -445,8 +463,12 @@ func TestTerminateAgent_Idempotent(t *testing.T) {
 	// Create session, spawn agent, terminate it
 	session, _ := manager.CreateUserSession(ctx, ws)
 	sessionID := session.GetID()
-	_ = manager.SpawnAgent(ctx, sessionID, "auth", "testdata/agent/auth")
-	_ = manager.TerminateAgent(ctx, sessionID, "auth")
+	if err := manager.SpawnAgent(ctx, sessionID, "auth", "testdata/agent/auth"); err != nil {
+		t.Fatalf("Failed to spawn agent: %v", err)
+	}
+	if err := manager.TerminateAgent(ctx, sessionID, "auth"); err != nil {
+		t.Fatalf("Failed to terminate agent: %v", err)
+	}
 
 	// Terminate again (should not panic or error)
 	err := manager.TerminateAgent(ctx, sessionID, "auth")
@@ -473,8 +495,12 @@ func TestListAgents(t *testing.T) {
 
 	// Create session and spawn agents
 	session, _ := manager.CreateUserSession(ctx, ws)
-	_ = manager.SpawnAgent(ctx, session.GetID(), "auth", "testdata/agent/auth")
-	_ = manager.SpawnAgent(ctx, session.GetID(), "db", "testdata/agent/db")
+	if err := manager.SpawnAgent(ctx, session.GetID(), "auth", "testdata/agent/auth"); err != nil {
+		t.Fatalf("Failed to spawn auth agent: %v", err)
+	}
+	if err := manager.SpawnAgent(ctx, session.GetID(), "db", "testdata/agent/db"); err != nil {
+		t.Fatalf("Failed to spawn db agent: %v", err)
+	}
 
 	// List agents
 	agents, err := manager.ListAgents(session.GetID())
@@ -498,7 +524,9 @@ func TestGetAgent(t *testing.T) {
 
 	// Create session and spawn agent
 	session, _ := manager.CreateUserSession(ctx, ws)
-	_ = manager.SpawnAgent(ctx, session.GetID(), "auth", "testdata/agent/auth")
+	if err := manager.SpawnAgent(ctx, session.GetID(), "auth", "testdata/agent/auth"); err != nil {
+		t.Fatalf("Failed to spawn agent: %v", err)
+	}
 
 	// Get agent
 	agent, err := manager.GetAgent(session.GetID(), "auth")
