@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/2389-research/ourocodus/pkg/acp"
 	"github.com/2389-research/ourocodus/pkg/relay/session"
 )
 
@@ -316,9 +317,12 @@ func (s *Server) handleAgentMessage(ctx context.Context, conn WebSocketConn, raw
 		errorMsg := NewErrorMessage(errorCode, errorMessage, recoverable)
 		if writeErr := conn.WriteJSON(errorMsg); writeErr != nil {
 			s.logger.Printf("Failed to send error response: %v", writeErr)
+			return true // Close on write error
 		}
 
-		return !recoverable // Close if non-recoverable
+		// Keep connection open even for non-recoverable errors
+		// Client can choose to: close connection OR create missing resources and retry
+		return false
 	}
 
 	// Check agent state
@@ -378,9 +382,22 @@ func (s *Server) handleAgentMessage(ctx context.Context, conn WebSocketConn, raw
 	s.logger.Printf("Agent response received: session=%s role=%s",
 		msg.SessionID, msg.Role)
 
-	// Convert response to string
-	// response is interface{}, typically will be a string or structured data
-	responseStr := fmt.Sprintf("%v", response)
+	// Type assert response to *acp.AgentMessage and extract content
+	agentMsg, ok := response.(*acp.AgentMessage)
+	if !ok {
+		s.logger.Printf("Invalid response type from agent: %T", response)
+		errorMsg := NewErrorMessage(
+			"AGENT_MESSAGE_FAILED",
+			"Invalid response format from agent",
+			true, // Recoverable - client can retry
+		)
+		if writeErr := conn.WriteJSON(errorMsg); writeErr != nil {
+			s.logger.Printf("Failed to send error response: %v", writeErr)
+			return true
+		}
+		return false
+	}
+	responseStr := agentMsg.Content
 
 	// Store both messages in history after successful ACP response
 	// Note: Using time.Now() directly because relay.Clock returns string for protocol messages,

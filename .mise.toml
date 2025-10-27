@@ -48,3 +48,11 @@ run = "go test ./..."
 [tasks.smoke]
 description = "Run the relay smoke test harness"
 run = "./scripts/smoke-test.sh"
+
+[tasks.demo]
+description = "Run interactive demo showcasing PR #27 features"
+run = "make demo"
+
+[tasks.interactive]
+description = "Run interactive REPL for manual testing"
+run = "make interactive"

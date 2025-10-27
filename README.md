@@ -72,8 +72,11 @@ mise run build
 # Run all Go tests
 mise run test
 
-# Execute the relay smoke test harness
+# Execute the smoke test harness (all tests)
 mise run smoke
+
+# Run smoke tests with fuzzing (100 iterations)
+./scripts/smoke-test.sh all --fuzz 100
 
 # Full validation suite
 mise run pre-commit
@@ -138,10 +141,23 @@ ourocodus/
 The project uses automated quality gates:
 
 **CI/CD (GitHub Actions)**
-- Builds on all PRs and pushes to main
-- Runs full test suite
-- Lints code with golangci-lint
-- Checks formatting with gofmt (Note: local dev uses gofumpt for stricter formatting)
+
+The project runs two GitHub Actions workflows on all PRs and pushes to main:
+
+*ci.yml* - Core quality checks:
+- Build all binaries (relay, cli, echo-agent)
+- Run unit tests (`go test ./...`)
+- golangci-lint verification
+- gofmt formatting check
+- shellcheck on scripts
+- Binary smoke test
+
+*smoke.yml* - Integration testing:
+- Session management smoke tests (8 test scenarios)
+- WebSocket relay integration tests (handshake, echo, session lifecycle, error handling)
+- Fuzz testing available via `--fuzz N` flag (disabled by default for CI stability)
+
+Note: Local dev uses gofumpt for stricter formatting than gofmt
 
 **Pre-commit Hooks (Optional)**
 ```bash
@@ -173,6 +189,127 @@ golangci-lint run
 
 # Auto-fix issues
 golangci-lint run --fix
+```
+
+## Demo
+
+Two interactive demos are available to showcase the relay system features. Both run a local relay server with an echo agent and work without requiring an ANTHROPIC_API_KEY.
+
+**Prerequisites for both demos:**
+- Run `make build` first to ensure all binaries are compiled
+- No ANTHROPIC_API_KEY required (uses echo-agent for testing)
+
+### Option 1: Interactive REPL (Recommended for Exploration)
+
+A full REPL interface for manual testing and experimentation.
+
+```bash
+# Via mise (recommended)
+mise run interactive
+
+# Or via Makefile
+make interactive
+```
+
+**Available Commands:**
+- `create` - Create a new session
+- `spawn <role> [workspace]` - Spawn an agent (default: ./workspaces/interactive)
+- `msg <role> <message>` - Send message to agent
+- `agents` - List spawned agents in current session
+- `help` - Show command help
+- `quit` - Exit the REPL
+
+**Example Session:**
+```
+[no session] > create
+✅ Session created: 4ad2f420
+
+[session:4ad2f420] > spawn assistant
+✅ Agent 'assistant' spawned in ./workspaces/interactive
+
+[session:4ad2f420] > msg assistant hello there!
+🤖 assistant: Echo: hello there!
+
+[session:4ad2f420] > msg assistant what can you do?
+🤖 assistant: Echo: what can you do?
+
+[session:4ad2f420] > spawn helper
+✅ Agent 'helper' spawned in ./workspaces/interactive
+
+[session:4ad2f420] > agents
+🤖 Spawned Agents:
+  - assistant
+  - helper
+
+[session:4ad2f420] > quit
+👋 Goodbye!
+```
+
+**Features:**
+- Full REPL interface with command history
+- Session tracking (shows current session ID in prompt)
+- Agent management (tracks spawned agents)
+- Real-time messaging (chat with agents and see responses instantly)
+- Error handling (shows error codes and recoverability)
+- Auto-starts and stops relay server
+
+**Source code:** `scripts/interactive/main.go`
+
+### Option 2: Automated Demo (For Quick Overview)
+
+An automated demonstration that runs predefined scenarios.
+
+```bash
+# Via mise
+mise run demo
+
+# Or via Makefile
+make demo
+```
+
+**What the Automated Demo Showcases:**
+
+**1. Session Lifecycle & Agent Communication**
+- Complete workflow: `session:create` → `agent:spawn` → `agent:message`
+- Bidirectional communication between user and agent
+- Multiple message exchanges in a single session
+- Agent state transitions (SPAWNING → ACTIVE)
+
+Example output:
+```
+━━━ Scenario 1: Session Lifecycle & Agent Communication ━━━
+✅ Session created: 4ad2f420-73d5-4b98-9517-f7e78ebd7e11
+✅ Agent spawned and ready (state: ACTIVE)
+
+→ Testing bidirectional communication...
+   User: Hello, agent!
+   Agent: Echo: Hello, agent!
+   User: Can you count to three?
+   Agent: Echo: Can you count to three?
+```
+
+**2. Clear Error Semantics with Recoverability**
+- Structured error responses with error codes
+- Recoverable vs non-recoverable error distinction
+- `SESSION_NOT_FOUND` error (non-recoverable)
+- `AGENT_NOT_FOUND` error (non-recoverable)
+
+Example output:
+```
+━━━ Scenario 2: Clear Error Semantics ━━━
+✅ Error received:
+   Code: SESSION_NOT_FOUND
+   Message: session not found: 00000000-0000-0000-0000-000000000000
+   Recoverable: false
+```
+
+**Source code:** `scripts/demo/main.go`
+
+### For Automated Testing
+
+For non-interactive automated testing, use the smoke test suite:
+```bash
+mise run smoke
 ```
 
 ## Contributing
