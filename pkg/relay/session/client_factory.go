@@ -9,26 +9,44 @@ import (
 
 // ACPClientFactory implements ClientFactory using pkg/acp.Client
 // Reads ANTHROPIC_API_KEY from environment and spawns claude-code-acp processes
+// Optionally reads OUROCODUS_ACP_BINARY to override the default ACP binary path
 type ACPClientFactory struct {
-	apiKey string
+	apiKey        string
+	acpBinaryPath string // Optional custom ACP binary path (for testing)
 }
 
 // NewACPClientFactory creates a new ACP client factory
-// Reads ANTHROPIC_API_KEY from environment
+// Reads ANTHROPIC_API_KEY from environment (required)
+// Optionally reads OUROCODUS_ACP_BINARY to use a custom ACP binary (e.g., echo-agent for testing)
 func NewACPClientFactory() (*ACPClientFactory, error) {
 	apiKey := os.Getenv("ANTHROPIC_API_KEY")
 	if apiKey == "" {
 		return nil, fmt.Errorf("ANTHROPIC_API_KEY environment variable not set")
 	}
 
+	// Check for custom ACP binary path (optional, for testing)
+	acpBinaryPath := os.Getenv("OUROCODUS_ACP_BINARY")
+
 	return &ACPClientFactory{
-		apiKey: apiKey,
+		apiKey:        apiKey,
+		acpBinaryPath: acpBinaryPath,
 	}, nil
 }
 
-// NewClient spawns a new claude-code-acp process in the given workspace
+// NewClient spawns a new ACP process in the given workspace
+// Uses custom binary path if OUROCODUS_ACP_BINARY was set, otherwise defaults to claude-code-acp
 func (f *ACPClientFactory) NewClient(workspace string) (ACPClient, error) {
-	client, err := acp.NewClient(workspace, f.apiKey)
+	var client *acp.Client
+	var err error
+
+	if f.acpBinaryPath != "" {
+		// Use custom binary (e.g., echo-agent for testing)
+		client, err = acp.NewClient(workspace, f.apiKey, acp.WithCommand(f.acpBinaryPath))
+	} else {
+		// Use default claude-code-acp binary
+		client, err = acp.NewClient(workspace, f.apiKey)
+	}
+
 	if err != nil {
 		return nil, err
 	}

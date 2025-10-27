@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/2389-research/ourocodus/pkg/relay/session"
@@ -116,7 +117,7 @@ func testSpawnSingleAgent(ctx context.Context, manager *session.Manager, verbose
 	userSession, _ := manager.CreateUserSession(ctx, ws)
 	sessionID := userSession.GetID()
 
-	err := manager.SpawnAgent(ctx, sessionID, "auth", "workspace/auth")
+	err := manager.SpawnAgent(ctx, sessionID, "auth", "./workspaces/auth")
 	if err != nil {
 		return fmt.Errorf("failed to spawn: %w", err)
 	}
@@ -148,7 +149,7 @@ func testSpawnMultipleAgents(ctx context.Context, manager *session.Manager, verb
 
 	roles := []string{"auth", "db", "tests"}
 	for _, role := range roles {
-		workspace := fmt.Sprintf("workspace/%s", role)
+		workspace := fmt.Sprintf("./workspaces/%s", role)
 		if err := manager.SpawnAgent(ctx, sessionID, role, workspace); err != nil {
 			return fmt.Errorf("failed to spawn %s: %w", role, err)
 		}
@@ -188,7 +189,8 @@ func testAgentSpawnFailureIsolation(ctx context.Context, verbose bool) error {
 	cleaner := session.NewNoOpCleaner()
 	logger := &testLogger{verbose: verbose}
 	failingFactory := session.NewFakeClientFactory(func(workspace string) (session.ACPClient, error) {
-		if workspace == "workspace/failing" {
+		// Manager converts paths to absolute, so check suffix
+		if strings.HasSuffix(workspace, "workspaces/failing") {
 			return nil, fmt.Errorf("simulated spawn failure")
 		}
 		return &fakeACPClient{workspace: workspace}, nil
@@ -201,12 +203,12 @@ func testAgentSpawnFailureIsolation(ctx context.Context, verbose bool) error {
 	sessionID := userSession.GetID()
 
 	// Spawn successful agent first
-	if err := manager.SpawnAgent(ctx, sessionID, "auth", "workspace/auth"); err != nil {
+	if err := manager.SpawnAgent(ctx, sessionID, "auth", "./workspaces/auth"); err != nil {
 		return fmt.Errorf("successful agent failed: %w", err)
 	}
 
 	// Try to spawn failing agent
-	err := manager.SpawnAgent(ctx, sessionID, "failing", "workspace/failing")
+	err := manager.SpawnAgent(ctx, sessionID, "failing", "./workspaces/failing")
 	if err == nil {
 		return fmt.Errorf("expected spawn to fail, but it succeeded")
 	}
@@ -242,10 +244,10 @@ func testTerminateSingleAgent(ctx context.Context, manager *session.Manager, ver
 	sessionID := userSession.GetID()
 
 	// Spawn two agents
-	if err := manager.SpawnAgent(ctx, sessionID, "auth", "workspace/auth"); err != nil {
+	if err := manager.SpawnAgent(ctx, sessionID, "auth", "./workspaces/auth"); err != nil {
 		return fmt.Errorf("failed to spawn auth agent: %w", err)
 	}
-	if err := manager.SpawnAgent(ctx, sessionID, "db", "workspace/db"); err != nil {
+	if err := manager.SpawnAgent(ctx, sessionID, "db", "./workspaces/db"); err != nil {
 		return fmt.Errorf("failed to spawn db agent: %w", err)
 	}
 
@@ -288,13 +290,13 @@ func testTerminateSession(ctx context.Context, manager *session.Manager, verbose
 	sessionID := userSession.GetID()
 
 	// Spawn multiple agents
-	if err := manager.SpawnAgent(ctx, sessionID, "auth", "workspace/auth"); err != nil {
+	if err := manager.SpawnAgent(ctx, sessionID, "auth", "./workspaces/auth"); err != nil {
 		return fmt.Errorf("failed to spawn auth agent: %w", err)
 	}
-	if err := manager.SpawnAgent(ctx, sessionID, "db", "workspace/db"); err != nil {
+	if err := manager.SpawnAgent(ctx, sessionID, "db", "./workspaces/db"); err != nil {
 		return fmt.Errorf("failed to spawn db agent: %w", err)
 	}
-	if err := manager.SpawnAgent(ctx, sessionID, "tests", "workspace/tests"); err != nil {
+	if err := manager.SpawnAgent(ctx, sessionID, "tests", "./workspaces/tests"); err != nil {
 		return fmt.Errorf("failed to spawn tests agent: %w", err)
 	}
 
@@ -327,7 +329,7 @@ func testIdempotentTermination(ctx context.Context, manager *session.Manager, ve
 	userSession, _ := manager.CreateUserSession(ctx, ws)
 	sessionID := userSession.GetID()
 
-	if err := manager.SpawnAgent(ctx, sessionID, "auth", "workspace/auth"); err != nil {
+	if err := manager.SpawnAgent(ctx, sessionID, "auth", "./workspaces/auth"); err != nil {
 		return fmt.Errorf("failed to spawn auth agent: %w", err)
 	}
 

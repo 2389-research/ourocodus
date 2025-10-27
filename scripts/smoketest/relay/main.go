@@ -33,7 +33,7 @@ var rng = rand.New(rand.NewSource(time.Now().UnixNano())) // #nosec G404 -- non-
 
 func main() {
 	verbose := flag.Bool("verbose", false, "emit every payload/response pair")
-	fuzzCount := flag.Int("fuzz", 100, "number of fuzzed payloads to hurl at the relay")
+	fuzzCount := flag.Int("fuzz", 0, "number of fuzzed payloads to hurl at the relay (0 = disabled)")
 	maxPayload := flag.Int("max-payload", 512*1024, "maximum payload size (bytes) used in fuzz cases")
 	seed := flag.Int64("seed", 0, "seed for fuzzing (0 = random)")
 	flag.Parse()
@@ -59,10 +59,23 @@ func main() {
 		fail("🔨", "Relay binary missing at %s (try `make build` first): %v", relayPath, err)
 	}
 
+	// Find echo-agent binary for testing
+	echoAgentPath := filepath.Join(root, "bin", "echo-agent")
+	if _, err := os.Stat(echoAgentPath); err != nil {
+		fail("🔨", "Echo-agent binary missing at %s (try `make build` first): %v", echoAgentPath, err)
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, relayPath) // #nosec G204 -- relayPath is determined by the repository layout, not user input
+
+	// Set environment variables for testing with echo-agent
+	cmd.Env = append(os.Environ(),
+		"OUROCODUS_ACP_BINARY="+echoAgentPath,
+		"ANTHROPIC_API_KEY=smoke-test-dummy-key",
+	)
+
 	if *verbose {
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
@@ -129,6 +142,20 @@ func runSmokeTest(verbose bool, fuzzCount int, maxPayload int) error {
 		return recoverErr
 	}
 
+	// Test session lifecycle (session:create, agent:spawn, agent:message)
+	sessionID, sessionErr := verifySessionLifecycle(conn, verbose)
+	if sessionErr != nil {
+		return sessionErr
+	}
+
+	// Test error codes (SESSION_NOT_FOUND, AGENT_NOT_FOUND)
+	if sessionNotFoundErr := verifySessionNotFound(conn, verbose); sessionNotFoundErr != nil {
+		return sessionNotFoundErr
+	}
+	if agentNotFoundErr := verifyAgentNotFound(conn, sessionID, verbose); agentNotFoundErr != nil {
+		return agentNotFoundErr
+	}
+
 	if fuzzCount < 0 {
 		fuzzCount = 0
 	}
@@ -179,7 +206,7 @@ func verifyHandshake(conn *websocket.Conn, verbose bool) error {
 func verifyEchoPath(conn *websocket.Conn, verbose bool) error {
 	payload := map[string]interface{}{
 		"version": "1.0",
-		"type":    "echo",
+		"type":    "test:echo",
 		"payload": "smoke test message",
 	}
 	debug(verbose, "📤", "Sending echo payload: %s", stringify(payload))
@@ -192,7 +219,7 @@ func verifyEchoPath(conn *websocket.Conn, verbose bool) error {
 		return fmt.Errorf("failed to read echo response: %w", err)
 	}
 	debug(verbose, "📬", "Echo response: %s", stringify(resp))
-	if resp["type"] != "echo" || resp["payload"] != payload["payload"] {
+	if resp["type"] != "test:echo" || resp["payload"] != payload["payload"] {
 		return fmt.Errorf("unexpected echo response: %s", stringify(resp))
 	}
 	if _, ok := resp["timestamp"].(string); !ok {
@@ -204,7 +231,7 @@ func verifyEchoPath(conn *websocket.Conn, verbose bool) error {
 
 func verifyRecoverablePath(conn *websocket.Conn, verbose bool) error {
 	payload := map[string]interface{}{
-		"type":    "echo",
+		"type":    "test:echo",
 		"payload": "missing version field",
 	}
 	debug(verbose, "📤", "Sending recoverable invalid payload: %s", stringify(payload))
@@ -235,7 +262,7 @@ func verifyRecoverablePath(conn *websocket.Conn, verbose bool) error {
 func verifyNonRecoverablePath(conn *websocket.Conn, verbose bool) error {
 	versionMismatch := map[string]interface{}{
 		"version": "0.9",
-		"type":    "echo",
+		"type":    "test:echo",
 		"payload": "old protocol version",
 	}
 	debug(verbose, "📤", "Sending non-recoverable payload: %s", stringify(versionMismatch))
@@ -262,6 +289,183 @@ func ensureClosedAfterTermination(conn *websocket.Conn) error {
 	} else if !isClosedError(err) {
 		return fmt.Errorf("expected close error after non-recoverable response, got %v", err)
 	}
+	return nil
+}
+
+//nolint:gocyclo // Multi-step integration test justifies complexity
+func verifySessionLifecycle(conn *websocket.Conn, verbose bool) (string, error) {
+	// Step 1: Create session
+	createMsg := map[string]interface{}{
+		"version": "1.0",
+		"type":    "session:create",
+	}
+	debug(verbose, "📤", "Sending session:create: %s", stringify(createMsg))
+	if err := writeJSON(conn, createMsg); err != nil {
+		return "", fmt.Errorf("failed to send session:create: %w", err)
+	}
+
+	createResp, err := readJSON(conn)
+	if err != nil {
+		return "", fmt.Errorf("failed to read session:created: %w", err)
+	}
+	debug(verbose, "📬", "Session creation response: %s", stringify(createResp))
+
+	if createResp["type"] != "session:created" {
+		return "", fmt.Errorf("expected type session:created, got: %s", stringify(createResp))
+	}
+	sessionID, ok := createResp["sessionId"].(string)
+	if !ok || sessionID == "" {
+		return "", fmt.Errorf("missing or invalid sessionId in response: %s", stringify(createResp))
+	}
+	if _, ok = createResp["timestamp"].(string); !ok {
+		return "", fmt.Errorf("missing timestamp in session:created: %s", stringify(createResp))
+	}
+	success("✅", "Session created: %s", sessionID)
+
+	// Step 2: Spawn agent
+	spawnMsg := map[string]interface{}{
+		"version":   "1.0",
+		"type":      "agent:spawn",
+		"sessionId": sessionID,
+		"role":      "smoke-test",
+		"workspace": "./workspaces/smoke-test",
+	}
+	debug(verbose, "📤", "Sending agent:spawn: %s", stringify(spawnMsg))
+	if err = writeJSON(conn, spawnMsg); err != nil {
+		return "", fmt.Errorf("failed to send agent:spawn: %w", err)
+	}
+
+	spawnResp, err := readJSON(conn)
+	if err != nil {
+		return "", fmt.Errorf("failed to read agent:ready: %w", err)
+	}
+	debug(verbose, "📬", "Agent spawn response: %s", stringify(spawnResp))
+
+	if spawnResp["type"] != "agent:ready" {
+		return "", fmt.Errorf("expected type agent:ready, got: %s", stringify(spawnResp))
+	}
+	if spawnResp["sessionId"] != sessionID {
+		return "", fmt.Errorf("sessionId mismatch in agent:ready: %s", stringify(spawnResp))
+	}
+	if spawnResp["role"] != "smoke-test" {
+		return "", fmt.Errorf("role mismatch in agent:ready: %s", stringify(spawnResp))
+	}
+	success("✅", "Agent spawned: role=smoke-test")
+
+	// Step 3: Send message to agent
+	messageMsg := map[string]interface{}{
+		"version":   "1.0",
+		"type":      "agent:message",
+		"sessionId": sessionID,
+		"role":      "smoke-test",
+		"content":   "hello",
+	}
+	debug(verbose, "📤", "Sending agent:message: %s", stringify(messageMsg))
+	if err = writeJSON(conn, messageMsg); err != nil {
+		return "", fmt.Errorf("failed to send agent:message: %w", err)
+	}
+
+	messageResp, err := readJSON(conn)
+	if err != nil {
+		return "", fmt.Errorf("failed to read agent:response: %w", err)
+	}
+	debug(verbose, "📬", "Agent message response: %s", stringify(messageResp))
+
+	if messageResp["type"] != "agent:response" {
+		return "", fmt.Errorf("expected type agent:response, got: %s", stringify(messageResp))
+	}
+	if messageResp["sessionId"] != sessionID {
+		return "", fmt.Errorf("sessionId mismatch in agent:response: %s", stringify(messageResp))
+	}
+	if messageResp["role"] != "smoke-test" {
+		return "", fmt.Errorf("role mismatch in agent:response: %s", stringify(messageResp))
+	}
+	content, ok := messageResp["content"].(string)
+	if !ok {
+		return "", fmt.Errorf("missing or invalid content in agent:response: %s", stringify(messageResp))
+	}
+	if content != "Echo: hello" {
+		return "", fmt.Errorf("unexpected echo content: got %q, expected \"Echo: hello\"", content)
+	}
+	if _, ok := messageResp["timestamp"].(string); !ok {
+		return "", fmt.Errorf("missing timestamp in agent:response: %s", stringify(messageResp))
+	}
+	success("✅", "Agent responded: %s", content)
+
+	return sessionID, nil
+}
+
+func verifySessionNotFound(conn *websocket.Conn, verbose bool) error {
+	// Send agent:message with non-existent session ID
+	messageMsg := map[string]interface{}{
+		"version":   "1.0",
+		"type":      "agent:message",
+		"sessionId": "00000000-0000-0000-0000-000000000000",
+		"role":      "smoke-test",
+		"content":   "hello",
+	}
+	debug(verbose, "📤", "Sending agent:message with fake session ID: %s", stringify(messageMsg))
+	if err := writeJSON(conn, messageMsg); err != nil {
+		return fmt.Errorf("failed to send agent:message: %w", err)
+	}
+
+	errorResp, err := readJSON(conn)
+	if err != nil {
+		return fmt.Errorf("failed to read error response: %w", err)
+	}
+	debug(verbose, "📬", "Session not found error response: %s", stringify(errorResp))
+
+	if errorResp["type"] != "error" {
+		return fmt.Errorf("expected type error, got: %s", stringify(errorResp))
+	}
+	errorDetail, ok := errorResp["error"].(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("missing error detail: %s", stringify(errorResp))
+	}
+	if errorDetail["code"] != "SESSION_NOT_FOUND" {
+		return fmt.Errorf("expected error code SESSION_NOT_FOUND, got: %s", stringify(errorResp))
+	}
+	if errorDetail["recoverable"] != false {
+		return fmt.Errorf("expected recoverable=false for SESSION_NOT_FOUND, got: %s", stringify(errorResp))
+	}
+	success("✅", "SESSION_NOT_FOUND error handled correctly")
+	return nil
+}
+
+func verifyAgentNotFound(conn *websocket.Conn, sessionID string, verbose bool) error {
+	// Send agent:message with non-existent agent role
+	messageMsg := map[string]interface{}{
+		"version":   "1.0",
+		"type":      "agent:message",
+		"sessionId": sessionID,
+		"role":      "non-existent-agent",
+		"content":   "hello",
+	}
+	debug(verbose, "📤", "Sending agent:message with non-existent role: %s", stringify(messageMsg))
+	if err := writeJSON(conn, messageMsg); err != nil {
+		return fmt.Errorf("failed to send agent:message: %w", err)
+	}
+
+	errorResp, err := readJSON(conn)
+	if err != nil {
+		return fmt.Errorf("failed to read error response: %w", err)
+	}
+	debug(verbose, "📬", "Agent not found error response: %s", stringify(errorResp))
+
+	if errorResp["type"] != "error" {
+		return fmt.Errorf("expected type error, got: %s", stringify(errorResp))
+	}
+	errorDetail, ok := errorResp["error"].(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("missing error detail: %s", stringify(errorResp))
+	}
+	if errorDetail["code"] != "AGENT_NOT_FOUND" {
+		return fmt.Errorf("expected error code AGENT_NOT_FOUND, got: %s", stringify(errorResp))
+	}
+	if errorDetail["recoverable"] != false {
+		return fmt.Errorf("expected recoverable=false for AGENT_NOT_FOUND, got: %s", stringify(errorResp))
+	}
+	success("✅", "AGENT_NOT_FOUND error handled correctly")
 	return nil
 }
 
@@ -802,7 +1006,7 @@ func isRecoverableInvalid(resp map[string]interface{}) bool {
 }
 
 func randomType() string {
-	base := []string{"echo", "session:create", "agent:message", "telemetry"}
+	base := []string{"test:echo", "session:create", "agent:message", "telemetry"}
 	if rng.Intn(5) == 0 {
 		return randomString(3, 12, true)
 	}

@@ -32,20 +32,25 @@ TEST_TYPE:
   all        Run all smoke tests (default)
 
 OPTIONS:
-  -v, --verbose   Enable verbose output
+  -v, --verbose       Enable verbose output
+  --fuzz COUNT        Run fuzz testing with COUNT iterations (relay tests only)
 
 Examples:
   $0 relay              # Run relay tests only
   $0 session            # Run session tests only
   $0 all                # Run all tests
   $0 relay --verbose    # Run relay tests with verbose output
+  $0 relay --fuzz 1000  # Run relay with 1000 fuzz iterations
+  $0 all --fuzz 100000  # Run all tests with 100k fuzz iterations
 EOF
   exit 0
 }
 
 run_relay_test() {
   local verbose_flag=""
+  local fuzz_flag=""
   [[ "$VERBOSE" == "true" ]] && verbose_flag="-verbose"
+  [[ -n "$FUZZ_COUNT" ]] && fuzz_flag="-fuzz $FUZZ_COUNT"
 
   say "🚀" "Running WebSocket relay integration test..."
 
@@ -54,7 +59,7 @@ run_relay_test() {
     (cd "${REPO_ROOT}" && ${MISE_EXEC} make build) || die "💥" "Build failed"
   fi
 
-  if ${MISE_EXEC} go run "${REPO_ROOT}/scripts/smoketest/relay" $verbose_flag; then
+  if ${MISE_EXEC} go run "${REPO_ROOT}/scripts/smoketest/relay" $verbose_flag $fuzz_flag; then
     yay "✅" "Relay integration test passed"
     return 0
   else
@@ -79,17 +84,39 @@ run_session_test() {
 # Parse arguments
 TEST_TYPE="${1:-all}"
 VERBOSE="false"
+FUZZ_COUNT=""
 
 # Handle help
 if [[ "$TEST_TYPE" == "-h" ]] || [[ "$TEST_TYPE" == "--help" ]]; then
   usage
 fi
 
-# Check for verbose flag in any position
-for arg in "$@"; do
-  if [[ "$arg" == "-v" ]] || [[ "$arg" == "--verbose" ]]; then
-    VERBOSE="true"
-  fi
+# Parse flags
+shift_count=0
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -v|--verbose)
+      VERBOSE="true"
+      shift
+      ;;
+    --fuzz)
+      if [[ -n "$2" ]] && [[ "$2" =~ ^[0-9]+$ ]]; then
+        FUZZ_COUNT="$2"
+        shift 2
+      else
+        echo "Error: --fuzz requires a numeric argument"
+        exit 1
+      fi
+      ;;
+    *)
+      # First non-flag argument is test type
+      if [[ $shift_count -eq 0 ]]; then
+        TEST_TYPE="$1"
+      fi
+      shift
+      shift_count=$((shift_count + 1))
+      ;;
+  esac
 done
 
 # Run tests

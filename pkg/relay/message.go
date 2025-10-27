@@ -10,6 +10,32 @@ const (
 	ProtocolVersion = "1.0"
 )
 
+// Error Codes and Recoverability Semantics
+//
+// The relay server uses typed errors from the session layer and maps them to protocol error codes.
+// Each error code has defined recoverability semantics that determine whether the client should
+// close the connection or can retry the operation.
+//
+// Non-Recoverable Errors (client must close connection or create missing resources):
+//   - VERSION_MISMATCH: Client protocol version incompatible with server (upgrade/downgrade required)
+//   - SESSION_NOT_FOUND: Session ID does not exist (client must create session first)
+//   - AGENT_NOT_FOUND: Agent role not found in session (client must spawn agent first)
+//
+// Recoverable Errors (client may retry or handle gracefully):
+//   - INVALID_MESSAGE: Malformed JSON or missing required fields (fix and retry)
+//   - SESSION_CREATE_FAILED: Temporary failure creating session (retry with backoff)
+//   - AGENT_SPAWN_FAILED: Temporary failure spawning agent (retry with backoff)
+//   - AGENT_NOT_READY: Agent exists but not in ACTIVE state (wait and retry)
+//   - AGENT_MESSAGE_FAILED: Temporary failure sending message to agent (retry)
+//   - INTERNAL_ERROR: Unexpected server error (retry with backoff, report if persistent)
+//
+// Error Mapping:
+// The server.mapError() function centralizes error mapping from session layer to protocol layer:
+//   - session.ErrSessionNotFound → SESSION_NOT_FOUND (non-recoverable)
+//   - session.ErrAgentNotFound → AGENT_NOT_FOUND (non-recoverable)
+//   - ValidationError → preserves code and recoverability from validation layer
+//   - Unknown errors → INTERNAL_ERROR (recoverable, allows retry)
+
 // BaseMessage contains fields common to all protocol messages
 type BaseMessage struct {
 	Version string `json:"version"`
@@ -80,6 +106,105 @@ func validateVersion(version string) error {
 	return nil
 }
 
+// parseSessionCreateMessage parses JSON into SessionCreateMessage (pure function)
+func parseSessionCreateMessage(data []byte) (SessionCreateMessage, error) {
+	var msg SessionCreateMessage
+	if err := json.Unmarshal(data, &msg); err != nil {
+		return msg, ValidationError{
+			Code:        "INVALID_MESSAGE",
+			Message:     fmt.Sprintf("Invalid JSON: %v", err),
+			Recoverable: true,
+		}
+	}
+	return msg, nil
+}
+
+// parseAgentSpawnMessage parses JSON into AgentSpawnMessage (pure function)
+func parseAgentSpawnMessage(data []byte) (AgentSpawnMessage, error) {
+	var msg AgentSpawnMessage
+	if err := json.Unmarshal(data, &msg); err != nil {
+		return msg, ValidationError{
+			Code:        "INVALID_MESSAGE",
+			Message:     fmt.Sprintf("Invalid JSON: %v", err),
+			Recoverable: true,
+		}
+	}
+	return msg, nil
+}
+
+// parseAgentMessageRequest parses JSON into AgentMessageRequest (pure function)
+func parseAgentMessageRequest(data []byte) (AgentMessageRequest, error) {
+	var msg AgentMessageRequest
+	if err := json.Unmarshal(data, &msg); err != nil {
+		return msg, ValidationError{
+			Code:        "INVALID_MESSAGE",
+			Message:     fmt.Sprintf("Invalid JSON: %v", err),
+			Recoverable: true,
+		}
+	}
+	return msg, nil
+}
+
+// validateSessionCreateMessage validates SessionCreateMessage has no additional requirements
+// beyond base message validation (pure function)
+func validateSessionCreateMessage(msg SessionCreateMessage) error {
+	// SessionCreateMessage only needs base validation (version + type)
+	// which is done by ValidateMessage
+	return nil
+}
+
+// validateAgentSpawnMessage validates AgentSpawnMessage required fields (pure function)
+func validateAgentSpawnMessage(msg AgentSpawnMessage) error {
+	if msg.SessionID == "" {
+		return ValidationError{
+			Code:        "INVALID_MESSAGE",
+			Message:     "Missing required field: sessionId",
+			Recoverable: true,
+		}
+	}
+	if msg.Role == "" {
+		return ValidationError{
+			Code:        "INVALID_MESSAGE",
+			Message:     "Missing required field: role",
+			Recoverable: true,
+		}
+	}
+	if msg.Workspace == "" {
+		return ValidationError{
+			Code:        "INVALID_MESSAGE",
+			Message:     "Missing required field: workspace",
+			Recoverable: true,
+		}
+	}
+	return nil
+}
+
+// validateAgentMessageRequest validates AgentMessageRequest required fields (pure function)
+func validateAgentMessageRequest(msg AgentMessageRequest) error {
+	if msg.SessionID == "" {
+		return ValidationError{
+			Code:        "INVALID_MESSAGE",
+			Message:     "Missing required field: sessionId",
+			Recoverable: true,
+		}
+	}
+	if msg.Role == "" {
+		return ValidationError{
+			Code:        "INVALID_MESSAGE",
+			Message:     "Missing required field: role",
+			Recoverable: true,
+		}
+	}
+	if msg.Content == "" {
+		return ValidationError{
+			Code:        "INVALID_MESSAGE",
+			Message:     "Missing required field: content",
+			Recoverable: true,
+		}
+	}
+	return nil
+}
+
 // ValidateMessage checks if a message has required fields and valid version
 // Composes pure validation functions
 func ValidateMessage(data []byte) error {
@@ -112,6 +237,50 @@ type ErrorMessage struct {
 	Error ErrorDetail `json:"error"`
 }
 
+// SessionCreateMessage is sent by PWA to create a new user session
+type SessionCreateMessage struct {
+	BaseMessage
+}
+
+// SessionCreatedMessage is sent by relay confirming session creation
+type SessionCreatedMessage struct {
+	BaseMessage
+	SessionID string `json:"sessionId"`
+	Timestamp string `json:"timestamp"`
+}
+
+// AgentSpawnMessage is sent by PWA to spawn an agent in a session
+type AgentSpawnMessage struct {
+	BaseMessage
+	SessionID string `json:"sessionId"`
+	Role      string `json:"role"`
+	Workspace string `json:"workspace"`
+}
+
+// AgentReadyMessage is sent by relay confirming agent is ready
+type AgentReadyMessage struct {
+	BaseMessage
+	SessionID string `json:"sessionId"`
+	Role      string `json:"role"`
+}
+
+// AgentMessageRequest is sent by PWA to send a message to an agent
+type AgentMessageRequest struct {
+	BaseMessage
+	SessionID string `json:"sessionId"`
+	Role      string `json:"role"`
+	Content   string `json:"content"`
+}
+
+// AgentMessageResponse is sent by relay with agent's response
+type AgentMessageResponse struct {
+	BaseMessage
+	SessionID string `json:"sessionId"`
+	Role      string `json:"role"`
+	Content   string `json:"content"`
+	Timestamp string `json:"timestamp"`
+}
+
 // NewConnectionEstablished creates a connection established message (pure function)
 func NewConnectionEstablished(serverID, timestamp string) ConnectionEstablishedMessage {
 	return ConnectionEstablishedMessage{
@@ -136,5 +305,43 @@ func NewErrorMessage(code, message string, recoverable bool) ErrorMessage {
 			Message:     message,
 			Recoverable: recoverable,
 		},
+	}
+}
+
+// NewSessionCreatedMessage creates a session created message (pure function)
+func NewSessionCreatedMessage(sessionID, timestamp string) SessionCreatedMessage {
+	return SessionCreatedMessage{
+		BaseMessage: BaseMessage{
+			Version: ProtocolVersion,
+			Type:    "session:created",
+		},
+		SessionID: sessionID,
+		Timestamp: timestamp,
+	}
+}
+
+// NewAgentReadyMessage creates an agent ready message (pure function)
+func NewAgentReadyMessage(sessionID, role string) AgentReadyMessage {
+	return AgentReadyMessage{
+		BaseMessage: BaseMessage{
+			Version: ProtocolVersion,
+			Type:    "agent:ready",
+		},
+		SessionID: sessionID,
+		Role:      role,
+	}
+}
+
+// NewAgentMessageResponse creates an agent response message (pure function)
+func NewAgentMessageResponse(sessionID, role, content, timestamp string) AgentMessageResponse {
+	return AgentMessageResponse{
+		BaseMessage: BaseMessage{
+			Version: ProtocolVersion,
+			Type:    "agent:response",
+		},
+		SessionID: sessionID,
+		Role:      role,
+		Content:   content,
+		Timestamp: timestamp,
 	}
 }

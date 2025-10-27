@@ -32,7 +32,8 @@ UserSession (ID: uuid)
     │   ├── ACPClient: *acp.Client
     │   ├── Created At: time.Time
     │   ├── Last Active: time.Time
-    │   └── Error: string (if FAILED)
+    │   ├── Error: string (if FAILED)
+    │   └── History: []Message (conversation turns)
     │
     ├── AgentSession (role: "db")
     │   └── ...
@@ -248,6 +249,52 @@ agent, err := manager.GetAgent(sessionID, role)
 ```
 
 Returns single agent by role.
+
+### Get Conversation History
+
+Retrieve stored conversation between user and agent.
+
+**Manager API:**
+```go
+history, err := manager.GetAgentHistory(sessionID, role)
+// Returns []Message with conversation turns
+```
+
+**Message Structure:**
+```go
+type Message struct {
+    From      string    // "user" or "agent"
+    Content   string    // Message content
+    Timestamp time.Time // When message was sent
+}
+```
+
+**Example:**
+```go
+history, err := manager.GetAgentHistory("session-123", "auth")
+if err != nil {
+    // Handle session/agent not found
+    log.Printf("Failed to get history: %v", err)
+    return
+}
+
+// Display conversation
+for _, msg := range history {
+    fmt.Printf("[%s] %s: %s\n",
+        msg.Timestamp.Format(time.RFC3339),
+        msg.From,
+        msg.Content)
+}
+```
+
+**Thread Safety:**
+- GetHistory() returns defensive copies
+- Safe for concurrent access
+- Messages stored transactionally after successful ACP responses
+
+**Error Handling:**
+- Returns `session.ErrSessionNotFound` if session doesn't exist
+- Returns `session.ErrAgentNotFound` if agent role not found
 
 ---
 

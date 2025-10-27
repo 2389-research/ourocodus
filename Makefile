@@ -1,4 +1,4 @@
-.PHONY: build test smoke-relay smoke-session smoke-all run stop clean lint fmt check pre-commit
+.PHONY: build test smoke-relay smoke-session smoke-all demo interactive run stop clean lint fmt check pre-commit
 
 # Build all binaries
 build:
@@ -28,6 +28,16 @@ smoke-session:
 smoke-all:
 	@echo "Running all smoke tests..."
 	./scripts/smoke-test.sh all --verbose
+
+# Run interactive demo showcasing PR #27 features
+demo:
+	@echo "Running PR #27 features demo..."
+	go run scripts/demo/main.go
+
+# Run interactive REPL for manual testing
+interactive:
+	@echo "Starting interactive REPL..."
+	go run scripts/interactive/main.go
 
 # Start the system (placeholder for now)
 run:

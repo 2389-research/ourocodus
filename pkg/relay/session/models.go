@@ -63,6 +63,13 @@ func (a AgentState) IsValid() bool {
 	}
 }
 
+// Message represents a single conversation message
+type Message struct {
+	From      string    `json:"from"`      // "user" or "agent"
+	Content   string    `json:"content"`   // Message content
+	Timestamp time.Time `json:"timestamp"` // When message was sent
+}
+
 // AgentSession represents ONE claude-code-acp process within a user session
 // Immutable after creation except for state transitions through Manager
 type AgentSession struct {
@@ -75,7 +82,8 @@ type AgentSession struct {
 	acpClient  ACPClient
 	createdAt  time.Time
 	lastActive time.Time
-	errorMsg   string // Error message if state is FAILED
+	errorMsg   string    // Error message if state is FAILED
+	history    []Message // Conversation history
 
 	mu sync.RWMutex
 }
@@ -96,11 +104,10 @@ type UserSession struct {
 	mu sync.RWMutex
 }
 
-// WebSocketConn abstracts WebSocket operations
-// Matches existing relay.WebSocketConn interface for compatibility
+// WebSocketConn abstracts WebSocket operations for session layer
+// Server owns all I/O - session layer only needs WriteJSON and Close
 type WebSocketConn interface {
 	WriteJSON(v interface{}) error
-	ReadMessage() (messageType int, p []byte, err error)
 	Close() error
 }
 
@@ -140,6 +147,7 @@ func NewAgentSession(role, workspace string, createdAt time.Time) *AgentSession 
 		state:      AgentSpawning,
 		createdAt:  createdAt,
 		lastActive: createdAt,
+		history:    make([]Message, 0),
 	}
 }
 
@@ -237,6 +245,27 @@ func (a *AgentSession) GetLastActive() time.Time {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	return a.lastActive
+}
+
+// AddMessage appends a message to the conversation history (thread-safe)
+func (a *AgentSession) AddMessage(from, content string, timestamp time.Time) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.history = append(a.history, Message{
+		From:      from,
+		Content:   content,
+		Timestamp: timestamp,
+	})
+}
+
+// GetHistory returns a copy of the conversation history (thread-safe)
+func (a *AgentSession) GetHistory() []Message {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	// Return a copy to prevent external modification
+	history := make([]Message, len(a.history))
+	copy(history, a.history)
+	return history
 }
 
 // --- Package-private mutators (called only by Manager) ---

@@ -1,8 +1,12 @@
 package relay
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"testing"
+
+	"github.com/2389-research/ourocodus/pkg/relay/session"
 )
 
 // Mock implementations for unit testing
@@ -262,7 +266,7 @@ func TestHandleValidationError_NonValidationError(t *testing.T) {
 	}
 }
 
-func TestEchoMessage_Success(t *testing.T) {
+func TestHandleEcho_Success(t *testing.T) {
 	logger := &mockLogger{}
 	clock := &mockClock{timestamp: "2025-10-23T12:00:00Z"}
 	conn := &mockWebSocketConn{}
@@ -273,9 +277,9 @@ func TestEchoMessage_Success(t *testing.T) {
 
 	rawMessage := []byte(`{"version":"1.0","type":"test:echo","message":"hello"}`)
 
-	err := server.echoMessage(conn, rawMessage)
-	if err != nil {
-		t.Fatalf("expected no error, got: %v", err)
+	shouldClose := server.handleEcho(conn, rawMessage)
+	if shouldClose {
+		t.Error("expected shouldClose=false for successful echo")
 	}
 
 	if len(conn.written) != 1 {
@@ -295,7 +299,7 @@ func TestEchoMessage_Success(t *testing.T) {
 	}
 }
 
-func TestEchoMessage_InvalidJSON(t *testing.T) {
+func TestHandleEcho_InvalidJSON(t *testing.T) {
 	logger := &mockLogger{}
 	clock := &mockClock{timestamp: "2025-10-23T12:00:00Z"}
 	conn := &mockWebSocketConn{}
@@ -306,10 +310,10 @@ func TestEchoMessage_InvalidJSON(t *testing.T) {
 
 	rawMessage := []byte(`{invalid json}`)
 
-	err := server.echoMessage(conn, rawMessage)
+	shouldClose := server.handleEcho(conn, rawMessage)
 
-	if err == nil {
-		t.Fatal("expected error for invalid JSON, got nil")
+	if !shouldClose {
+		t.Error("expected shouldClose=true for invalid JSON")
 	}
 
 	// Should log error
@@ -323,7 +327,7 @@ func TestEchoMessage_InvalidJSON(t *testing.T) {
 	}
 }
 
-func TestHandleMessage_ValidMessage(t *testing.T) {
+func TestRouteMessage_ValidEchoMessage(t *testing.T) {
 	logger := &mockLogger{}
 	clock := &mockClock{timestamp: "2025-10-23T12:00:00Z"}
 	conn := &mockWebSocketConn{}
@@ -332,9 +336,10 @@ func TestHandleMessage_ValidMessage(t *testing.T) {
 		clock:  clock,
 	}
 
+	ctx := context.Background()
 	rawMessage := []byte(`{"version":"1.0","type":"test:echo","message":"hello"}`)
 
-	shouldClose := server.handleMessage(conn, rawMessage)
+	shouldClose := server.routeMessage(ctx, conn, rawMessage)
 
 	if shouldClose {
 		t.Error("expected shouldClose=false for valid message")
@@ -346,7 +351,7 @@ func TestHandleMessage_ValidMessage(t *testing.T) {
 	}
 }
 
-func TestHandleMessage_ValidationError(t *testing.T) {
+func TestRouteMessage_ValidationError(t *testing.T) {
 	logger := &mockLogger{}
 	clock := &mockClock{timestamp: "2025-10-23T12:00:00Z"}
 	conn := &mockWebSocketConn{}
@@ -355,10 +360,11 @@ func TestHandleMessage_ValidationError(t *testing.T) {
 		clock:  clock,
 	}
 
+	ctx := context.Background()
 	// Missing version field
 	rawMessage := []byte(`{"type":"test:echo","message":"hello"}`)
 
-	shouldClose := server.handleMessage(conn, rawMessage)
+	shouldClose := server.routeMessage(ctx, conn, rawMessage)
 
 	if shouldClose {
 		t.Error("expected shouldClose=false for recoverable validation error")
@@ -379,7 +385,7 @@ func TestHandleMessage_ValidationError(t *testing.T) {
 	}
 }
 
-func TestHandleMessage_VersionMismatch(t *testing.T) {
+func TestRouteMessage_VersionMismatch(t *testing.T) {
 	logger := &mockLogger{}
 	clock := &mockClock{timestamp: "2025-10-23T12:00:00Z"}
 	conn := &mockWebSocketConn{}
@@ -388,10 +394,11 @@ func TestHandleMessage_VersionMismatch(t *testing.T) {
 		clock:  clock,
 	}
 
+	ctx := context.Background()
 	// Wrong version - non-recoverable
 	rawMessage := []byte(`{"version":"2.0","type":"test:echo"}`)
 
-	shouldClose := server.handleMessage(conn, rawMessage)
+	shouldClose := server.routeMessage(ctx, conn, rawMessage)
 
 	if !shouldClose {
 		t.Error("expected shouldClose=true for version mismatch")
@@ -409,7 +416,8 @@ func TestNewServer_UsesIDGenerator(t *testing.T) {
 	clock := &mockClock{timestamp: "2025-10-23T12:00:00Z"}
 	upgrader := &mockUpgrader{}
 
-	server := NewServer(idGen, logger, clock, upgrader)
+	// sessionManager not used in this test, pass nil
+	server := NewServer(idGen, logger, clock, upgrader, nil)
 
 	if server.serverID != "test-server-123" {
 		t.Errorf("expected serverID test-server-123, got %s", server.serverID)
@@ -422,7 +430,8 @@ func TestNewServer_InjectsDependencies(t *testing.T) {
 	clock := &mockClock{timestamp: "2025-10-23T12:00:00Z"}
 	upgrader := &mockUpgrader{}
 
-	server := NewServer(idGen, logger, clock, upgrader)
+	// Test with nil sessionManager - just verify the field is properly injected
+	server := NewServer(idGen, logger, clock, upgrader, nil)
 
 	// Verify all dependencies are set
 	if server.logger == nil {
@@ -434,4 +443,100 @@ func TestNewServer_InjectsDependencies(t *testing.T) {
 	if server.upgrader == nil {
 		t.Error("expected upgrader to be set")
 	}
+	// sessionManager can be nil in this test, we're just verifying the field exists
 }
+
+func TestMapError_GenericError(t *testing.T) {
+	server := &Server{logger: &mockLogger{}}
+
+	// Test generic error that's not a session sentinel
+	genericErr := errors.New("some random error")
+
+	code, _, recoverable := server.mapError(genericErr)
+
+	// Should map to INTERNAL_ERROR (recoverable fallback)
+	if code != "INTERNAL_ERROR" {
+		t.Errorf("expected code INTERNAL_ERROR for non-sentinel error, got %s", code)
+	}
+	if !recoverable {
+		t.Error("expected recoverable=true for unknown error")
+	}
+}
+
+func TestMapError_ValidationError(t *testing.T) {
+	server := &Server{logger: &mockLogger{}}
+
+	validationErr := ValidationError{
+		Code:        "MISSING_FIELD",
+		Message:     "Missing required field: foo",
+		Recoverable: false,
+	}
+
+	code, message, recoverable := server.mapError(validationErr)
+
+	if code != "MISSING_FIELD" {
+		t.Errorf("expected code MISSING_FIELD, got %s", code)
+	}
+	if message != "Missing required field: foo" {
+		t.Errorf("expected original message, got %s", message)
+	}
+	if recoverable {
+		t.Error("expected recoverable=false from ValidationError")
+	}
+}
+
+func TestMapError_UnknownError(t *testing.T) {
+	server := &Server{logger: &mockLogger{}}
+
+	unknownErr := errors.New("something unexpected happened")
+
+	code, message, recoverable := server.mapError(unknownErr)
+
+	if code != "INTERNAL_ERROR" {
+		t.Errorf("expected code INTERNAL_ERROR, got %s", code)
+	}
+	if message != "something unexpected happened" {
+		t.Errorf("expected error message, got %s", message)
+	}
+	if !recoverable {
+		t.Error("expected recoverable=true for unknown errors")
+	}
+}
+
+// Integration tests with actual session errors
+
+func TestMapError_SessionNotFoundSentinel(t *testing.T) {
+	server := &Server{logger: &mockLogger{}}
+
+	// Wrap session.ErrSessionNotFound as GetAgent would
+	err := fmt.Errorf("%w: test-session", session.ErrSessionNotFound)
+
+	code, _, recoverable := server.mapError(err)
+
+	if code != "SESSION_NOT_FOUND" {
+		t.Errorf("expected code SESSION_NOT_FOUND, got %s", code)
+	}
+	if recoverable {
+		t.Error("expected recoverable=false for session not found")
+	}
+}
+
+func TestMapError_AgentNotFoundSentinel(t *testing.T) {
+	server := &Server{logger: &mockLogger{}}
+
+	// Wrap session.ErrAgentNotFound as GetAgent would
+	err := fmt.Errorf("%w: role=auth session=test-session", session.ErrAgentNotFound)
+
+	code, _, recoverable := server.mapError(err)
+
+	if code != "AGENT_NOT_FOUND" {
+		t.Errorf("expected code AGENT_NOT_FOUND, got %s", code)
+	}
+	if recoverable {
+		t.Error("expected recoverable=false for agent not found")
+	}
+}
+
+// TODO: Add handler tests for handleSessionCreate, handleAgentSpawn, handleAgentMessage
+// Requires creating a SessionManager interface to allow mocking
+// Deferred to follow-up work
