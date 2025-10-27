@@ -122,6 +122,8 @@ func (m *Manager) List(filter *SessionFilter) []*UserSession {
 // SpawnAgent spawns ONE agent into an existing user session
 // Creates workspace directory if needed, spawns ACP client, adds to session
 // Returns error if spawn fails, but user session stays ACTIVE
+//
+//nolint:gocyclo // Complexity required for TOCTOU prevention and proper error handling
 func (m *Manager) SpawnAgent(ctx context.Context, sessionID, role, workspace string) error {
 	// Validate inputs
 	if role == "" {
@@ -160,19 +162,21 @@ func (m *Manager) SpawnAgent(ctx context.Context, sessionID, role, workspace str
 		return fmt.Errorf("session not found: %s", sessionID)
 	}
 
-	// Check if session is active
-	if session.GetState() != StateActive {
-		return fmt.Errorf("session %s is not active (state=%s)", sessionID, session.GetState())
+	// Initial validation with lock (check-lock-check pattern to prevent TOCTOU)
+	session.mu.Lock()
+	if session.state != StateActive {
+		session.mu.Unlock()
+		return fmt.Errorf("session %s is not active (state=%s)", sessionID, session.state)
 	}
-
-	// Check if agent already exists
-	if session.GetAgent(role) != nil {
+	if session.agents[role] != nil {
+		session.mu.Unlock()
 		return fmt.Errorf("agent %s already exists in session %s", role, sessionID)
 	}
+	session.mu.Unlock()
 
 	m.logger.Printf("Spawning agent: session=%s role=%s workspace=%s", sessionID, role, absPath)
 
-	// Create workspace directory if needed
+	// Create workspace directory if needed (I/O - no lock held)
 	err = os.MkdirAll(absPath, 0o750)
 	if err != nil {
 		return fmt.Errorf("failed to create workspace directory: %w", err)
@@ -182,13 +186,27 @@ func (m *Manager) SpawnAgent(ctx context.Context, sessionID, role, workspace str
 	now := m.clock.Now()
 	agent := NewAgentSession(role, absPath, now)
 
-	// Add agent to session (in SPAWNING state)
+	// Re-check and add agent atomically (prevents TOCTOU race)
 	session.mu.Lock()
+
+	// Re-check state (session could have been terminated during I/O)
+	if session.state != StateActive {
+		session.mu.Unlock()
+		return fmt.Errorf("session %s is not active (state=%s)", sessionID, session.state)
+	}
+
+	// Re-check agent doesn't exist (another goroutine could have added it)
+	if session.agents[role] != nil {
+		session.mu.Unlock()
+		return fmt.Errorf("agent %s already exists in session %s", role, sessionID)
+	}
+
+	// Add agent to session in SPAWNING state
 	session.addAgent(agent)
 	session.setLastActive(now)
 	session.mu.Unlock()
 
-	// Spawn ACP client
+	// Spawn ACP client (I/O - no lock held)
 	acpClient, err := m.clientFactory.NewClient(absPath)
 	if err != nil {
 		// Mark agent as FAILED
