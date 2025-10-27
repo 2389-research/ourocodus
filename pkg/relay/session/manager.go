@@ -143,7 +143,12 @@ func (m *Manager) SpawnAgent(ctx context.Context, sessionID, role, workspace str
 		return fmt.Errorf("invalid base workspace directory: %w", err)
 	}
 
-	// Use filepath.Rel to prevent directory name prefix bypass attacks
+	// Defense-in-depth: Check prefix with separator to prevent directory name bypass
+	if absPath != baseAbs && !strings.HasPrefix(absPath, baseAbs+string(os.PathSeparator)) {
+		return fmt.Errorf("workspace path must be under base directory %s", m.baseWorkspaceDir)
+	}
+
+	// Use filepath.Rel to prevent directory traversal with ".."
 	relPath, err := filepath.Rel(baseAbs, absPath)
 	if err != nil || strings.HasPrefix(relPath, "..") || relPath == ".." {
 		return fmt.Errorf("workspace path must be under base directory %s", m.baseWorkspaceDir)
@@ -251,18 +256,22 @@ func (m *Manager) TerminateAgent(ctx context.Context, sessionID, role string) er
 
 	m.logger.Printf("Terminating agent: session=%s role=%s", sessionID, role)
 
-	// Close ACP client if present
-	if acpClient := agent.GetACPClient(); acpClient != nil {
+	// Close ACP client if present (with double-close protection)
+	agent.mu.Lock()
+	acpClient := agent.acpClient
+	if acpClient != nil {
+		agent.acpClient = nil // Clear before Close to prevent double-close
+	}
+	agent.setAgentState(AgentTerminated)
+	agent.mu.Unlock()
+
+	// Close outside the lock
+	if acpClient != nil {
 		if err := acpClient.Close(); err != nil {
 			m.logger.Printf("Error closing ACP client: session=%s role=%s error=%v", sessionID, role, err)
 			// Continue with cleanup even if close fails
 		}
 	}
-
-	// Mark agent as terminated and remove from session
-	agent.mu.Lock()
-	agent.setAgentState(AgentTerminated)
-	agent.mu.Unlock()
 
 	session.mu.Lock()
 	session.removeAgent(role)
@@ -282,6 +291,11 @@ func (m *Manager) TerminateUserSession(ctx context.Context, sessionID string) er
 		m.logger.Printf("Session not found during termination: %s (already cleaned?)", sessionID)
 		return nil
 	}
+
+	// Set state to TERMINATED immediately to prevent new agent spawns during termination
+	session.mu.Lock()
+	session.setState(StateTerminated)
+	session.mu.Unlock()
 
 	m.logger.Printf("Terminating user session: id=%s", sessionID)
 
@@ -304,8 +318,17 @@ func (m *Manager) TerminateUserSession(ctx context.Context, sessionID string) er
 				agentCtx, cancel := context.WithTimeout(ctx, agentTimeout)
 				defer cancel()
 
-				// Close ACP client
-				if acpClient := a.GetACPClient(); acpClient != nil {
+				// Close ACP client (with double-close protection)
+				a.mu.Lock()
+				acpClient := a.acpClient
+				if acpClient != nil {
+					a.acpClient = nil // Clear before Close to prevent double-close
+				}
+				a.setAgentState(AgentTerminated)
+				a.mu.Unlock()
+
+				// Close outside the lock
+				if acpClient != nil {
 					done := make(chan error, 1)
 					go func() {
 						done <- acpClient.Close()
@@ -320,11 +343,6 @@ func (m *Manager) TerminateUserSession(ctx context.Context, sessionID string) er
 						m.logger.Printf("Agent close timeout: session=%s role=%s", sessionID, r)
 					}
 				}
-
-				// Mark agent as terminated
-				a.mu.Lock()
-				a.setAgentState(AgentTerminated)
-				a.mu.Unlock()
 			}(role, agent)
 		}
 
@@ -361,12 +379,7 @@ func (m *Manager) TerminateUserSession(ctx context.Context, sessionID string) er
 		}
 	}
 
-	// Mark session as terminated
-	session.mu.Lock()
-	session.setState(StateTerminated)
-	session.mu.Unlock()
-
-	// Remove from store
+	// Remove from store (state already set to TERMINATED above)
 	m.store.Delete(sessionID)
 
 	m.logger.Printf("User session terminated: id=%s", sessionID)
