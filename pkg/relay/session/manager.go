@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -33,12 +35,13 @@ type Logger interface {
 // Manager coordinates user session and agent lifecycle with dependency injection
 // Composes Store + ClientFactory + Cleaner for testable orchestration
 type Manager struct {
-	store         Store
-	idGen         IDGenerator
-	clock         Clock
-	cleaner       Cleaner
-	logger        Logger
-	clientFactory ClientFactory
+	store            Store
+	idGen            IDGenerator
+	clock            Clock
+	cleaner          Cleaner
+	logger           Logger
+	clientFactory    ClientFactory
+	baseWorkspaceDir string
 }
 
 // NewManager creates a session manager with injected dependencies.
@@ -46,7 +49,10 @@ type Manager struct {
 // All dependencies are required and must be non-nil. This constructor panics on
 // nil collaborators because missing dependencies indicate programmer configuration
 // bugs, not runtime failures.
-func NewManager(store Store, idGen IDGenerator, clock Clock, cleaner Cleaner, logger Logger, clientFactory ClientFactory) *Manager {
+//
+// baseWorkspaceDir specifies the base directory under which all workspace paths
+// must be constrained. If empty, defaults to "./workspaces".
+func NewManager(store Store, idGen IDGenerator, clock Clock, cleaner Cleaner, logger Logger, clientFactory ClientFactory, baseWorkspaceDir string) *Manager {
 	if store == nil {
 		panic("store cannot be nil")
 	}
@@ -66,13 +72,18 @@ func NewManager(store Store, idGen IDGenerator, clock Clock, cleaner Cleaner, lo
 		panic("clientFactory cannot be nil")
 	}
 
+	if baseWorkspaceDir == "" {
+		baseWorkspaceDir = "./workspaces"
+	}
+
 	return &Manager{
-		store:         store,
-		idGen:         idGen,
-		clock:         clock,
-		cleaner:       cleaner,
-		logger:        logger,
-		clientFactory: clientFactory,
+		store:            store,
+		idGen:            idGen,
+		clock:            clock,
+		cleaner:          cleaner,
+		logger:           logger,
+		clientFactory:    clientFactory,
+		baseWorkspaceDir: baseWorkspaceDir,
 	}
 }
 
@@ -120,6 +131,22 @@ func (m *Manager) SpawnAgent(ctx context.Context, sessionID, role, workspace str
 		return fmt.Errorf("workspace cannot be empty")
 	}
 
+	// Validate and constrain workspace path under base directory
+	cleanPath := filepath.Clean(workspace)
+	absPath, err := filepath.Abs(cleanPath)
+	if err != nil {
+		return fmt.Errorf("invalid workspace path: %w", err)
+	}
+
+	baseAbs, err := filepath.Abs(m.baseWorkspaceDir)
+	if err != nil {
+		return fmt.Errorf("invalid base workspace directory: %w", err)
+	}
+
+	if !strings.HasPrefix(absPath, baseAbs) {
+		return fmt.Errorf("workspace path must be under base directory %s", m.baseWorkspaceDir)
+	}
+
 	// Get user session
 	session := m.store.Get(sessionID)
 	if session == nil {
@@ -136,16 +163,17 @@ func (m *Manager) SpawnAgent(ctx context.Context, sessionID, role, workspace str
 		return fmt.Errorf("agent %s already exists in session %s", role, sessionID)
 	}
 
-	m.logger.Printf("Spawning agent: session=%s role=%s workspace=%s", sessionID, role, workspace)
+	m.logger.Printf("Spawning agent: session=%s role=%s workspace=%s", sessionID, role, absPath)
 
 	// Create workspace directory if needed
-	if err := os.MkdirAll(workspace, 0o750); err != nil {
+	err = os.MkdirAll(absPath, 0o750)
+	if err != nil {
 		return fmt.Errorf("failed to create workspace directory: %w", err)
 	}
 
 	// Create agent session in SPAWNING state
 	now := m.clock.Now()
-	agent := NewAgentSession(role, workspace, now)
+	agent := NewAgentSession(role, absPath, now)
 
 	// Add agent to session (in SPAWNING state)
 	session.mu.Lock()
@@ -154,7 +182,7 @@ func (m *Manager) SpawnAgent(ctx context.Context, sessionID, role, workspace str
 	session.mu.Unlock()
 
 	// Spawn ACP client
-	acpClient, err := m.clientFactory.NewClient(workspace)
+	acpClient, err := m.clientFactory.NewClient(absPath)
 	if err != nil {
 		// Mark agent as FAILED
 		agent.mu.Lock()
@@ -317,6 +345,14 @@ func (m *Manager) TerminateUserSession(ctx context.Context, sessionID string) er
 	if err := m.cleaner.Cleanup(ctx, session); err != nil {
 		m.logger.Printf("Cleanup error for session %s: %v", sessionID, err)
 		// Continue with termination even if hook fails
+	}
+
+	// Close WebSocket connection
+	if session.webSocket != nil {
+		if err := session.webSocket.Close(); err != nil {
+			m.logger.Printf("Error closing WebSocket for session %s: %v", sessionID, err)
+			// Don't fail termination due to WS close error
+		}
 	}
 
 	// Mark session as terminated

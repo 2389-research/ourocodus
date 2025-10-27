@@ -20,7 +20,10 @@ Wire the relay session manager to real ACP agent processes so that each active s
 - **State orchestration via session manager** – All lifecycle mutations must go through the `session.Manager` API from issue #6. The ACP integration layer only calls `Manager` methods; it never reaches into session internals.
 - **Deterministic teardown** – Termination paths must use injected `Cleaner`/`Reaper` collaborators so tests can assert ordering without time-dependent sleeps.
 
-## Scope
+## Scope (original design; superseded by actual implementation in this PR)
+
+**Note**: The implementation in this PR simplified the architecture by integrating directly into `pkg/relay/session/` instead of creating a separate `pkg/relay/agent/` package. The original scope is preserved below for historical context.
+
 1. **Agent runtime package** – Create `pkg/relay/agent/` with narrow domain types:
    - `Spec` struct describing role, workspace root, env vars, and command template.
    - `Runtime` struct holding the active `session.Handle`, `acp.Client`, cancel func, and diagnostic metadata.
@@ -45,7 +48,10 @@ Wire the relay session manager to real ACP agent processes so that each active s
 - Observability/metrics hooks beyond simple logging stubs.
 - Container orchestration; continue spawning local binaries per Phase 1 assumptions.
 
-## Deliverables
+## Deliverables (original design; superseded by actual implementation in this PR)
+
+**Actual Implementation**: See "Acceptance Criteria (Actual Implementation)" section below for what was delivered.
+
 - New package `pkg/relay/agent/` containing:
   - `spec.go` (`Spec`, validation helpers).
   - `runtime.go` (`Runtime`, getters, construction helpers).

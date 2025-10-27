@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -65,11 +66,25 @@ func (m *mockLogger) MessageCount() int {
 	return len(m.messages)
 }
 
-type mockWebSocket struct{}
+type mockWebSocket struct {
+	mu          sync.Mutex
+	closeCalled bool
+}
 
 func (m *mockWebSocket) WriteJSON(v interface{}) error     { return nil }
 func (m *mockWebSocket) ReadMessage() (int, []byte, error) { return 0, nil, nil }
-func (m *mockWebSocket) Close() error                      { return nil }
+func (m *mockWebSocket) Close() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.closeCalled = true
+	return nil
+}
+
+func (m *mockWebSocket) WasClosed() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.closeCalled
+}
 
 type mockACPClient struct {
 	sendFunc  func(string) (interface{}, error)
@@ -123,7 +138,8 @@ func setupManager() (*Manager, *mockIDGenerator, *mockClock, *mockCleaner, *mock
 	logger := &mockLogger{}
 	clientFactory := &mockClientFactory{}
 
-	manager := NewManager(store, idGen, clock, cleaner, logger, clientFactory)
+	// Use current directory as base for tests (allows testdata/ paths)
+	manager := NewManager(store, idGen, clock, cleaner, logger, clientFactory, ".")
 	return manager, idGen, clock, cleaner, logger, clientFactory
 }
 
@@ -455,6 +471,34 @@ func TestTerminateUserSession_Idempotent(t *testing.T) {
 	}
 }
 
+func TestTerminateUserSession_ClosesWebSocket(t *testing.T) {
+	manager, _, _, _, _, _ := setupManager()
+	ctx := context.Background()
+	ws := &mockWebSocket{}
+
+	// Create session
+	session, err := manager.CreateUserSession(ctx, ws)
+	if err != nil {
+		t.Fatalf("Failed to create session: %v", err)
+	}
+	sessionID := session.GetID()
+
+	// Verify WebSocket not closed yet
+	if ws.WasClosed() {
+		t.Fatal("WebSocket should not be closed before termination")
+	}
+
+	// Terminate session
+	if err := manager.TerminateUserSession(ctx, sessionID); err != nil {
+		t.Fatalf("Failed to terminate session: %v", err)
+	}
+
+	// Verify WebSocket was closed
+	if !ws.WasClosed() {
+		t.Fatal("WebSocket.Close() should have been called during termination")
+	}
+}
+
 func TestTerminateAgent_Idempotent(t *testing.T) {
 	manager, _, _, _, _, _ := setupManager()
 	ctx := context.Background()
@@ -584,5 +628,68 @@ func TestCount(t *testing.T) {
 	count := manager.Count()
 	if count == 0 {
 		t.Error("Expected at least 1 session after creating sessions")
+	}
+}
+
+// --- Security Tests ---
+
+func TestSpawnAgent_RejectsPathTraversal(t *testing.T) {
+	manager, _, _, _, _, _ := setupManager()
+	ctx := context.Background()
+	ws := &mockWebSocket{}
+
+	// Create session
+	session, _ := manager.CreateUserSession(ctx, ws)
+	sessionID := session.GetID()
+
+	tests := []struct {
+		name      string
+		workspace string
+	}{
+		{"parent directory traversal", "../../../etc/passwd"},
+		{"absolute path outside base", "/tmp/evil"},
+		{"traversal within path", "workspace/../../escape"},
+		{"traversal with dots", "./workspaces/../../../etc"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := manager.SpawnAgent(ctx, sessionID, "testRole", tt.workspace)
+			if err == nil {
+				t.Errorf("Expected error for workspace %q, but got nil", tt.workspace)
+			}
+			if !strings.Contains(err.Error(), "must be under base directory") {
+				t.Errorf("Expected path traversal error, got: %v", err)
+			}
+		})
+	}
+}
+
+func TestSpawnAgent_AcceptsValidPaths(t *testing.T) {
+	manager, _, _, _, _, _ := setupManager()
+	ctx := context.Background()
+	ws := &mockWebSocket{}
+
+	// Create session
+	session, _ := manager.CreateUserSession(ctx, ws)
+	sessionID := session.GetID()
+
+	tests := []struct {
+		name      string
+		workspace string
+	}{
+		{"relative path under base", "./workspaces/test1"},
+		{"another relative path", "workspaces/test2"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := manager.SpawnAgent(ctx, sessionID, tt.name, tt.workspace)
+			// Should not error due to path validation
+			// (May still error due to ACP client creation, but that's expected)
+			if err != nil && strings.Contains(err.Error(), "must be under base directory") {
+				t.Errorf("Valid workspace path %q was rejected: %v", tt.workspace, err)
+			}
+		})
 	}
 }

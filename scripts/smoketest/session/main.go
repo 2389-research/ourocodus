@@ -45,7 +45,7 @@ func runSessionSmokeTest(verbose bool) error {
 		return &fakeACPClient{workspace: workspace}, nil
 	})
 
-	manager := session.NewManager(store, idGen, clock, cleaner, logger, clientFactory)
+	manager := session.NewManager(store, idGen, clock, cleaner, logger, clientFactory, "")
 
 	announce("🧪", "Test 1: Create UserSession")
 	if err := testCreateUserSession(ctx, manager, verbose); err != nil {
@@ -194,7 +194,7 @@ func testAgentSpawnFailureIsolation(ctx context.Context, verbose bool) error {
 		return &fakeACPClient{workspace: workspace}, nil
 	})
 
-	manager := session.NewManager(store, idGen, clock, cleaner, logger, failingFactory)
+	manager := session.NewManager(store, idGen, clock, cleaner, logger, failingFactory, "")
 
 	ws := &fakeWebSocket{}
 	userSession, _ := manager.CreateUserSession(ctx, ws)
@@ -368,7 +368,7 @@ func testListAndFilter(ctx context.Context, verbose bool) error {
 		return &fakeACPClient{workspace: workspace}, nil
 	})
 
-	freshManager := session.NewManager(store, idGen, clock, cleaner, logger, clientFactory)
+	freshManager := session.NewManager(store, idGen, clock, cleaner, logger, clientFactory, "")
 
 	// Create multiple sessions
 	ws1 := &fakeWebSocket{}

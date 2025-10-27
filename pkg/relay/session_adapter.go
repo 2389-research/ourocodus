@@ -68,5 +68,6 @@ func NewSessionManager(logger Logger, clock Clock, idGen IDGenerator) (*session.
 		return nil, err
 	}
 
-	return session.NewManager(store, sessionIDGen, sessionClock, cleaner, sessionLogger, clientFactory), nil
+	// Use default base workspace directory ("./workspaces")
+	return session.NewManager(store, sessionIDGen, sessionClock, cleaner, sessionLogger, clientFactory, ""), nil
 }
