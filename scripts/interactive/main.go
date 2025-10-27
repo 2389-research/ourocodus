@@ -26,6 +26,7 @@ type replState struct {
 	agents    map[string]bool // Track spawned agents
 }
 
+//nolint:gocyclo // Interactive REPL command dispatch justifies complexity
 func main() {
 	fmt.Println("🎮 Ourocodus Interactive Demo - REPL")
 	fmt.Println("====================================")
@@ -45,7 +46,7 @@ func main() {
 
 	// Start relay server
 	fmt.Println("🚀 Starting relay server...")
-	relayCmd := exec.Command(relayPath)
+	relayCmd := exec.Command(relayPath) //#nosec G204 -- relayPath is validated to exist before use
 	relayCmd.Env = append(os.Environ(),
 		"OUROCODUS_ACP_BINARY="+echoAgentPath,
 		"ANTHROPIC_API_KEY=interactive-demo-key",
@@ -80,7 +81,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("❌ Failed to connect: %v", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	// Receive handshake
 	var handshake map[string]interface{}

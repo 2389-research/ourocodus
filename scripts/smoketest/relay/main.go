@@ -292,6 +292,7 @@ func ensureClosedAfterTermination(conn *websocket.Conn) error {
 	return nil
 }
 
+//nolint:gocyclo // Multi-step integration test justifies complexity
 func verifySessionLifecycle(conn *websocket.Conn, verbose bool) (string, error) {
 	// Step 1: Create session
 	createMsg := map[string]interface{}{
@@ -316,7 +317,7 @@ func verifySessionLifecycle(conn *websocket.Conn, verbose bool) (string, error) 
 	if !ok || sessionID == "" {
 		return "", fmt.Errorf("missing or invalid sessionId in response: %s", stringify(createResp))
 	}
-	if _, ok := createResp["timestamp"].(string); !ok {
+	if _, ok = createResp["timestamp"].(string); !ok {
 		return "", fmt.Errorf("missing timestamp in session:created: %s", stringify(createResp))
 	}
 	success("✅", "Session created: %s", sessionID)
@@ -330,7 +331,7 @@ func verifySessionLifecycle(conn *websocket.Conn, verbose bool) (string, error) 
 		"workspace": "./workspaces/smoke-test",
 	}
 	debug(verbose, "📤", "Sending agent:spawn: %s", stringify(spawnMsg))
-	if err := writeJSON(conn, spawnMsg); err != nil {
+	if err = writeJSON(conn, spawnMsg); err != nil {
 		return "", fmt.Errorf("failed to send agent:spawn: %w", err)
 	}
 
@@ -360,7 +361,7 @@ func verifySessionLifecycle(conn *websocket.Conn, verbose bool) (string, error) 
 		"content":   "hello",
 	}
 	debug(verbose, "📤", "Sending agent:message: %s", stringify(messageMsg))
-	if err := writeJSON(conn, messageMsg); err != nil {
+	if err = writeJSON(conn, messageMsg); err != nil {
 		return "", fmt.Errorf("failed to send agent:message: %w", err)
 	}
 

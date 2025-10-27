@@ -37,7 +37,7 @@ func main() {
 
 	// Start relay server
 	fmt.Println("🚀 Starting relay server...")
-	relayCmd := exec.Command(relayPath)
+	relayCmd := exec.Command(relayPath) //#nosec G204 -- relayPath is validated to exist before use
 	relayCmd.Env = append(os.Environ(),
 		"OUROCODUS_ACP_BINARY="+echoAgentPath,
 		"ANTHROPIC_API_KEY=demo-key",
@@ -60,11 +60,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("❌ Failed to connect: %v", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	// Receive handshake
 	var handshake map[string]interface{}
-	if err := conn.ReadJSON(&handshake); err != nil {
+	if err = conn.ReadJSON(&handshake); err != nil {
 		log.Fatalf("❌ Failed to read handshake: %v", err)
 	}
 	fmt.Printf("✅ Connected! Server ID: %s\n\n", handshake["serverId"])
@@ -76,12 +76,12 @@ func main() {
 	fmt.Println()
 
 	// Scenario 1: Session Lifecycle
-	if err := demoSessionLifecycle(conn); err != nil {
+	if err = demoSessionLifecycle(conn); err != nil {
 		log.Fatalf("❌ Scenario 1 failed: %v", err)
 	}
 
 	// Scenario 2: Clear Error Semantics
-	if err := demoErrorSemantics(conn); err != nil {
+	if err = demoErrorSemantics(conn); err != nil {
 		log.Fatalf("❌ Scenario 2 failed: %v", err)
 	}
 
@@ -129,7 +129,7 @@ func demoSessionLifecycle(conn *websocket.Conn) error {
 		}
 	}
 
-	fmt.Println("\n✨ Session lifecycle complete!\n")
+	fmt.Println("\n✨ Session lifecycle complete!")
 	return nil
 }
 
@@ -166,7 +166,7 @@ func demoErrorSemantics(conn *websocket.Conn) error {
 	fmt.Printf("   Message: %s\n", message)
 	fmt.Printf("   Recoverable: %v\n", recoverable)
 
-	if code != "SESSION_NOT_FOUND" || recoverable != false {
+	if code != "SESSION_NOT_FOUND" || recoverable {
 		return fmt.Errorf("expected SESSION_NOT_FOUND (non-recoverable), got %s (recoverable=%v)", code, recoverable)
 	}
 
@@ -204,14 +204,13 @@ func demoErrorSemantics(conn *websocket.Conn) error {
 	fmt.Printf("   Message: %s\n", message)
 	fmt.Printf("   Recoverable: %v\n", recoverable)
 
-	if code != "AGENT_NOT_FOUND" || recoverable != false {
+	if code != "AGENT_NOT_FOUND" || recoverable {
 		return fmt.Errorf("expected AGENT_NOT_FOUND (non-recoverable), got %s (recoverable=%v)", code, recoverable)
 	}
 
-	fmt.Println("✨ Error semantics verified!\n")
+	fmt.Println("✨ Error semantics verified!")
 	return nil
 }
-
 
 // Helper functions
 func dialRelay() (*websocket.Conn, error) {
