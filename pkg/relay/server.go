@@ -300,7 +300,7 @@ func (s *Server) handleAgentMessage(ctx context.Context, conn WebSocketConn, raw
 		return s.handleValidationError(conn, validationErr)
 	}
 
-	_ = ctx // TODO(Task 4): Pass context to ACP client when timeout support is added
+	_ = ctx // TODO: Pass context to ACP client when timeout/cancellation support is implemented in ACPClient.SendMessage
 
 	s.logger.Printf("Routing message to agent: session=%s role=%s",
 		msg.SessionID, msg.Role)
