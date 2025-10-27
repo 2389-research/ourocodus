@@ -471,7 +471,7 @@ func TestTerminateUserSession_Idempotent(t *testing.T) {
 	}
 }
 
-func TestTerminateUserSession_ClosesWebSocket(t *testing.T) {
+func TestTerminateUserSession_DoesNotCloseWebSocket(t *testing.T) {
 	manager, _, _, _, _, _ := setupManager()
 	ctx := context.Background()
 	ws := &mockWebSocket{}
@@ -493,9 +493,14 @@ func TestTerminateUserSession_ClosesWebSocket(t *testing.T) {
 		t.Fatalf("Failed to terminate session: %v", err)
 	}
 
-	// Verify WebSocket was closed
-	if !ws.WasClosed() {
-		t.Fatal("WebSocket.Close() should have been called during termination")
+	// Verify WebSocket was NOT closed (server layer owns WebSocket closing)
+	if ws.WasClosed() {
+		t.Fatal("WebSocket.Close() should NOT be called by session manager (server owns closing)")
+	}
+
+	// Verify session was removed from store
+	if manager.Get(sessionID) != nil {
+		t.Fatal("Session should be removed from store after termination")
 	}
 }
 
@@ -704,5 +709,77 @@ func TestSpawnAgent_AcceptsValidPaths(t *testing.T) {
 				t.Errorf("Valid workspace path %q was rejected: %v", tt.workspace, err)
 			}
 		})
+	}
+}
+
+func TestGetAgentHistory(t *testing.T) {
+	manager, _, clock, _, _, _ := setupManager()
+	ctx := context.Background()
+	ws := &mockWebSocket{}
+
+	// Create session and spawn agent
+	session, err := manager.CreateUserSession(ctx, ws)
+	if err != nil {
+		t.Fatalf("Failed to create session: %v", err)
+	}
+	sessionID := session.GetID()
+
+	err = manager.SpawnAgent(ctx, sessionID, "auth", "testdata/agent/auth")
+	if err != nil {
+		t.Fatalf("Failed to spawn agent: %v", err)
+	}
+
+	// Get agent and add some messages
+	agent, err := manager.GetAgent(sessionID, "auth")
+	if err != nil {
+		t.Fatalf("Failed to get agent: %v", err)
+	}
+
+	now := clock.Now()
+	agent.AddMessage("user", "Hello", now)
+	agent.AddMessage("agent", "Hi there", now)
+
+	// Get history via Manager API
+	history, err := manager.GetAgentHistory(sessionID, "auth")
+	if err != nil {
+		t.Fatalf("Failed to get agent history: %v", err)
+	}
+
+	if len(history) != 2 {
+		t.Fatalf("Expected 2 messages, got %d", len(history))
+	}
+
+	if history[0].From != "user" || history[0].Content != "Hello" {
+		t.Error("First message incorrect")
+	}
+
+	if history[1].From != "agent" || history[1].Content != "Hi there" {
+		t.Error("Second message incorrect")
+	}
+}
+
+func TestGetAgentHistory_SessionNotFound(t *testing.T) {
+	manager, _, _, _, _, _ := setupManager()
+
+	_, err := manager.GetAgentHistory("nonexistent", "auth")
+	if err == nil {
+		t.Fatal("Expected error for nonexistent session")
+	}
+}
+
+func TestGetAgentHistory_AgentNotFound(t *testing.T) {
+	manager, _, _, _, _, _ := setupManager()
+	ctx := context.Background()
+	ws := &mockWebSocket{}
+
+	// Create session without spawning agent
+	session, err := manager.CreateUserSession(ctx, ws)
+	if err != nil {
+		t.Fatalf("Failed to create session: %v", err)
+	}
+
+	_, err = manager.GetAgentHistory(session.GetID(), "nonexistent")
+	if err == nil {
+		t.Fatal("Expected error for nonexistent agent")
 	}
 }

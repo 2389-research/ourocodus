@@ -165,7 +165,7 @@ func (m *Manager) SpawnAgent(ctx context.Context, sessionID, role, workspace str
 	// Get user session
 	session := m.store.Get(sessionID)
 	if session == nil {
-		return fmt.Errorf("session not found: %s", sessionID)
+		return fmt.Errorf("%w: %s", ErrSessionNotFound, sessionID)
 	}
 
 	// Initial validation with lock (check-lock-check pattern to prevent TOCTOU)
@@ -241,12 +241,12 @@ func (m *Manager) SpawnAgent(ctx context.Context, sessionID, role, workspace str
 func (m *Manager) GetAgent(sessionID, role string) (*AgentSession, error) {
 	session := m.store.Get(sessionID)
 	if session == nil {
-		return nil, fmt.Errorf("session not found: %s", sessionID)
+		return nil, fmt.Errorf("%w: %s", ErrSessionNotFound, sessionID)
 	}
 
 	agent := session.GetAgent(role)
 	if agent == nil {
-		return nil, fmt.Errorf("agent %s not found in session %s", role, sessionID)
+		return nil, fmt.Errorf("%w: role=%s session=%s", ErrAgentNotFound, role, sessionID)
 	}
 
 	return agent, nil
@@ -256,10 +256,20 @@ func (m *Manager) GetAgent(sessionID, role string) (*AgentSession, error) {
 func (m *Manager) ListAgents(sessionID string) (map[string]*AgentSession, error) {
 	session := m.store.Get(sessionID)
 	if session == nil {
-		return nil, fmt.Errorf("session not found: %s", sessionID)
+		return nil, fmt.Errorf("%w: %s", ErrSessionNotFound, sessionID)
 	}
 
 	return session.ListAgents(), nil
+}
+
+// GetAgentHistory returns the conversation history for a specific agent
+func (m *Manager) GetAgentHistory(sessionID, role string) ([]Message, error) {
+	agent, err := m.GetAgent(sessionID, role)
+	if err != nil {
+		return nil, err
+	}
+
+	return agent.GetHistory(), nil
 }
 
 // TerminateAgent terminates ONE agent in a user session
@@ -392,17 +402,8 @@ func (m *Manager) TerminateUserSession(ctx context.Context, sessionID string) er
 		// Continue with termination even if hook fails
 	}
 
-	// Close WebSocket connection (with mutex protection)
-	session.mu.Lock()
-	ws := session.webSocket
-	session.mu.Unlock()
-
-	if ws != nil {
-		if err := ws.Close(); err != nil {
-			m.logger.Printf("Error closing WebSocket for session %s: %v", sessionID, err)
-			// Don't fail termination due to WS close error
-		}
-	}
+	// Note: WebSocket ownership belongs to server layer
+	// Server is responsible for closing the connection, not the session manager
 
 	// Remove from store (state already set to TERMINATED above)
 	m.store.Delete(sessionID)
@@ -415,7 +416,7 @@ func (m *Manager) TerminateUserSession(ctx context.Context, sessionID string) er
 func (m *Manager) RecordHeartbeat(ctx context.Context, sessionID string) error {
 	session := m.store.Get(sessionID)
 	if session == nil {
-		return fmt.Errorf("session not found: %s", sessionID)
+		return fmt.Errorf("%w: %s", ErrSessionNotFound, sessionID)
 	}
 
 	session.mu.Lock()

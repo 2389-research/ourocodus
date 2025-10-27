@@ -119,3 +119,300 @@ func TestValidateMessage_ValidMessage(t *testing.T) {
 		t.Fatalf("expected no error for valid message, got: %v", err)
 	}
 }
+
+// TestParseSessionCreateMessage tests parsing of session:create messages
+func TestParseSessionCreateMessage(t *testing.T) {
+	data := []byte(`{"version":"1.0","type":"session:create"}`)
+
+	msg, err := parseSessionCreateMessage(data)
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	if msg.Version != "1.0" {
+		t.Errorf("expected version 1.0, got %s", msg.Version)
+	}
+	if msg.Type != "session:create" {
+		t.Errorf("expected type session:create, got %s", msg.Type)
+	}
+}
+
+// TestParseSessionCreateMessage_InvalidJSON tests parsing with invalid JSON
+func TestParseSessionCreateMessage_InvalidJSON(t *testing.T) {
+	data := []byte(`{invalid}`)
+
+	_, err := parseSessionCreateMessage(data)
+	if err == nil {
+		t.Fatal("expected error for invalid JSON, got nil")
+	}
+
+	if verr, ok := err.(ValidationError); ok {
+		if verr.Code != "INVALID_MESSAGE" {
+			t.Errorf("expected code INVALID_MESSAGE, got %s", verr.Code)
+		}
+	} else {
+		t.Error("expected ValidationError type")
+	}
+}
+
+// TestValidateSessionCreateMessage tests validation (should always pass after base validation)
+func TestValidateSessionCreateMessage(t *testing.T) {
+	msg := SessionCreateMessage{
+		BaseMessage: BaseMessage{Version: "1.0", Type: "session:create"},
+	}
+
+	err := validateSessionCreateMessage(msg)
+	if err != nil {
+		t.Errorf("expected no error, got: %v", err)
+	}
+}
+
+// TestParseAgentSpawnMessage tests parsing of agent:spawn messages
+func TestParseAgentSpawnMessage(t *testing.T) {
+	data := []byte(`{"version":"1.0","type":"agent:spawn","sessionId":"sess123","role":"auth","workspace":"/path/to/workspace"}`)
+
+	msg, err := parseAgentSpawnMessage(data)
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	if msg.Version != "1.0" {
+		t.Errorf("expected version 1.0, got %s", msg.Version)
+	}
+	if msg.SessionID != "sess123" {
+		t.Errorf("expected sessionId sess123, got %s", msg.SessionID)
+	}
+	if msg.Role != "auth" {
+		t.Errorf("expected role auth, got %s", msg.Role)
+	}
+	if msg.Workspace != "/path/to/workspace" {
+		t.Errorf("expected workspace /path/to/workspace, got %s", msg.Workspace)
+	}
+}
+
+// TestValidateAgentSpawnMessage_MissingSessionID tests validation with missing sessionId
+func TestValidateAgentSpawnMessage_MissingSessionID(t *testing.T) {
+	msg := AgentSpawnMessage{
+		BaseMessage: BaseMessage{Version: "1.0", Type: "agent:spawn"},
+		Role:        "auth",
+		Workspace:   "/path",
+	}
+
+	err := validateAgentSpawnMessage(msg)
+	if err == nil {
+		t.Fatal("expected error for missing sessionId, got nil")
+	}
+
+	expectedMsg := "Missing required field: sessionId"
+	if err.Error() != expectedMsg {
+		t.Errorf("expected error %q, got %q", expectedMsg, err.Error())
+	}
+}
+
+// TestValidateAgentSpawnMessage_MissingRole tests validation with missing role
+func TestValidateAgentSpawnMessage_MissingRole(t *testing.T) {
+	msg := AgentSpawnMessage{
+		BaseMessage: BaseMessage{Version: "1.0", Type: "agent:spawn"},
+		SessionID:   "sess123",
+		Workspace:   "/path",
+	}
+
+	err := validateAgentSpawnMessage(msg)
+	if err == nil {
+		t.Fatal("expected error for missing role, got nil")
+	}
+
+	expectedMsg := "Missing required field: role"
+	if err.Error() != expectedMsg {
+		t.Errorf("expected error %q, got %q", expectedMsg, err.Error())
+	}
+}
+
+// TestValidateAgentSpawnMessage_MissingWorkspace tests validation with missing workspace
+func TestValidateAgentSpawnMessage_MissingWorkspace(t *testing.T) {
+	msg := AgentSpawnMessage{
+		BaseMessage: BaseMessage{Version: "1.0", Type: "agent:spawn"},
+		SessionID:   "sess123",
+		Role:        "auth",
+	}
+
+	err := validateAgentSpawnMessage(msg)
+	if err == nil {
+		t.Fatal("expected error for missing workspace, got nil")
+	}
+
+	expectedMsg := "Missing required field: workspace"
+	if err.Error() != expectedMsg {
+		t.Errorf("expected error %q, got %q", expectedMsg, err.Error())
+	}
+}
+
+// TestValidateAgentSpawnMessage_Valid tests validation with all fields
+func TestValidateAgentSpawnMessage_Valid(t *testing.T) {
+	msg := AgentSpawnMessage{
+		BaseMessage: BaseMessage{Version: "1.0", Type: "agent:spawn"},
+		SessionID:   "sess123",
+		Role:        "auth",
+		Workspace:   "/path",
+	}
+
+	err := validateAgentSpawnMessage(msg)
+	if err != nil {
+		t.Errorf("expected no error, got: %v", err)
+	}
+}
+
+// TestParseAgentMessageRequest tests parsing of agent:message messages
+func TestParseAgentMessageRequest(t *testing.T) {
+	data := []byte(`{"version":"1.0","type":"agent:message","sessionId":"sess123","role":"auth","content":"implement JWT"}`)
+
+	msg, err := parseAgentMessageRequest(data)
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	if msg.Version != "1.0" {
+		t.Errorf("expected version 1.0, got %s", msg.Version)
+	}
+	if msg.SessionID != "sess123" {
+		t.Errorf("expected sessionId sess123, got %s", msg.SessionID)
+	}
+	if msg.Role != "auth" {
+		t.Errorf("expected role auth, got %s", msg.Role)
+	}
+	if msg.Content != "implement JWT" {
+		t.Errorf("expected content 'implement JWT', got %s", msg.Content)
+	}
+}
+
+// TestValidateAgentMessageRequest_MissingSessionID tests validation with missing sessionId
+func TestValidateAgentMessageRequest_MissingSessionID(t *testing.T) {
+	msg := AgentMessageRequest{
+		BaseMessage: BaseMessage{Version: "1.0", Type: "agent:message"},
+		Role:        "auth",
+		Content:     "test",
+	}
+
+	err := validateAgentMessageRequest(msg)
+	if err == nil {
+		t.Fatal("expected error for missing sessionId, got nil")
+	}
+
+	expectedMsg := "Missing required field: sessionId"
+	if err.Error() != expectedMsg {
+		t.Errorf("expected error %q, got %q", expectedMsg, err.Error())
+	}
+}
+
+// TestValidateAgentMessageRequest_MissingRole tests validation with missing role
+func TestValidateAgentMessageRequest_MissingRole(t *testing.T) {
+	msg := AgentMessageRequest{
+		BaseMessage: BaseMessage{Version: "1.0", Type: "agent:message"},
+		SessionID:   "sess123",
+		Content:     "test",
+	}
+
+	err := validateAgentMessageRequest(msg)
+	if err == nil {
+		t.Fatal("expected error for missing role, got nil")
+	}
+
+	expectedMsg := "Missing required field: role"
+	if err.Error() != expectedMsg {
+		t.Errorf("expected error %q, got %q", expectedMsg, err.Error())
+	}
+}
+
+// TestValidateAgentMessageRequest_MissingContent tests validation with missing content
+func TestValidateAgentMessageRequest_MissingContent(t *testing.T) {
+	msg := AgentMessageRequest{
+		BaseMessage: BaseMessage{Version: "1.0", Type: "agent:message"},
+		SessionID:   "sess123",
+		Role:        "auth",
+	}
+
+	err := validateAgentMessageRequest(msg)
+	if err == nil {
+		t.Fatal("expected error for missing content, got nil")
+	}
+
+	expectedMsg := "Missing required field: content"
+	if err.Error() != expectedMsg {
+		t.Errorf("expected error %q, got %q", expectedMsg, err.Error())
+	}
+}
+
+// TestValidateAgentMessageRequest_Valid tests validation with all fields
+func TestValidateAgentMessageRequest_Valid(t *testing.T) {
+	msg := AgentMessageRequest{
+		BaseMessage: BaseMessage{Version: "1.0", Type: "agent:message"},
+		SessionID:   "sess123",
+		Role:        "auth",
+		Content:     "test",
+	}
+
+	err := validateAgentMessageRequest(msg)
+	if err != nil {
+		t.Errorf("expected no error, got: %v", err)
+	}
+}
+
+// TestNewSessionCreatedMessage tests constructor function
+func TestNewSessionCreatedMessage(t *testing.T) {
+	msg := NewSessionCreatedMessage("sess123", "2025-10-27T12:00:00Z")
+
+	if msg.Version != ProtocolVersion {
+		t.Errorf("expected version %s, got %s", ProtocolVersion, msg.Version)
+	}
+	if msg.Type != "session:created" {
+		t.Errorf("expected type session:created, got %s", msg.Type)
+	}
+	if msg.SessionID != "sess123" {
+		t.Errorf("expected sessionId sess123, got %s", msg.SessionID)
+	}
+	if msg.Timestamp != "2025-10-27T12:00:00Z" {
+		t.Errorf("expected timestamp 2025-10-27T12:00:00Z, got %s", msg.Timestamp)
+	}
+}
+
+// TestNewAgentReadyMessage tests constructor function
+func TestNewAgentReadyMessage(t *testing.T) {
+	msg := NewAgentReadyMessage("sess123", "auth")
+
+	if msg.Version != ProtocolVersion {
+		t.Errorf("expected version %s, got %s", ProtocolVersion, msg.Version)
+	}
+	if msg.Type != "agent:ready" {
+		t.Errorf("expected type agent:ready, got %s", msg.Type)
+	}
+	if msg.SessionID != "sess123" {
+		t.Errorf("expected sessionId sess123, got %s", msg.SessionID)
+	}
+	if msg.Role != "auth" {
+		t.Errorf("expected role auth, got %s", msg.Role)
+	}
+}
+
+// TestNewAgentMessageResponse tests constructor function
+func TestNewAgentMessageResponse(t *testing.T) {
+	msg := NewAgentMessageResponse("sess123", "auth", "JWT implemented", "2025-10-27T12:00:00Z")
+
+	if msg.Version != ProtocolVersion {
+		t.Errorf("expected version %s, got %s", ProtocolVersion, msg.Version)
+	}
+	if msg.Type != "agent:response" {
+		t.Errorf("expected type agent:response, got %s", msg.Type)
+	}
+	if msg.SessionID != "sess123" {
+		t.Errorf("expected sessionId sess123, got %s", msg.SessionID)
+	}
+	if msg.Role != "auth" {
+		t.Errorf("expected role auth, got %s", msg.Role)
+	}
+	if msg.Content != "JWT implemented" {
+		t.Errorf("expected content 'JWT implemented', got %s", msg.Content)
+	}
+	if msg.Timestamp != "2025-10-27T12:00:00Z" {
+		t.Errorf("expected timestamp 2025-10-27T12:00:00Z, got %s", msg.Timestamp)
+	}
+}

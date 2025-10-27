@@ -12,11 +12,18 @@ import (
 
 // Test helpers for dependency injection
 func newTestServer() *Server {
+	logger := &StdLogger{}
+	clock := &SystemClock{}
+	idGen := &UUIDGenerator{}
+
+	// TODO(Task 3): Create real sessionManager when routing logic is implemented
+	// For now, pass nil since these tests only exercise echo functionality
 	return NewServer(
-		&UUIDGenerator{},
-		&StdLogger{},
-		&SystemClock{},
+		idGen,
+		logger,
+		clock,
 		NewGorillaUpgrader(func(r *http.Request) bool { return true }),
+		nil, // sessionManager not used in echo tests
 	)
 }
 

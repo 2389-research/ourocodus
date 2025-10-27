@@ -19,15 +19,27 @@ const (
 )
 
 func main() {
+	// Create dependencies
+	logger := &relay.StdLogger{}
+	clock := &relay.SystemClock{}
+	idGen := &relay.UUIDGenerator{}
+
+	// Create session manager
+	sessionManager, err := relay.NewSessionManager(logger, clock, idGen)
+	if err != nil {
+		log.Fatalf("Failed to create session manager: %v", err)
+	}
+
 	// Create relay server with dependency injection
 	server := relay.NewServer(
-		&relay.UUIDGenerator{},
-		&relay.StdLogger{},
-		&relay.SystemClock{},
+		idGen,
+		logger,
+		clock,
 		relay.NewGorillaUpgrader(func(r *http.Request) bool {
 			// Allow all origins for development (Phase 1)
 			return true
 		}),
+		sessionManager,
 	)
 
 	// Create HTTP server
