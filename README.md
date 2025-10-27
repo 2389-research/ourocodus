@@ -40,11 +40,12 @@ PWA (Browser) ←WebSocket→ Relay (Go) ←stdio→ 3x Claude Code ACP processe
 ## Documentation
 
 - **[PRD.md](PRD.md)** - Product vision and requirements
-- **[docs/PHASE1.md](docs/PHASE1.md)** - Current phase: Foundation with real ACP
-- **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** - Phase 1 vs Long-term architecture
+- **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** - System architecture overview
+- **[docs/SESSION_LIFECYCLE.md](docs/SESSION_LIFECYCLE.md)** - Session and agent lifecycle
+- **[docs/ERROR_HANDLING.md](docs/ERROR_HANDLING.md)** - Error handling with structured codes
 - **[docs/ACP.md](docs/ACP.md)** - Agent Client Protocol integration details
-- **[docs/PROTOCOLS.md](docs/PROTOCOLS.md)** - Communication patterns (long-term)
-- **[docs/PHASES.md](docs/PHASES.md)** - Roadmap for future phases
+- **[docs/PROTOCOLS.md](docs/PROTOCOLS.md)** - Communication patterns
+- **[docs/TESTING.md](docs/TESTING.md)** - Testing strategy
 
 ## Project Status
 
@@ -55,7 +56,8 @@ PWA (Browser) ←WebSocket→ Relay (Go) ←stdio→ 3x Claude Code ACP processe
 ### Quick Links
 - [Issue #1: Project Initialization](https://github.com/2389-research/ourocodus/issues/1) ← **Start here**
 - [Issue Dependency Graph](docs/ISSUES.md)
-- [Phase 1 Spec](docs/PHASE1.md)
+- [Session Lifecycle](docs/SESSION_LIFECYCLE.md)
+- [Error Handling](docs/ERROR_HANDLING.md)
 
 ## Development
 

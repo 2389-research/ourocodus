@@ -1,13 +1,70 @@
-# Error Handling Strategy - Phase 1
-
-> **Phase 1 Status:** Basic error handling implemented.  
-> Structured error codes described below are planned for Phase 2.
+# Error Handling Strategy
 
 ## Overview
 
-Phase 1 error handling is **fail-fast** with minimal recovery. The goal is to surface problems quickly so we can validate assumptions and understand failure modes.
+Structured error handling with typed sentinel errors and centralized error mapping.
 
-**Philosophy:** Let it crash, log everything, fix the root cause.
+**Philosophy:** Type-safe error handling with clear recoverability semantics.
+
+The relay server uses typed errors from the session layer and maps them to protocol error codes. Each error code has defined recoverability semantics that determine whether the client should close the connection or can retry the operation.
+
+## Implemented Error Codes
+
+All errors map to protocol error codes with defined recoverability semantics.
+
+### Non-Recoverable Errors
+
+Client must close connection or create missing resources.
+
+| Code | Cause | Action Required |
+|------|-------|----------------|
+| VERSION_MISMATCH | Protocol version incompatible | Upgrade/downgrade client |
+| SESSION_NOT_FOUND | Session ID does not exist | Create session first |
+| AGENT_NOT_FOUND | Agent role not in session | Spawn agent first |
+
+### Recoverable Errors
+
+Client may retry or handle gracefully.
+
+| Code | Cause | Retry Strategy |
+|------|-------|---------------|
+| INVALID_MESSAGE | Malformed JSON or missing fields | Fix and retry |
+| SESSION_CREATE_FAILED | Temporary failure creating session | Retry with backoff |
+| AGENT_SPAWN_FAILED | Temporary failure spawning agent | Retry with backoff |
+| AGENT_NOT_READY | Agent not in ACTIVE state | Wait and retry |
+| AGENT_MESSAGE_FAILED | Temporary ACP communication failure | Retry |
+| INTERNAL_ERROR | Unexpected server error | Retry with backoff, report if persistent |
+
+## Error Mapping
+
+The relay server uses centralized error mapping via `server.mapError()`:
+
+```go
+func (s *Server) mapError(err error) (code, message string, recoverable bool)
+```
+
+**Mapping Logic:**
+- `session.ErrSessionNotFound` → SESSION_NOT_FOUND (non-recoverable)
+- `session.ErrAgentNotFound` → AGENT_NOT_FOUND (non-recoverable)
+- `ValidationError` → Preserves code and recoverability from validation layer
+- Unknown errors → INTERNAL_ERROR (recoverable fallback)
+
+**Implementation Details:**
+- Uses `errors.Is()` for typed sentinel errors
+- Single source of truth for error semantics
+- No string-based error checking
+- Consistent error handling across all handlers
+
+**Code Location:**
+- Error mapper: `pkg/relay/server.go` (mapError function)
+- Sentinel errors: `pkg/relay/session/errors.go`
+- Error documentation: `pkg/relay/message.go` (comprehensive comments)
+
+---
+
+## Legacy Error Categories
+
+The following sections describe historical error handling patterns. Current implementation uses the structured error codes above.
 
 ## Error Categories
 
