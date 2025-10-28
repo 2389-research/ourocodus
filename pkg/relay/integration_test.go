@@ -89,6 +89,12 @@ func (m *integrationMockIDGenerator) Generate() string {
 	return fmt.Sprintf("test-id-%d", m.counter)
 }
 
+func (m *integrationMockIDGenerator) GetCounter() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.counter
+}
+
 // integrationMockClock provides fixed time for testing (returns RFC3339 string)
 type integrationMockClock struct {
 	timestamp string
@@ -163,7 +169,9 @@ func (m *integrationMockLogger) GetLogs() []string {
 }
 
 // setupIntegrationServer creates a fully configured test server with real session.Manager
-func setupIntegrationServer() (*Server, *integrationMockIDGenerator, *integrationMockClientFactory) {
+// Returns server, clientFactory, and tempDir for constructing workspace paths
+func setupIntegrationServer(t *testing.T) (*Server, *integrationMockClientFactory, string) {
+	t.Helper()
 	// Create relay-layer mocks
 	relayIDGen := &integrationMockIDGenerator{}
 	relayClock := &integrationMockClock{}
@@ -178,9 +186,12 @@ func setupIntegrationServer() (*Server, *integrationMockIDGenerator, *integratio
 	sessionLogger := &integrationMockLogger{}
 	clientFactory := &integrationMockClientFactory{}
 
+	// Create temporary directory for test workspaces
+	tempDir := t.TempDir()
+
 	// Create real session.Manager with injected mocks
 	store := session.NewMemoryStore()
-	sessionManager := session.NewManager(store, sessionIDGen, sessionClock, sessionCleaner, sessionLogger, clientFactory, "./test-workspaces")
+	sessionManager := session.NewManager(store, sessionIDGen, sessionClock, sessionCleaner, sessionLogger, clientFactory, tempDir)
 
 	// Create relay server with real session manager
 	server := NewServer(
@@ -191,14 +202,14 @@ func setupIntegrationServer() (*Server, *integrationMockIDGenerator, *integratio
 		sessionManager,
 	)
 
-	return server, relayIDGen, clientFactory
+	return server, clientFactory, tempDir
 }
 
 // Test_FullFlow_CreateSession_SpawnAgent_SendMessage tests the complete integration flow
 // This is the PRIMARY test for Issue #30 - validates the entire PWA → Relay → ACP → PWA flow
 func Test_FullFlow_CreateSession_SpawnAgent_SendMessage(t *testing.T) {
 	// Setup server with real session.Manager
-	server, _, clientFactory := setupIntegrationServer()
+	server, clientFactory, tempDir := setupIntegrationServer(t)
 
 	// Configure mock client factory to return successful mock client
 	var testClient *integrationMockACPClient
@@ -242,7 +253,7 @@ func Test_FullFlow_CreateSession_SpawnAgent_SendMessage(t *testing.T) {
 
 	// 2. Send session:create
 	sessionCreate := map[string]interface{}{
-		"version": "1.0",
+		"version": ProtocolVersion,
 		"type":    "session:create",
 	}
 	err = conn.WriteJSON(sessionCreate)
@@ -272,11 +283,11 @@ func Test_FullFlow_CreateSession_SpawnAgent_SendMessage(t *testing.T) {
 
 	// 3. Send agent:spawn
 	agentSpawn := map[string]interface{}{
-		"version":   "1.0",
+		"version":   ProtocolVersion,
 		"type":      "agent:spawn",
 		"sessionId": sessionID,
 		"role":      "test-agent",
-		"workspace": "./test-workspaces/test-agent",
+		"workspace": fmt.Sprintf("%s/test-agent", tempDir),
 	}
 	err = conn.WriteJSON(agentSpawn)
 	if err != nil {
@@ -303,7 +314,7 @@ func Test_FullFlow_CreateSession_SpawnAgent_SendMessage(t *testing.T) {
 
 	// 4. Send agent:message
 	agentMessage := map[string]interface{}{
-		"version":   "1.0",
+		"version":   ProtocolVersion,
 		"type":      "agent:message",
 		"sessionId": sessionID,
 		"role":      "test-agent",
@@ -321,7 +332,8 @@ func Test_FullFlow_CreateSession_SpawnAgent_SendMessage(t *testing.T) {
 	}
 
 	var agentResponse map[string]interface{}
-	if err := json.Unmarshal(message, &agentResponse); err != nil {
+	err = json.Unmarshal(message, &agentResponse)
+	if err != nil {
 		t.Fatalf("Failed to parse agent:response: %v", err)
 	}
 
@@ -357,11 +369,31 @@ func Test_FullFlow_CreateSession_SpawnAgent_SendMessage(t *testing.T) {
 	if count := clientFactory.CallCount(); count != 1 {
 		t.Errorf("Expected client factory called once, got %d", count)
 	}
+
+	// 7. Verify conversation history was persisted
+	sessionMgr, ok := server.sessionManager.(*session.Manager)
+	if !ok {
+		t.Fatal("Expected session manager to be *session.Manager")
+	}
+	history, err := sessionMgr.GetAgentHistory(sessionID, "test-agent")
+	if err != nil {
+		t.Fatalf("Failed to get agent history: %v", err)
+	}
+	if len(history) != 2 {
+		t.Fatalf("Expected 2 history entries (user + agent), got %d", len(history))
+	}
+	if history[0].From != "user" || history[0].Content != "Hello, agent!" {
+		t.Errorf("Unexpected first history entry: %+v", history[0])
+	}
+	expectedAgentResponse := "Mock agent says: Hello, agent!"
+	if history[1].From != "agent" || history[1].Content != expectedAgentResponse {
+		t.Errorf("Unexpected second history entry: %+v", history[1])
+	}
 }
 
 // Test_HandleSessionCreate_Success tests session creation success path
 func Test_HandleSessionCreate_Success(t *testing.T) {
-	server, idGen, _ := setupIntegrationServer()
+	server, _, _ := setupIntegrationServer(t)
 
 	// Create test HTTP server
 	httpServer := httptest.NewServer(http.HandlerFunc(server.HandleWebSocket))
@@ -383,7 +415,7 @@ func Test_HandleSessionCreate_Success(t *testing.T) {
 
 	// Send session:create
 	sessionCreate := map[string]interface{}{
-		"version": "1.0",
+		"version": ProtocolVersion,
 		"type":    "session:create",
 	}
 	err = conn.WriteJSON(sessionCreate)
@@ -403,8 +435,8 @@ func Test_HandleSessionCreate_Success(t *testing.T) {
 	}
 
 	// Verify response
-	if response["version"] != "1.0" {
-		t.Errorf("Expected version 1.0, got %v", response["version"])
+	if response["version"] != ProtocolVersion {
+		t.Errorf("Expected version %s, got %v", ProtocolVersion, response["version"])
 	}
 	if response["type"] != "session:created" {
 		t.Errorf("Expected type session:created, got %v", response["type"])
@@ -415,10 +447,9 @@ func Test_HandleSessionCreate_Success(t *testing.T) {
 		t.Fatal("Missing or invalid sessionId")
 	}
 
-	// Verify session ID follows expected pattern from mockIDGenerator
-	expectedID := fmt.Sprintf("test-id-%d", idGen.counter)
-	if sessionID != expectedID {
-		t.Errorf("Expected sessionId %s, got %s", expectedID, sessionID)
+	// Verify session ID format (avoid coupling to internal mock counter)
+	if !strings.HasPrefix(sessionID, "test-id-") {
+		t.Errorf("Unexpected sessionId format: %s", sessionID)
 	}
 
 	// Verify timestamp exists
@@ -429,7 +460,7 @@ func Test_HandleSessionCreate_Success(t *testing.T) {
 
 // Test_HandleAgentSpawn_Success tests agent spawning success path
 func Test_HandleAgentSpawn_Success(t *testing.T) {
-	server, _, clientFactory := setupIntegrationServer()
+	server, clientFactory, tempDir := setupIntegrationServer(t)
 
 	// Configure mock client factory
 	clientFactory.clientFunc = func(workspace string) (session.ACPClient, error) {
@@ -456,7 +487,7 @@ func Test_HandleAgentSpawn_Success(t *testing.T) {
 
 	// Create session first
 	sessionCreate := map[string]interface{}{
-		"version": "1.0",
+		"version": ProtocolVersion,
 		"type":    "session:create",
 	}
 	err = conn.WriteJSON(sessionCreate)
@@ -475,15 +506,18 @@ func Test_HandleAgentSpawn_Success(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to parse session:created: %v", err)
 	}
-	sessionID := sessionCreated["sessionId"].(string)
+	sessionID, ok := sessionCreated["sessionId"].(string)
+	if !ok || sessionID == "" {
+		t.Fatal("Missing or invalid sessionId in session:created response")
+	}
 
 	// Send agent:spawn
 	agentSpawn := map[string]interface{}{
-		"version":   "1.0",
+		"version":   ProtocolVersion,
 		"type":      "agent:spawn",
 		"sessionId": sessionID,
 		"role":      "test-agent",
-		"workspace": "./test-workspaces/spawn-test",
+		"workspace": fmt.Sprintf("%s/spawn-test", tempDir),
 	}
 	err = conn.WriteJSON(agentSpawn)
 	if err != nil {
@@ -502,8 +536,8 @@ func Test_HandleAgentSpawn_Success(t *testing.T) {
 	}
 
 	// Verify response
-	if agentReady["version"] != "1.0" {
-		t.Errorf("Expected version 1.0, got %v", agentReady["version"])
+	if agentReady["version"] != ProtocolVersion {
+		t.Errorf("Expected version %s, got %v", ProtocolVersion, agentReady["version"])
 	}
 	if agentReady["type"] != "agent:ready" {
 		t.Errorf("Expected type agent:ready, got %v", agentReady["type"])
@@ -523,7 +557,7 @@ func Test_HandleAgentSpawn_Success(t *testing.T) {
 
 // Test_HandleAgentMessage_Success_FullFlow tests agent message handling success path
 func Test_HandleAgentMessage_Success_FullFlow(t *testing.T) {
-	server, _, clientFactory := setupIntegrationServer()
+	server, clientFactory, tempDir := setupIntegrationServer(t)
 
 	// Configure mock client to return specific response
 	var capturedContent string
@@ -558,7 +592,7 @@ func Test_HandleAgentMessage_Success_FullFlow(t *testing.T) {
 
 	// Create session
 	sessionCreate := map[string]interface{}{
-		"version": "1.0",
+		"version": ProtocolVersion,
 		"type":    "session:create",
 	}
 	err = conn.WriteJSON(sessionCreate)
@@ -571,16 +605,22 @@ func Test_HandleAgentMessage_Success_FullFlow(t *testing.T) {
 		t.Fatalf("Failed to read session:created: %v", err)
 	}
 	var sessionCreated map[string]interface{}
-	json.Unmarshal(message, &sessionCreated)
-	sessionID := sessionCreated["sessionId"].(string)
+	err = json.Unmarshal(message, &sessionCreated)
+	if err != nil {
+		t.Fatalf("Failed to parse session:created: %v", err)
+	}
+	sessionID, ok := sessionCreated["sessionId"].(string)
+	if !ok || sessionID == "" {
+		t.Fatal("Missing or invalid sessionId in session:created response")
+	}
 
 	// Spawn agent
 	agentSpawn := map[string]interface{}{
-		"version":   "1.0",
+		"version":   ProtocolVersion,
 		"type":      "agent:spawn",
 		"sessionId": sessionID,
 		"role":      "test-agent",
-		"workspace": "./test-workspaces/message-test",
+		"workspace": fmt.Sprintf("%s/message-test", tempDir),
 	}
 	err = conn.WriteJSON(agentSpawn)
 	if err != nil {
@@ -596,7 +636,7 @@ func Test_HandleAgentMessage_Success_FullFlow(t *testing.T) {
 	// Send agent:message
 	testContent := "Test message for agent"
 	agentMessage := map[string]interface{}{
-		"version":   "1.0",
+		"version":   ProtocolVersion,
 		"type":      "agent:message",
 		"sessionId": sessionID,
 		"role":      "test-agent",
@@ -614,13 +654,14 @@ func Test_HandleAgentMessage_Success_FullFlow(t *testing.T) {
 	}
 
 	var agentResponse map[string]interface{}
-	if err := json.Unmarshal(message, &agentResponse); err != nil {
+	err = json.Unmarshal(message, &agentResponse)
+	if err != nil {
 		t.Fatalf("Failed to parse agent:response: %v", err)
 	}
 
 	// Verify response structure
-	if agentResponse["version"] != "1.0" {
-		t.Errorf("Expected version 1.0, got %v", agentResponse["version"])
+	if agentResponse["version"] != ProtocolVersion {
+		t.Errorf("Expected version %s, got %v", ProtocolVersion, agentResponse["version"])
 	}
 	if agentResponse["type"] != "agent:response" {
 		t.Errorf("Expected type agent:response, got %v", agentResponse["type"])
@@ -663,7 +704,7 @@ func Test_SessionWebSocketAdapter_WriteJSON(t *testing.T) {
 
 	// Test data
 	testData := map[string]interface{}{
-		"version": "1.0",
+		"version": ProtocolVersion,
 		"type":    "test",
 		"data":    "test value",
 	}
@@ -692,7 +733,7 @@ func Test_SessionWebSocketAdapter_WriteJSON_Error(t *testing.T) {
 
 	// Test data
 	testData := map[string]interface{}{
-		"version": "1.0",
+		"version": ProtocolVersion,
 		"type":    "test",
 	}
 
