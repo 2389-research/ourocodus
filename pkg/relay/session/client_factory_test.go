@@ -1,6 +1,7 @@
 package session
 
 import (
+	"fmt"
 	"testing"
 )
 
@@ -35,9 +36,13 @@ func TestACPClientFactory_WithAPIKey(t *testing.T) {
 // TestFakeClientFactory tests the fake factory
 func TestFakeClientFactory(t *testing.T) {
 	called := false
+	var receivedWorkspace string
+	expectedClient := &mockACPClient{}
+
 	factory := NewFakeClientFactory(func(workspace string) (ACPClient, error) {
 		called = true
-		return &mockACPClient{}, nil
+		receivedWorkspace = workspace
+		return expectedClient, nil
 	})
 
 	client, err := factory.NewClient("test-workspace")
@@ -49,6 +54,31 @@ func TestFakeClientFactory(t *testing.T) {
 	}
 	if !called {
 		t.Error("Expected clientFunc to be called")
+	}
+	if receivedWorkspace != "test-workspace" {
+		t.Errorf("Expected workspace 'test-workspace', got '%s'", receivedWorkspace)
+	}
+	if client != expectedClient {
+		t.Error("Expected returned client to be the same instance created by clientFunc")
+	}
+}
+
+// TestFakeClientFactory_Error tests error handling in fake factory
+func TestFakeClientFactory_Error(t *testing.T) {
+	expectedError := fmt.Errorf("simulated client creation error")
+	factory := NewFakeClientFactory(func(workspace string) (ACPClient, error) {
+		return nil, expectedError
+	})
+
+	client, err := factory.NewClient("test-workspace")
+	if err == nil {
+		t.Fatal("Expected error, got nil")
+	}
+	if err != expectedError {
+		t.Errorf("Expected error '%v', got '%v'", expectedError, err)
+	}
+	if client != nil {
+		t.Error("Expected nil client on error, got non-nil")
 	}
 }
 
@@ -62,8 +92,8 @@ func TestACPClientFactory_CustomBinary(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
-	if factory.acpBinaryPath != "/path/to/echo-agent" {
-		t.Errorf("Expected acpBinaryPath='/path/to/echo-agent', got '%s'", factory.acpBinaryPath)
+	if factory.GetACPBinaryPath() != "/path/to/echo-agent" {
+		t.Errorf("Expected acpBinaryPath='/path/to/echo-agent', got '%s'", factory.GetACPBinaryPath())
 	}
 }
 
@@ -77,7 +107,7 @@ func TestACPClientFactory_DefaultBinary(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
-	if factory.acpBinaryPath != "" {
-		t.Errorf("Expected acpBinaryPath='', got '%s'", factory.acpBinaryPath)
+	if factory.GetACPBinaryPath() != "" {
+		t.Errorf("Expected acpBinaryPath='', got '%s'", factory.GetACPBinaryPath())
 	}
 }

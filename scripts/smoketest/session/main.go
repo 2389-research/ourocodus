@@ -107,6 +107,12 @@ func testCreateUserSession(ctx context.Context, manager *session.Manager, verbos
 		return fmt.Errorf("expected ACTIVE state, got %s", userSession.GetState())
 	}
 
+	// Verify initial state has 0 agents
+	agents := userSession.ListAgents()
+	if len(agents) != 0 {
+		return fmt.Errorf("expected 0 agents initially, got %d", len(agents))
+	}
+
 	debug(verbose, "  ✓ Created session %s in ACTIVE state", userSession.GetID())
 	debug(verbose, "  ✓ Session has 0 agents initially")
 	success("✅", "UserSession created successfully")
@@ -390,6 +396,11 @@ func testListAndFilter(ctx context.Context, verbose bool) error {
 	})
 
 	freshManager := session.NewManager(store, idGen, clock, cleaner, logger, clientFactory, "")
+
+	// Verify initial state has 0 sessions
+	if initialCount := freshManager.Count(); initialCount != 0 {
+		return fmt.Errorf("expected 0 sessions initially, got %d", initialCount)
+	}
 
 	// Create multiple sessions
 	ws1 := &fakeWebSocket{}

@@ -4,20 +4,17 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 )
 
 // TestTerminateAgent_CloseError tests agent termination when Close() fails
 func TestTerminateAgent_CloseError(t *testing.T) {
-	manager, _, _, _, logger, _ := setupManager()
-	ctx := context.Background()
-	ws := &mockWebSocket{}
-
-	// Create session with agent that fails to close
-	session, err := manager.CreateUserSession(ctx, ws)
-	if err != nil {
-		t.Fatalf("Failed to create session: %v", err)
-	}
-
+	// Create manager with factory that returns agents that fail to close
+	store := NewMemoryStore()
+	idGen := &mockIDGenerator{nextID: "test-session-id"}
+	clock := &mockClock{now: time.Date(2025, 10, 23, 12, 0, 0, 0, time.UTC)}
+	cleaner := &mockCleaner{}
+	logger := &mockLogger{}
 	failingFactory := &mockClientFactory{
 		clientFunc: func(workspace string) (ACPClient, error) {
 			return &mockACPClient{
@@ -27,7 +24,16 @@ func TestTerminateAgent_CloseError(t *testing.T) {
 			}, nil
 		},
 	}
-	manager.clientFactory = failingFactory
+	manager := NewManager(store, idGen, clock, cleaner, logger, failingFactory, ".")
+
+	ctx := context.Background()
+	ws := &mockWebSocket{}
+
+	// Create session with agent that fails to close
+	session, err := manager.CreateUserSession(ctx, ws)
+	if err != nil {
+		t.Fatalf("Failed to create session: %v", err)
+	}
 
 	if err := manager.SpawnAgent(ctx, session.GetID(), "auth", "testdata/agent/auth"); err != nil {
 		t.Fatalf("Failed to spawn agent: %v", err)
