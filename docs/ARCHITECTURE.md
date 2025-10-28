@@ -4,37 +4,39 @@
 
 **Goal:** Validate multi-agent communication and concurrent work
 
-```text
-┌────────────────────────────────┐
-│ WebSocket Client               │
-│ (PWA planned, currently demos) │
-│ - scripts/demo/                │
-│ - scripts/interactive/         │
-└────────────┬───────────────────┘
-             │ WebSocket
-             │
-┌────────────▼───────────────────┐
-│ Relay (Go)                     │
-│ - UserSession (container)      │
-│ - Routes messages              │
-│ - Spawns agent processes       │
-│ - In-memory state              │
-└─┬────────┬────────┬────────────┘
-  │ stdio  │ stdio  │ stdio (0-N)
-  │        │        │
-┌─▼────┐ ┌─▼────┐ ┌─▼────┐
-│Agent │ │Agent │ │Agent │
-│auth  │ │db    │ │test  │
-│Claude│ │Claude│ │Claude│
-│Code  │ │Code  │ │Code  │
-│ACP   │ │ACP   │ │ACP   │
-│(proc)│ │(proc)│ │(proc)│
-└──────┘ └──────┘ └──────┘
+```mermaid
+flowchart TD
+    Client["WebSocket Client<br/>(PWA planned, currently demos)<br/>scripts/demo/, scripts/interactive/"]
+    Relay["Relay (Go)<br/>- UserSession (container)<br/>- Routes messages<br/>- Spawns agent processes<br/>- In-memory state"]
+    AgentA["Agent (role A)<br/>Claude Code ACP<br/>(process)"]
+    AgentB["Agent (role B)<br/>Claude Code ACP<br/>(process)"]
+    AgentC["Agent (role C)<br/>Claude Code ACP<br/>(process)"]
 
-Note: Roles are dynamic, not hardcoded
-      Agent failure doesn't terminate session
-      Agents can be spawned/terminated independently
+    Client -->|"WebSocket"| Relay
+    Relay -->|"stdio"| AgentA
+    Relay -->|"stdio"| AgentB
+    Relay -->|"stdio (0-N)"| AgentC
 ```
+
+**Example:** role A="auth", role B="db", role C="test"
+_(System supports any user-specified roles dynamically)_
+
+**Note:**
+- Roles are dynamic, not hardcoded
+- Agent failure doesn't terminate session
+- Agents can be spawned/terminated independently
+
+**Operational Requirements:**
+
+- **Workspace Paths**: Each agent requires its own workspace directory path
+  - Paths must be under the configured base workspace directory
+  - Paths are constrained for security (no directory traversal attacks)
+  - Example: `workspaces/session-123/auth`, `workspaces/session-123/db`
+
+- **API Key**: `ANTHROPIC_API_KEY` environment variable must be set
+  - Required for spawning Claude Code ACP processes
+  - Shared across all agents in the relay process
+  - Can be overridden via `OUROCODUS_ACP_BINARY` for testing (see `pkg/relay/session/client_factory.go`)
 
 **Key Characteristics:**
 
@@ -60,33 +62,20 @@ Note: Roles are dynamic, not hardcoded
 
 **Goal:** Autonomous multi-agent workflow system
 
-```text
-┌──────────────────────┐
-│ PWA (Browser)        │
-└──────────┬───────────┘
-           │ WebSocket
-           │
-┌──────────▼───────────┐
-│ API Server (Go)      │
-└──────────┬───────────┘
-           │
-┌──────────▼───────────┐
-│ NATS Message Bus     │
-└─┬────────┬───────────┬┘
-  │        │           │
-┌─▼────────▼──┐  ┌────▼──────┐
-│ Coordinator │  │ Relay     │
-│ (Go)        │  │ (Go)      │
-│ - Graph     │  │ - ACP     │
-│ - Workflow  │  │   adapter │
-│ - Approvals │  └────┬──────┘
-└─────────────┘       │
-                      │ WebSocket/stdio
-                      │
-             ┌────────▼────────┐
-             │ Claude Code     │
-             │ (containers)    │
-             └─────────────────┘
+```mermaid
+flowchart TD
+    PWA["PWA (Browser)"]
+    API["API Server (Go)"]
+    NATS["NATS Message Bus"]
+    Coordinator["Coordinator (Go)<br/>- Graph<br/>- Workflow<br/>- Approvals"]
+    Relay["Relay (Go)<br/>- ACP adapter"]
+    Claude["Claude Code<br/>(containers)"]
+
+    PWA -->|"WebSocket"| API
+    API --> NATS
+    NATS --> Coordinator
+    NATS --> Relay
+    Relay -->|"WebSocket/stdio"| Claude
 ```
 
 **Key Characteristics:**

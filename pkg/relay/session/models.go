@@ -73,14 +73,14 @@ type Message struct {
 // AgentSession represents ONE claude-code-acp process within a user session
 // Immutable after creation except for state transitions through Manager
 type AgentSession struct {
-	// Immutable fields (set at creation)
-	Role      string // "auth", "db", "tests", etc.
-	Workspace string // Path to agent workspace directory
+	// Immutable fields (set at creation, never modified)
+	Role      string    // "auth", "db", "tests", etc.
+	Workspace string    // Path to agent workspace directory
+	createdAt time.Time // Agent creation timestamp
 
 	// Mutable fields (protected by mu)
 	state      AgentState
 	acpClient  ACPClient
-	createdAt  time.Time
 	lastActive time.Time
 	errorMsg   string    // Error message if state is FAILED
 	history    []Message // Conversation history
@@ -91,14 +91,14 @@ type AgentSession struct {
 // UserSession represents a user's workspace container (0-N agents)
 // Immutable after creation except for state transitions through Manager
 type UserSession struct {
-	// Immutable fields (set at creation)
-	ID string // UUID v4
+	// Immutable fields (set at creation, never modified)
+	ID        string    // UUID v4
+	createdAt time.Time // Session creation timestamp
 
 	// Mutable fields (protected by mu)
 	state      UserSessionState
 	webSocket  WebSocketConn
 	agents     map[string]*AgentSession // role → agent instance
-	createdAt  time.Time
 	lastActive time.Time
 
 	mu sync.RWMutex

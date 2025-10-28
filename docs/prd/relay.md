@@ -29,51 +29,23 @@ Bridge between internal NATS messaging and external ACP-speaking agents (Claude 
 
 ## Architecture
 
-```text
-┌──────────────┐
-│  NATS Bus    │
-│              │
-│  sessions.   │
-│  sess_123.   │
-│  work.coding │
-└──────┬───────┘
-       │
-       │ Subscribe
-       │
-┌──────▼─────────────────────────┐
-│  Relay                          │
-│                                 │
-│  ┌──────────────────────┐      │
-│  │ NATS Subscriber      │      │
-│  │ - Receives work msgs │      │
-│  └──────────┬───────────┘      │
-│             │                   │
-│  ┌──────────▼───────────┐      │
-│  │ Router               │      │
-│  │ - session_id → conn  │      │
-│  │ - agent_role → conn  │      │
-│  └──────────┬───────────┘      │
-│             │                   │
-│  ┌──────────▼───────────┐      │
-│  │ ACP Translator       │      │
-│  │ - NATS JSON → ACP    │      │
-│  │ - ACP → NATS JSON    │      │
-│  └──────────┬───────────┘      │
-│             │                   │
-│  ┌──────────▼───────────┐      │
-│  │ WebSocket Manager    │      │
-│  │ - Connection pool    │      │
-│  │ - Send/receive       │      │
-│  └──────────┬───────────┘      │
-└─────────────┼───────────────────┘
-              │
-              │ WebSocket
-              │
-    ┌─────────▼──────┐  ┌────────────────┐
-    │ Claude Code    │  │ OpenAI Codex   │
-    │ Container      │  │ Container      │
-    └────────────────┘  └────────────────┘
-```text
+```mermaid
+flowchart TD
+    NATS["NATS Bus<br/>sessions.sess_123.work.coding"]
+    Subscriber["NATS Subscriber<br/>- Receives work msgs"]
+    Router["Router<br/>- session_id → conn<br/>- agent_role → conn"]
+    Translator["ACP Translator<br/>- NATS JSON → ACP<br/>- ACP → NATS JSON"]
+    WSManager["WebSocket Manager<br/>- Connection pool<br/>- Send/receive"]
+    Claude["Claude Code<br/>Container"]
+    OpenAI["OpenAI Codex<br/>Container"]
+
+    NATS -->|"Subscribe"| Subscriber
+    Subscriber --> Router
+    Router --> Translator
+    Translator --> WSManager
+    WSManager -->|"WebSocket"| Claude
+    WSManager -->|"WebSocket"| OpenAI
+```
 
 ## API Specification
 
