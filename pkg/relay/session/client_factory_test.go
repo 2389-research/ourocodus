@@ -1,41 +1,27 @@
 package session
 
 import (
-	"os"
 	"testing"
 )
 
 // TestACPClientFactory_MissingAPIKey tests error when ANTHROPIC_API_KEY not set
 func TestACPClientFactory_MissingAPIKey(t *testing.T) {
-	// Save original value
-	originalKey := os.Getenv("ANTHROPIC_API_KEY")
-	defer os.Setenv("ANTHROPIC_API_KEY", originalKey)
-
-	// Unset the key
-	os.Unsetenv("ANTHROPIC_API_KEY")
+	// Unset the key (t.Setenv automatically restores original value)
+	t.Setenv("ANTHROPIC_API_KEY", "")
 
 	_, err := NewACPClientFactory()
 	if err == nil {
 		t.Fatal("Expected error when ANTHROPIC_API_KEY not set, got nil")
 	}
-	if err.Error() != "ANTHROPIC_API_KEY environment variable not set" {
-		t.Errorf("Unexpected error message: %s", err.Error())
+	if err != ErrMissingAnthropicAPIKey {
+		t.Errorf("Expected ErrMissingAnthropicAPIKey, got: %v", err)
 	}
 }
 
 // TestACPClientFactory_WithAPIKey tests successful factory creation
 func TestACPClientFactory_WithAPIKey(t *testing.T) {
-	// Set API key
-	originalKey := os.Getenv("ANTHROPIC_API_KEY")
-	defer func() {
-		if originalKey != "" {
-			os.Setenv("ANTHROPIC_API_KEY", originalKey)
-		} else {
-			os.Unsetenv("ANTHROPIC_API_KEY")
-		}
-	}()
-
-	os.Setenv("ANTHROPIC_API_KEY", "test-key")
+	// Set API key (t.Setenv automatically restores original value)
+	t.Setenv("ANTHROPIC_API_KEY", "test-key")
 
 	factory, err := NewACPClientFactory()
 	if err != nil {
@@ -68,25 +54,9 @@ func TestFakeClientFactory(t *testing.T) {
 
 // TestACPClientFactory_CustomBinary tests that custom ACP binary path is respected
 func TestACPClientFactory_CustomBinary(t *testing.T) {
-	// Save and restore environment variables
-	originalKey := os.Getenv("ANTHROPIC_API_KEY")
-	originalBinary := os.Getenv("OUROCODUS_ACP_BINARY")
-	defer func() {
-		if originalKey != "" {
-			os.Setenv("ANTHROPIC_API_KEY", originalKey)
-		} else {
-			os.Unsetenv("ANTHROPIC_API_KEY")
-		}
-		if originalBinary != "" {
-			os.Setenv("OUROCODUS_ACP_BINARY", originalBinary)
-		} else {
-			os.Unsetenv("OUROCODUS_ACP_BINARY")
-		}
-	}()
-
-	// Set environment variables
-	os.Setenv("ANTHROPIC_API_KEY", "test-key")
-	os.Setenv("OUROCODUS_ACP_BINARY", "/path/to/echo-agent")
+	// Set environment variables (t.Setenv automatically restores original values)
+	t.Setenv("ANTHROPIC_API_KEY", "test-key")
+	t.Setenv("OUROCODUS_ACP_BINARY", "/path/to/echo-agent")
 
 	factory, err := NewACPClientFactory()
 	if err != nil {
@@ -99,25 +69,9 @@ func TestACPClientFactory_CustomBinary(t *testing.T) {
 
 // TestACPClientFactory_DefaultBinary tests that binary path defaults to empty when env var not set
 func TestACPClientFactory_DefaultBinary(t *testing.T) {
-	// Save and restore environment variables
-	originalKey := os.Getenv("ANTHROPIC_API_KEY")
-	originalBinary := os.Getenv("OUROCODUS_ACP_BINARY")
-	defer func() {
-		if originalKey != "" {
-			os.Setenv("ANTHROPIC_API_KEY", originalKey)
-		} else {
-			os.Unsetenv("ANTHROPIC_API_KEY")
-		}
-		if originalBinary != "" {
-			os.Setenv("OUROCODUS_ACP_BINARY", originalBinary)
-		} else {
-			os.Unsetenv("OUROCODUS_ACP_BINARY")
-		}
-	}()
-
-	// Set API key but unset custom binary
-	os.Setenv("ANTHROPIC_API_KEY", "test-key")
-	os.Unsetenv("OUROCODUS_ACP_BINARY")
+	// Set API key but unset custom binary (t.Setenv automatically restores original values)
+	t.Setenv("ANTHROPIC_API_KEY", "test-key")
+	t.Setenv("OUROCODUS_ACP_BINARY", "")
 
 	factory, err := NewACPClientFactory()
 	if err != nil {

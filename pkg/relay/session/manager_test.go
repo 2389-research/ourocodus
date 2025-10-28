@@ -13,10 +13,15 @@ import (
 
 type mockIDGenerator struct {
 	nextID string
+	count  int
+	mu     sync.Mutex
 }
 
 func (m *mockIDGenerator) Generate() string {
-	return m.nextID
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.count++
+	return fmt.Sprintf("%s%d", m.nextID, m.count)
 }
 
 type mockClock struct {
@@ -146,7 +151,7 @@ func setupManager() (*Manager, *mockIDGenerator, *mockClock, *mockCleaner, *mock
 // --- Tests ---
 
 func TestCreateUserSession_EmptySession(t *testing.T) {
-	manager, idGen, _, _, logger, _ := setupManager()
+	manager, _, _, _, logger, _ := setupManager()
 	ctx := context.Background()
 	ws := &mockWebSocket{}
 
@@ -159,8 +164,10 @@ func TestCreateUserSession_EmptySession(t *testing.T) {
 	if session == nil {
 		t.Fatal("Expected session, got nil")
 	}
-	if session.GetID() != idGen.nextID {
-		t.Errorf("Expected session ID %s, got %s", idGen.nextID, session.GetID())
+	// Check that ID starts with the prefix (now has counter suffix)
+	expectedID := "test-session-id1"
+	if session.GetID() != expectedID {
+		t.Errorf("Expected session ID %s, got %s", expectedID, session.GetID())
 	}
 	if session.GetState() != StateActive {
 		t.Errorf("Expected state ACTIVE, got %s", session.GetState())
@@ -318,13 +325,16 @@ func TestSpawnAgent_DuplicateRole(t *testing.T) {
 	ws := &mockWebSocket{}
 
 	// Create user session and spawn agent
-	session, _ := manager.CreateUserSession(ctx, ws)
+	session, err := manager.CreateUserSession(ctx, ws)
+	if err != nil {
+		t.Fatalf("Failed to create session: %v", err)
+	}
 	if err := manager.SpawnAgent(ctx, session.GetID(), "auth", "testdata/agent/auth"); err != nil {
 		t.Fatalf("Failed to spawn agent: %v", err)
 	}
 
 	// Try to spawn agent with same role
-	err := manager.SpawnAgent(ctx, session.GetID(), "auth", "testdata/agent/auth2")
+	err = manager.SpawnAgent(ctx, session.GetID(), "auth", "testdata/agent/auth2")
 	if err == nil {
 		t.Fatal("Expected error spawning duplicate role, got nil")
 	}
@@ -342,13 +352,16 @@ func TestTerminateAgent_SingleAgent(t *testing.T) {
 	ws := &mockWebSocket{}
 
 	// Create session and spawn agent
-	session, _ := manager.CreateUserSession(ctx, ws)
+	session, err := manager.CreateUserSession(ctx, ws)
+	if err != nil {
+		t.Fatalf("Failed to create session: %v", err)
+	}
 	if err := manager.SpawnAgent(ctx, session.GetID(), "auth", "testdata/agent/auth"); err != nil {
 		t.Fatalf("Failed to spawn agent: %v", err)
 	}
 
 	// Terminate the agent
-	err := manager.TerminateAgent(ctx, session.GetID(), "auth")
+	err = manager.TerminateAgent(ctx, session.GetID(), "auth")
 	if err != nil {
 		t.Fatalf("Expected no error terminating agent, got: %v", err)
 	}
@@ -376,7 +389,10 @@ func TestTerminateAgent_OtherAgentsUnaffected(t *testing.T) {
 	ws := &mockWebSocket{}
 
 	// Create session and spawn three agents
-	session, _ := manager.CreateUserSession(ctx, ws)
+	session, err := manager.CreateUserSession(ctx, ws)
+	if err != nil {
+		t.Fatalf("Failed to create session: %v", err)
+	}
 	if err := manager.SpawnAgent(ctx, session.GetID(), "auth", "testdata/agent/auth"); err != nil {
 		t.Fatalf("Failed to spawn auth agent: %v", err)
 	}
@@ -388,7 +404,7 @@ func TestTerminateAgent_OtherAgentsUnaffected(t *testing.T) {
 	}
 
 	// Terminate one agent
-	err := manager.TerminateAgent(ctx, session.GetID(), "db")
+	err = manager.TerminateAgent(ctx, session.GetID(), "db")
 	if err != nil {
 		t.Fatalf("Expected no error terminating agent, got: %v", err)
 	}
@@ -418,7 +434,10 @@ func TestTerminateUserSession_AllAgentsTerminated(t *testing.T) {
 	ws := &mockWebSocket{}
 
 	// Create session and spawn three agents
-	session, _ := manager.CreateUserSession(ctx, ws)
+	session, err := manager.CreateUserSession(ctx, ws)
+	if err != nil {
+		t.Fatalf("Failed to create session: %v", err)
+	}
 	sessionID := session.GetID()
 	if err := manager.SpawnAgent(ctx, sessionID, "auth", "testdata/agent/auth"); err != nil {
 		t.Fatalf("Failed to spawn auth agent: %v", err)
@@ -431,7 +450,7 @@ func TestTerminateUserSession_AllAgentsTerminated(t *testing.T) {
 	}
 
 	// Terminate user session
-	err := manager.TerminateUserSession(ctx, sessionID)
+	err = manager.TerminateUserSession(ctx, sessionID)
 	if err != nil {
 		t.Fatalf("Expected no error terminating session, got: %v", err)
 	}
@@ -458,14 +477,17 @@ func TestTerminateUserSession_Idempotent(t *testing.T) {
 	ws := &mockWebSocket{}
 
 	// Create and terminate session
-	session, _ := manager.CreateUserSession(ctx, ws)
+	session, err := manager.CreateUserSession(ctx, ws)
+	if err != nil {
+		t.Fatalf("Failed to create session: %v", err)
+	}
 	sessionID := session.GetID()
 	if err := manager.TerminateUserSession(ctx, sessionID); err != nil {
 		t.Fatalf("Failed to terminate session: %v", err)
 	}
 
 	// Terminate again (should not panic or error)
-	err := manager.TerminateUserSession(ctx, sessionID)
+	err = manager.TerminateUserSession(ctx, sessionID)
 	if err != nil {
 		t.Fatalf("Expected idempotent termination, got error: %v", err)
 	}
@@ -510,7 +532,10 @@ func TestTerminateAgent_Idempotent(t *testing.T) {
 	ws := &mockWebSocket{}
 
 	// Create session, spawn agent, terminate it
-	session, _ := manager.CreateUserSession(ctx, ws)
+	session, err := manager.CreateUserSession(ctx, ws)
+	if err != nil {
+		t.Fatalf("Failed to create session: %v", err)
+	}
 	sessionID := session.GetID()
 	if err := manager.SpawnAgent(ctx, sessionID, "auth", "testdata/agent/auth"); err != nil {
 		t.Fatalf("Failed to spawn agent: %v", err)
@@ -520,7 +545,7 @@ func TestTerminateAgent_Idempotent(t *testing.T) {
 	}
 
 	// Terminate again (should not panic or error)
-	err := manager.TerminateAgent(ctx, sessionID, "auth")
+	err = manager.TerminateAgent(ctx, sessionID, "auth")
 	if err != nil {
 		t.Fatalf("Expected idempotent termination, got error: %v", err)
 	}
@@ -543,7 +568,10 @@ func TestListAgents(t *testing.T) {
 	ws := &mockWebSocket{}
 
 	// Create session and spawn agents
-	session, _ := manager.CreateUserSession(ctx, ws)
+	session, err := manager.CreateUserSession(ctx, ws)
+	if err != nil {
+		t.Fatalf("Failed to create session: %v", err)
+	}
 	if err := manager.SpawnAgent(ctx, session.GetID(), "auth", "testdata/agent/auth"); err != nil {
 		t.Fatalf("Failed to spawn auth agent: %v", err)
 	}
@@ -572,7 +600,10 @@ func TestGetAgent(t *testing.T) {
 	ws := &mockWebSocket{}
 
 	// Create session and spawn agent
-	session, _ := manager.CreateUserSession(ctx, ws)
+	session, err := manager.CreateUserSession(ctx, ws)
+	if err != nil {
+		t.Fatalf("Failed to create session: %v", err)
+	}
 	if err := manager.SpawnAgent(ctx, session.GetID(), "auth", "testdata/agent/auth"); err != nil {
 		t.Fatalf("Failed to spawn agent: %v", err)
 	}
@@ -597,12 +628,15 @@ func TestRecordHeartbeat(t *testing.T) {
 	ws := &mockWebSocket{}
 
 	// Create session
-	session, _ := manager.CreateUserSession(ctx, ws)
+	session, err := manager.CreateUserSession(ctx, ws)
+	if err != nil {
+		t.Fatalf("Failed to create session: %v", err)
+	}
 	oldLastActive := session.GetLastActive()
 
 	// Advance time and record heartbeat
 	clock.now = clock.now.Add(5 * time.Second)
-	err := manager.RecordHeartbeat(ctx, session.GetID())
+	err = manager.RecordHeartbeat(ctx, session.GetID())
 	if err != nil {
 		t.Fatalf("Expected no error recording heartbeat, got: %v", err)
 	}
@@ -624,15 +658,17 @@ func TestCount(t *testing.T) {
 	}
 
 	// Create sessions
-	manager.CreateUserSession(ctx, &mockWebSocket{})
-	manager.CreateUserSession(ctx, &mockWebSocket{})
+	if _, err := manager.CreateUserSession(ctx, &mockWebSocket{}); err != nil {
+		t.Fatalf("Failed to create first session: %v", err)
+	}
+	if _, err := manager.CreateUserSession(ctx, &mockWebSocket{}); err != nil {
+		t.Fatalf("Failed to create second session: %v", err)
+	}
 
-	// Should have 2 sessions (but IDs will be same, so actually 1)
-	// Need unique IDs for this test
-	// This is a limitation of the test setup - in real usage IDs would be unique
+	// Should have 2 sessions (unique IDs now generated)
 	count := manager.Count()
-	if count == 0 {
-		t.Error("Expected at least 1 session after creating sessions")
+	if count != 2 {
+		t.Errorf("Expected 2 sessions after creating sessions, got %d", count)
 	}
 }
 
@@ -654,7 +690,10 @@ func TestSpawnAgent_RejectsPathTraversal(t *testing.T) {
 	ws := &mockWebSocket{}
 
 	// Create session
-	session, _ := manager.CreateUserSession(ctx, ws)
+	session, err := manager.CreateUserSession(ctx, ws)
+	if err != nil {
+		t.Fatalf("Failed to create session: %v", err)
+	}
 	sessionID := session.GetID()
 
 	tests := []struct {
@@ -689,7 +728,10 @@ func TestSpawnAgent_AcceptsValidPaths(t *testing.T) {
 	ws := &mockWebSocket{}
 
 	// Create session
-	session, _ := manager.CreateUserSession(ctx, ws)
+	session, err := manager.CreateUserSession(ctx, ws)
+	if err != nil {
+		t.Fatalf("Failed to create session: %v", err)
+	}
 	sessionID := session.GetID()
 
 	tests := []struct {

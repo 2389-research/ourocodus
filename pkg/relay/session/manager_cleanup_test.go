@@ -13,7 +13,10 @@ func TestTerminateAgent_CloseError(t *testing.T) {
 	ws := &mockWebSocket{}
 
 	// Create session with agent that fails to close
-	session, _ := manager.CreateUserSession(ctx, ws)
+	session, err := manager.CreateUserSession(ctx, ws)
+	if err != nil {
+		t.Fatalf("Failed to create session: %v", err)
+	}
 
 	failingFactory := &mockClientFactory{
 		clientFunc: func(workspace string) (ACPClient, error) {
@@ -26,10 +29,12 @@ func TestTerminateAgent_CloseError(t *testing.T) {
 	}
 	manager.clientFactory = failingFactory
 
-	_ = manager.SpawnAgent(ctx, session.GetID(), "auth", "testdata/agent/auth")
+	if err := manager.SpawnAgent(ctx, session.GetID(), "auth", "testdata/agent/auth"); err != nil {
+		t.Fatalf("Failed to spawn agent: %v", err)
+	}
 
 	// Terminate should log error but continue
-	err := manager.TerminateAgent(ctx, session.GetID(), "auth")
+	err = manager.TerminateAgent(ctx, session.GetID(), "auth")
 	if err != nil {
 		t.Fatalf("Expected no error (close error logged), got: %v", err)
 	}
@@ -48,10 +53,13 @@ func TestTerminateUserSession_CleanerError(t *testing.T) {
 	// Make cleaner fail
 	cleaner.shouldErr = true
 
-	session, _ := manager.CreateUserSession(ctx, &mockWebSocket{})
+	session, err := manager.CreateUserSession(ctx, &mockWebSocket{})
+	if err != nil {
+		t.Fatalf("Failed to create session: %v", err)
+	}
 	sessionID := session.GetID()
 
-	err := manager.TerminateUserSession(ctx, sessionID)
+	err = manager.TerminateUserSession(ctx, sessionID)
 	if err != nil {
 		t.Fatalf("Expected no error (cleaner error logged), got: %v", err)
 	}

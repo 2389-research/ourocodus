@@ -26,6 +26,7 @@ linters-settings:
     enable-all: true
     disable:
       - fieldalignment # Disable struct field alignment checks (micro-optimization for POC)
+      - shadow # Disable shadow variable checks (common Go pattern in error handling)
   revive:
     severity: warning
   gosec:
@@ -44,3 +45,4 @@ issues:
         - gocyclo
         - errcheck
         - gosec
+        - unparam # Test helper functions may have unused return values
