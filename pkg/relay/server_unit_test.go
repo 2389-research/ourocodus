@@ -981,3 +981,67 @@ func TestHandleAgentSpawn_SessionNotFound(t *testing.T) {
 		t.Error("expected recoverable=false")
 	}
 }
+
+// Test infrastructure validation - ensures mock types work correctly
+// These mocks will be used for integration tests in future work
+
+func TestMockACPClient_SendMessage(t *testing.T) {
+	mockACP := &mockACPClient{
+		sendMessageFunc: func(content string) (*acp.AgentMessage, error) {
+			return &acp.AgentMessage{
+				Type:    "text",
+				Content: "Response to: " + content,
+			}, nil
+		},
+	}
+
+	msg, err := mockACP.SendMessage("test")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if msg.Type != "text" {
+		t.Errorf("expected type text, got %s", msg.Type)
+	}
+
+	if msg.Content != "Response to: test" {
+		t.Errorf("expected response content, got %s", msg.Content)
+	}
+}
+
+func TestMockAgent_StateAndHistory(t *testing.T) {
+	mockACP := &mockACPClient{}
+	agent := &mockAgent{
+		state:     session.AgentActive,
+		acpClient: mockACP,
+		messages:  []session.Message{},
+	}
+
+	// Test state
+	if agent.GetState() != session.AgentActive {
+		t.Errorf("expected AgentActive, got %s", agent.GetState())
+	}
+
+	// Test ACP client
+	if agent.GetACPClient() != mockACP {
+		t.Error("expected same ACP client")
+	}
+
+	// Test message history
+	now := time.Now()
+	agent.AddMessage("user", "hello", now)
+	agent.AddMessage("agent", "hi there", now)
+
+	history := agent.GetHistory()
+	if len(history) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(history))
+	}
+
+	if history[0].From != "user" || history[0].Content != "hello" {
+		t.Error("first message incorrect")
+	}
+
+	if history[1].From != "agent" || history[1].Content != "hi there" {
+		t.Error("second message incorrect")
+	}
+}
