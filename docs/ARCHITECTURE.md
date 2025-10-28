@@ -22,19 +22,33 @@
 └─┬────────┬────────┬────────────┘
   │ stdio  │ stdio  │ stdio (0-N)
   │        │        │
-┌─▼────┐ ┌─▼────┐ ┌─▼────┐
-│Agent │ │Agent │ │Agent │
-│auth  │ │db    │ │test  │
-│Claude│ │Claude│ │Claude│
-│Code  │ │Code  │ │Code  │
-│ACP   │ │ACP   │ │ACP   │
-│(proc)│ │(proc)│ │(proc)│
-└──────┘ └──────┘ └──────┘
+┌─▼────────┐ ┌─▼────────┐ ┌─▼────────┐
+│Agent     │ │Agent     │ │Agent     │
+│(role A)  │ │(role B)  │ │(role C)  │
+│Claude    │ │Claude    │ │Claude    │
+│Code ACP  │ │Code ACP  │ │Code ACP  │
+│(process) │ │(process) │ │(process) │
+└──────────┘ └──────────┘ └──────────┘
+
+Example: role A="auth", role B="db", role C="test"
+         (System supports any user-specified roles dynamically)
 
 Note: Roles are dynamic, not hardcoded
       Agent failure doesn't terminate session
       Agents can be spawned/terminated independently
 ```
+
+**Operational Requirements:**
+
+- **Workspace Paths**: Each agent requires its own workspace directory path
+  - Paths must be under the configured base workspace directory
+  - Paths are constrained for security (no directory traversal attacks)
+  - Example: `workspaces/session-123/auth`, `workspaces/session-123/db`
+
+- **API Key**: `ANTHROPIC_API_KEY` environment variable must be set
+  - Required for spawning Claude Code ACP processes
+  - Shared across all agents in the relay process
+  - Can be overridden via `OUROCODUS_ACP_BINARY` for testing (see `pkg/relay/session/client_factory.go`)
 
 **Key Characteristics:**
 
