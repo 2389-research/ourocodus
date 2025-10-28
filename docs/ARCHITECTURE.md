@@ -12,10 +12,10 @@ flowchart TD
     AgentB["Agent (role B)<br/>Claude Code ACP<br/>(process)"]
     AgentC["Agent (role C)<br/>Claude Code ACP<br/>(process)"]
 
-    Client -->|WebSocket| Relay
-    Relay -->|stdio| AgentA
-    Relay -->|stdio| AgentB
-    Relay -->|stdio 0-N| AgentC
+    Client -->|"WebSocket"| Relay
+    Relay -->|"stdio"| AgentA
+    Relay -->|"stdio"| AgentB
+    Relay -->|"stdio (0-N)"| AgentC
 ```
 
 **Example:** role A="auth", role B="db", role C="test"
@@ -71,11 +71,11 @@ flowchart TD
     Relay["Relay (Go)<br/>- ACP adapter"]
     Claude["Claude Code<br/>(containers)"]
 
-    PWA -->|WebSocket| API
+    PWA -->|"WebSocket"| API
     API --> NATS
     NATS --> Coordinator
     NATS --> Relay
-    Relay -->|WebSocket/stdio| Claude
+    Relay -->|"WebSocket/stdio"| Claude
 ```
 
 **Key Characteristics:**

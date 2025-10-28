@@ -61,10 +61,10 @@ flowchart TD
     Future["Future ACP Tools<br/>- git ops<br/>- terminal<br/>- etc."]
     Worktree["Shared worktree volume<br/>(git branch per container)"]
 
-    Coordinator -->|Send ACP sampling request via NATS| Relay
-    Relay -->|ACP over WebSocket| Claude
-    Relay -->|ACP over WebSocket| OpenAI
-    Relay -->|ACP over WebSocket| Future
+    Coordinator -->|"Send work request via NATS"| Relay
+    Relay -->|"ACP over WebSocket"| Claude
+    Relay -->|"ACP over WebSocket"| OpenAI
+    Relay -->|"ACP over WebSocket"| Future
     Claude --> Worktree
     OpenAI --> Worktree
     Future --> Worktree
@@ -72,9 +72,13 @@ flowchart TD
 
 ## ACP Protocol Basics
 
+**Note on Terminology:** In ACP, "sampling" means "generate a response from the model" - it's the technical term for making an inference request. We use "work request" throughout this doc for clarity, but the actual ACP protocol method is `sampling.request`.
+
 ### Message Flow
 
-1. **Coordinator → Agent (Sampling Request)**
+1. **Coordinator → Agent (Work Request)**
+
+_Sends task to agent with available tools_
 
 ```json
 {
@@ -298,7 +302,7 @@ Message: {
 }
 ```
 
-1. **Relay translates to ACP:**
+1. **Relay translates to ACP work request:**
 
 ```json
 {

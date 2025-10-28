@@ -39,12 +39,12 @@ flowchart TD
     Claude["Claude Code<br/>Container"]
     OpenAI["OpenAI Codex<br/>Container"]
 
-    NATS -->|Subscribe| Subscriber
+    NATS -->|"Subscribe"| Subscriber
     Subscriber --> Router
     Router --> Translator
     Translator --> WSManager
-    WSManager -->|WebSocket| Claude
-    WSManager -->|WebSocket| OpenAI
+    WSManager -->|"WebSocket"| Claude
+    WSManager -->|"WebSocket"| OpenAI
 ```
 
 ## API Specification
