@@ -1,0 +1,11 @@
+{
+  "timestamp": "2025-10-28T16:03:59Z",
+  "repo_root": "/Users/clint/code/ourocodus",
+  "checks": {},
+  "summary": {
+    "total_checks": 6,
+    "passed": 3,
+    "warnings": 3,
+    "failed": 0
+  }
+}
