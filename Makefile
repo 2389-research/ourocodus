@@ -1,4 +1,7 @@
-.PHONY: build test smoke-relay smoke-session smoke-all demo interactive run stop clean lint fmt check pre-commit
+.PHONY: all build test smoke-relay smoke-session smoke-all demo interactive run stop clean lint fmt check pre-commit
+
+# Default target: build and test
+all: build test
 
 # Build all binaries
 build:
