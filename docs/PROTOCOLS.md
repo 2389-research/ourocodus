@@ -14,40 +14,23 @@ This document defines the communication boundaries, message formats, and interac
 
 ## System Boundaries
 
-```text
-┌─────────────────────────────────────────────────────────┐
-│  External Clients (CLI, Web UI)                         │
-└───────────────┬─────────────────────────────────────────┘
-                │ HTTP/REST + WebSocket (SSE)
-                │
-┌───────────────▼─────────────────────────────────────────┐
-│  API Server (Go)                                         │
-│  - REST endpoints                                        │
-│  - Static file serving                                   │
-│  - Event streaming (SSE)                                 │
-└───────────────┬─────────────────────────────────────────┘
-                │ NATS pub/sub
-                │
-┌───────────────▼─────────────────────────────────────────┐
-│  NATS Message Bus                                        │
-│  - Topic-based routing                                   │
-│  - At-least-once delivery                                │
-└───┬───────────────────┬─────────────────────┬───────────┘
-    │                   │                     │
-    │ NATS sub/pub      │ NATS sub/pub        │ NATS sub/pub
-    │                   │                     │
-┌───▼────────┐  ┌──────▼──────┐  ┌──────────▼──────────┐
-│ Coordinator│  │   Agent     │  │  Event Logger       │
-│  (Go)      │  │   (Go)      │  │  (writes to disk)   │
-└────────────┘  └─────────────┘  └─────────────────────┘
-                      │
-                      │ Git commands
-                      │
-                ┌─────▼──────┐
-                │  Worktree  │
-                │  (git)     │
-                └────────────┘
-```text
+```mermaid
+flowchart TD
+    Clients["External Clients<br/>(CLI, Web UI)"]
+    API["API Server (Go)<br/>- REST endpoints<br/>- Static file serving<br/>- Event streaming (SSE)"]
+    NATS["NATS Message Bus<br/>- Topic-based routing<br/>- At-least-once delivery"]
+    Coordinator["Coordinator<br/>(Go)"]
+    Agent["Agent<br/>(Go)"]
+    Logger["Event Logger<br/>(writes to disk)"]
+    Worktree["Worktree<br/>(git)"]
+
+    Clients -->|HTTP/REST + WebSocket (SSE)| API
+    API -->|NATS pub/sub| NATS
+    NATS -->|NATS sub/pub| Coordinator
+    NATS -->|NATS sub/pub| Agent
+    NATS -->|NATS sub/pub| Logger
+    Agent -->|Git commands| Worktree
+```
 
 ## Communication Channels
 

@@ -52,31 +52,22 @@ Ourocodus provides:
 
 ## Architecture
 
-```text
-┌─────────────┐
-│ Coordinator │
-│    (Go)     │
-└──────┬──────┘
-       │ Send ACP sampling request via NATS
-       │
-┌──────▼──────────────────────────────────────┐
-│  ACP Relay                                   │
-│  - Receives NATS messages                    │
-│  - Translates to ACP WebSocket/HTTP         │
-│  - Routes to correct agent container         │
-└──────┬──────────────────────────────────────┘
-       │ ACP over WebSocket
-       │
-┌──────▼──────┐   ┌─────────────┐   ┌────────────┐
-│ Claude Code │   │ OpenAI Codex│   │   Future   │
-│ Container   │   │  Container  │   │  ACP Tools │
-│             │   │             │   │            │
-│ - git clone │   │ - git clone │   │ - git ops  │
-│ - edit files│   │ - edit files│   │ - terminal │
-│ - run tests │   │ - run tests │   │ - etc.     │
-└─────────────┘   └─────────────┘   └────────────┘
-       │
-       └─────► Shared worktree volume (git branch per container)
+```mermaid
+flowchart TD
+    Coordinator["Coordinator (Go)"]
+    Relay["ACP Relay<br/>- Receives NATS messages<br/>- Translates to ACP WebSocket/HTTP<br/>- Routes to correct agent container"]
+    Claude["Claude Code Container<br/>- git clone<br/>- edit files<br/>- run tests"]
+    OpenAI["OpenAI Codex Container<br/>- git clone<br/>- edit files<br/>- run tests"]
+    Future["Future ACP Tools<br/>- git ops<br/>- terminal<br/>- etc."]
+    Worktree["Shared worktree volume<br/>(git branch per container)"]
+
+    Coordinator -->|Send ACP sampling request via NATS| Relay
+    Relay -->|ACP over WebSocket| Claude
+    Relay -->|ACP over WebSocket| OpenAI
+    Relay -->|ACP over WebSocket| Future
+    Claude --> Worktree
+    OpenAI --> Worktree
+    Future --> Worktree
 ```
 
 ## ACP Protocol Basics
