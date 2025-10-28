@@ -34,7 +34,8 @@ func main() {
 }
 
 func runSessionSmokeTest(verbose bool) error {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
 	// Setup test dependencies
 	store := session.NewMemoryStore()
@@ -306,9 +307,9 @@ func testTerminateSession(ctx context.Context, manager *session.Manager, verbose
 	}
 
 	// Verify session is removed
-	session := manager.Get(sessionID)
-	if session != nil {
-		return fmt.Errorf("session still exists after termination")
+	userSession = manager.Get(sessionID)
+	if userSession != nil {
+		return fmt.Errorf("userSession still exists after termination")
 	}
 
 	// Verify agents are gone

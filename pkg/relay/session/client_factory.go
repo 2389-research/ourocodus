@@ -1,7 +1,6 @@
 package session
 
 import (
-	"fmt"
 	"os"
 
 	"github.com/2389-research/ourocodus/pkg/acp"
@@ -21,7 +20,7 @@ type ACPClientFactory struct {
 func NewACPClientFactory() (*ACPClientFactory, error) {
 	apiKey := os.Getenv("ANTHROPIC_API_KEY")
 	if apiKey == "" {
-		return nil, fmt.Errorf("ANTHROPIC_API_KEY environment variable not set")
+		return nil, ErrMissingAnthropicAPIKey
 	}
 
 	// Check for custom ACP binary path (optional, for testing)

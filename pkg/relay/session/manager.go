@@ -132,11 +132,11 @@ func (m *Manager) List(filter *SessionFilter) []*UserSession {
 //nolint:gocyclo // Complexity required for TOCTOU prevention and proper error handling
 func (m *Manager) SpawnAgent(ctx context.Context, sessionID, role, workspace string) error {
 	// Validate inputs
-	if role == "" {
-		return fmt.Errorf("role cannot be empty")
+	if strings.TrimSpace(role) == "" {
+		return fmt.Errorf("role cannot be empty or whitespace-only")
 	}
-	if workspace == "" {
-		return fmt.Errorf("workspace cannot be empty")
+	if strings.TrimSpace(workspace) == "" {
+		return fmt.Errorf("workspace cannot be empty or whitespace-only")
 	}
 
 	// Validate and constrain workspace path under base directory

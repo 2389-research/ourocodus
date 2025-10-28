@@ -2,6 +2,7 @@ package session
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 )
 
@@ -50,7 +51,12 @@ func NewMemoryStore() *MemoryStore {
 // Create adds a new user session to storage
 func (m *MemoryStore) Create(session *UserSession) error {
 	if session == nil {
-		return fmt.Errorf("session cannot be nil")
+		return ErrSessionNil
+	}
+
+	// Validate session ID is not empty or whitespace-only
+	if len(session.ID) == 0 || len(session.ID) != len(strings.TrimSpace(session.ID)) {
+		return ErrEmptySessionID
 	}
 
 	m.mu.Lock()
@@ -58,7 +64,7 @@ func (m *MemoryStore) Create(session *UserSession) error {
 
 	// Check for duplicate session ID
 	if _, exists := m.sessions[session.ID]; exists {
-		return fmt.Errorf("session with ID %s already exists", session.ID)
+		return fmt.Errorf("%w: %s", ErrSessionDuplicate, session.ID)
 	}
 
 	// Store session
@@ -69,6 +75,11 @@ func (m *MemoryStore) Create(session *UserSession) error {
 
 // Get retrieves a user session by ID
 func (m *MemoryStore) Get(id string) *UserSession {
+	// Return nil for empty or whitespace-only IDs
+	if len(id) == 0 || len(id) != len(strings.TrimSpace(id)) {
+		return nil
+	}
+
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -80,7 +91,7 @@ func (m *MemoryStore) List(filter *SessionFilter) []*UserSession {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	var result []*UserSession
+	result := make([]*UserSession, 0, len(m.sessions))
 
 	for _, session := range m.sessions {
 		if m.matchesFilter(session, filter) {
