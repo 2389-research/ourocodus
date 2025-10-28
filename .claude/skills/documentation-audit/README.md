@@ -1,332 +1,216 @@
 # Documentation Audit Skill
 
-A comprehensive Claude Code skill for auditing and maintaining documentation quality in Go projects.
+A Claude Code skill for systematic manual documentation validation against actual code behavior.
 
 ## Overview
 
-This skill performs systematic documentation audits to ensure:
-- **Accuracy**: Documentation matches actual code behavior
-- **Currency**: No outdated or obsolete information
-- **Completeness**: Appropriate documentation for all audiences
-- **Balance**: "Just right" documentation volume
+This skill performs manual documentation audits to ensure:
+- **Accuracy**: Every claim in documentation matches actual code behavior (90-95% of effort)
+- **Completeness**: All features, protocols, and behaviors in code are documented
+- **Quality**: Basic formatting/link/spelling checks (5% of effort)
+
+## Philosophy
+
+**No automation, no reports, just validation.**
+
+This skill is about reading documentation, reading code, and verifying they match. It uses simple tools (Read, Grep, Glob) to validate every factual claim in documentation against actual code behavior.
 
 ## Quick Start
 
-### Prerequisites
-
-**Required** (for basic functionality):
-- Go 1.21+
-- golangci-lint (install via `mise install` or see [installation](https://golangci-lint.run/usage/install/))
-
-**Recommended** (for full Phase 1 checks):
-```bash
-# Link checking
-cargo install lychee
-
-# Markdown linting
-npm install -g markdownlint-cli
-
-# Spell checking
-pip install codespell
-```
-
-### Running Your First Audit
-
-```bash
-# From repository root
-cd .claude/skills/documentation-audit
-
-# Run Phase 1 quick checks
-./scripts/run-quick-checks.sh
-
-# View the report
-cat reports/quick-checks-report.md
-```
-
-## Usage
-
-### Phase 1: Quick Checks (Current)
-
-Fast automated checks that catch common issues:
-
-```bash
-# Full quick audit
-./scripts/run-quick-checks.sh
-
-# Just inventory
-./scripts/collect-inventory.sh
-```
-
-**What Phase 1 Checks:**
-- ✓ Broken links and anchors (via lychee)
-- ✓ Markdown formatting issues (via markdownlint)
-- ✓ Spelling errors (via codespell)
-- ✓ Go Example test validation
-- ✓ Documentation coverage of exported symbols (via golangci-lint)
-
-### Phase 2: Deep Analysis (Coming Soon)
-
-Code-driven analysis comparing code reality to documentation claims:
-- Extract CLI flags, config keys, APIs from code
-- Parse documentation claims
-- Cross-validate for accuracy drift
-- Check completeness by audience
-- Identify over/under-documentation
-
-**Status**: Phase 2 implementation coming in next iteration
-
 ### With Claude Code
 
-From anywhere in your project, just ask Claude:
+From anywhere in your project, ask Claude:
 
 ```
 "Run a documentation audit"
 "Check if our docs are up to date"
-"Validate documentation quality"
+"Validate documentation against code"
 ```
 
-Claude will automatically:
-1. Use this skill
-2. Run appropriate checks
-3. Generate a report
-4. Suggest fixes
+Claude will:
+1. List all documentation files and create TODOs for each section
+2. Validate each section by reading docs → reading code → verifying claims
+3. Fix documentation directly when inaccuracies are found
+4. Check code for undocumented features
+5. Summarize findings conversationally
 
-## Configuration
+## How It Works
 
-Edit `config.yaml` to customize:
+### Forward Pass: Documentation → Code (70% of work)
 
-```yaml
-thresholds:
-  doc_coverage_min: 85          # Minimum % of documented exports
-  drift_fail: true              # Fail CI on accuracy issues
-  broken_links_max: 0           # Maximum allowed broken links
+1. Create TODO for each documentation section that makes factual claims
+2. Read documentation section carefully
+3. Extract every factual claim (what does the doc SAY?)
+4. Use Read/Grep/Glob to find relevant code
+5. Verify each claim is accurate
+6. Update documentation immediately if wrong
 
-audiences:                      # Check completeness for:
-  - user
-  - contributor
-  - maintainer
-
-exclusions:                     # Paths to skip
-  - "vendor/**"
-  - "**/*.pb.go"
+**Example:**
+```
+Doc claims: "Manager.CreateUserSession() returns error if WebSocket is nil"
+→ Read pkg/relay/session/manager.go
+→ Find CreateUserSession() method
+→ Verify error handling
+→ Update doc if behavior differs
 ```
 
-See [config.yaml](config.yaml) for all options.
+### Reverse Pass: Code → Documentation (25% of work)
 
-## Output
+1. Create TODO for each Go package/major file
+2. Read the code to understand what it does
+3. Identify key features, protocols, state machines, error handling
+4. Check if these behaviors are documented anywhere
+5. Add documentation for undocumented features
 
-All reports are generated in `reports/`:
-
-- **quick-checks-report.md** - Human-readable findings from Phase 1
-- **quick-checks-report.json** - Machine-readable results for CI
-- **inventory.json** - Full documentation and code inventory
-
-### Sample Report Structure
-
-```markdown
-# Documentation Audit - Quick Checks Report
-
-## ✓ Inventory Collection
-Status: PASSED
-Successfully collected documentation and code inventory.
-
-## ⚠ Link Checking
-Status: WARNING
-Found 3 broken link(s). These should be fixed or removed.
-
-## Summary
-Total Checks: 6
-Passed: 4 ✓
-Warnings: 2 ⚠
-Failed: 0 ✗
+**Example:**
+```
+Read: pkg/relay/session/manager.go
+Find: Clock interface for time dependency injection
+Check: Is this pattern documented in docs/TESTING.md?
+→ If no, add section explaining the pattern
 ```
 
-## Integration
+### Quick Quality Checks (5% of work)
 
-### CI Integration
+Optional automated checks for obvious issues:
+- markdownlint for formatting
+- Link checker for broken links
+- codespell for spelling
 
-**GitHub Actions** example:
+These are the LEAST important part of the audit.
 
-```yaml
-name: Documentation Audit
+## What Gets Validated
 
-on: [pull_request, push]
+### Types of Claims to Check
 
-jobs:
-  docs-audit:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+1. **Existence Claims**
+   - "The Manager type provides session lifecycle management"
+   - "Use OUROCODUS_ACP_BINARY environment variable"
+   - → Verify type/variable exists in code
 
-      - name: Setup Go
-        uses: actions/setup-go@v4
-        with:
-          go-version: '1.23'
+2. **Behavior Claims**
+   - "SpawnAgent() returns error if role already exists"
+   - "UserSession progresses through ACTIVE → TERMINATED"
+   - → Read code to verify actual behavior
 
-      - name: Install Tools
-        run: |
-          cargo install lychee
-          npm install -g markdownlint-cli
-          pip install codespell
+3. **Configuration Claims**
+   - "Default port is 8080"
+   - "ANTHROPIC_API_KEY is required"
+   - → Check default values and validation in code
 
-      - name: Run Documentation Audit
-        run: |
-          cd .claude/skills/documentation-audit
-          ./scripts/run-quick-checks.sh
+4. **API/Protocol Claims**
+   - "Error messages include 'code', 'message', 'recoverable' fields"
+   - "WebSocket endpoint is ws://localhost:8080/ws"
+   - → Verify message formats and endpoints
 
-      - name: Upload Report
-        if: always()
-        uses: actions/upload-artifact@v3
-        with:
-          name: doc-audit-report
-          path: .claude/skills/documentation-audit/reports/
-```
+5. **Example Claims**
+   - "Run `make build` to compile"
+   - Code examples in documentation
+   - → Test that commands/examples actually work
 
-### Pre-commit Hook
-
-Add to `.pre-commit-config.yaml`:
-
-```yaml
-- repo: local
-  hooks:
-    - id: doc-audit
-      name: Documentation Audit
-      entry: .claude/skills/documentation-audit/scripts/run-quick-checks.sh
-      language: script
-      pass_filenames: false
-      stages: [manual]  # Run with: pre-commit run doc-audit
-```
-
-## Documentation Guidelines
-
-### What to Document
+## What to Document
 
 **Always Document:**
 - Exported APIs (types, functions, methods)
 - CLI flags and commands
+- Environment variables
 - Configuration options
+- State machines and transitions
+- Error handling patterns
 - Non-obvious behavior
 - Security considerations
-- Performance implications
 
 **Skip:**
 - Trivial getters/setters
-- Self-explanatory code
-- Implementation details of private functions
+- Self-explanatory private code
+- Implementation details
+- Internal data structures
 
-See [SKILL.md](SKILL.md#what-to-document-vs-skip) for complete criteria.
+## Tools You Use
 
-## Templates
+No special tools needed. Use normal Claude Code capabilities:
 
-Use provided templates for consistency:
+- **Read**: Read documentation and code files
+- **Grep**: Search for functions, types, patterns
+- **Glob**: Find files matching patterns
+- **Edit/Write**: Update documentation directly
+- **Bash**: Run commands to verify examples
 
-- [README.template.md](templates/README.template.md) - Project README structure
-- [CONTRIBUTING.template.md](templates/CONTRIBUTING.template.md) - Contributing guide
-- [SECURITY.template.md](templates/SECURITY.template.md) - Security policy
+## Output
 
-## Troubleshooting
+**DO NOT generate reports.** Instead:
+- Update documentation files directly as you find issues
+- Keep TODO list updated with progress
+- Summarize findings conversationally at the end
 
-### "command not found" errors
+## Anti-Patterns
 
-Install the missing tool:
+❌ **Don't generate reports** - Update docs directly instead
+❌ **Don't build automation** - Just read and validate manually
+❌ **Don't focus on linting** - That's only 5% of the work
+❌ **Don't batch updates** - Fix docs as you find issues
+❌ **Don't skip code reading** - Every claim must be verified
 
-```bash
-# lychee (link checker)
-cargo install lychee
+## Configuration
 
-# markdownlint (markdown linter)
-npm install -g markdownlint-cli
-
-# codespell (spell checker)
-pip install codespell
-```
-
-The skill will skip checks for missing tools and warn you.
-
-### Too many false positives
-
-Adjust thresholds in `config.yaml` or add exclusions:
+Edit `config.yaml` to customize exclusion patterns:
 
 ```yaml
 exclusions:
-  - "docs/legacy/**"  # Skip old docs
-  - "vendor/**"       # Skip dependencies
-
-tools:
-  codespell:
-    ignore_words:
-      - "yourtechterm"  # Add technical terms
+  - "vendor/**"
+  - "**/*.pb.go"
+  - ".git/**"
+  - "node_modules/**"
 ```
 
-### Large backlog of issues
+## Example Workflow
 
-Start with blockers only:
+```
+User: Run documentation audit
 
-1. Fix broken links first (quick wins)
-2. Fix spelling errors
-3. Address accuracy issues
-4. Tackle completeness gaps
-5. Refine volume issues
+Claude:
+1. Lists all .md files and creates TODOs for major sections
+2. For each section:
+   - Reads doc section
+   - Extracts factual claims
+   - Reads relevant code with Read/Grep/Glob
+   - Edits documentation if claims are inaccurate
+3. Lists all Go packages and creates TODOs
+4. For each package:
+   - Reads code files
+   - Identifies features/behaviors
+   - Checks if documented
+   - Adds missing documentation
+5. Optionally runs quick automated checks (markdownlint, etc.)
+6. Summarizes findings: "Fixed 3 inaccuracies, added 2 missing docs"
+```
 
-Use `.docauditignore` for legacy exceptions (coming in Phase 2).
+## Integration
 
-## Roadmap
+### Pre-commit Hook (Optional)
 
-### Phase 1 (✓ Current)
-- [x] Inventory collection
-- [x] Link checking
-- [x] Markdown linting
-- [x] Spell checking
-- [x] Example test validation
-- [x] Basic doc coverage
+Add to `.pre-commit-config.yaml` to run linting checks:
 
-### Phase 2 (Planned)
-- [ ] Code fact extraction (CLI, config, APIs)
-- [ ] Doc claim parsing
-- [ ] Accuracy cross-validation
-- [ ] Completeness by audience
-- [ ] Over/under-documentation detection
-- [ ] Auto-fix generation
+```yaml
+- repo: https://github.com/markdownlint/markdownlint
+  rev: v0.12.0
+  hooks:
+    - id: markdownlint
+      args: ['--config', '.markdownlintrc']
+```
 
-### Phase 3 (Future)
-- [ ] CI comment bot
-- [ ] Trend tracking dashboard
-- [ ] Auto-generated reference docs
-- [ ] Documentation debt tracking
+Note: This only runs formatting checks, not claim validation. Manual validation must be done by Claude.
 
-## Contributing
+## Summary
 
-Improvements welcome! To contribute:
+This skill is intentionally simple:
+1. Read documentation → Read code → Verify match → Fix docs
+2. Read code → Check if documented → Add missing docs
+3. Quick automated checks (least important)
 
-1. Test your changes on a real codebase
-2. Update documentation
-3. Add examples
-4. Submit a PR
-
-## FAQ
-
-**Q: How often should I run this?**
-A: Weekly scheduled runs + on every PR.
-
-**Q: What if I have a lot of technical terms?**
-A: Add them to `config.yaml` under `tools.codespell.ignore_words`.
-
-**Q: Can I use this with non-Go projects?**
-A: Phase 1 works for any project with markdown docs. Phase 2 is Go-specific.
-
-**Q: Does this replace manual review?**
-A: No, it complements manual review by catching mechanical issues.
-
-**Q: What's the difference from golangci-lint?**
-A: This is comprehensive (links, spelling, examples, cross-validation) vs. just code comments.
+**90-95% of effort is manual reading and validating, not automation.**
 
 ## References
 
 - [SKILL.md](SKILL.md) - Complete skill documentation
 - [config.yaml](config.yaml) - Configuration reference
-- [Go Doc Comments](https://go.dev/doc/comment) - Go documentation style
-- [Write the Docs](https://www.writethedocs.org/) - Documentation best practices
-
-## License
-
-Same as parent project.
