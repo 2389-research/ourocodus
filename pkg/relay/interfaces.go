@@ -1,6 +1,11 @@
 package relay
 
-import "github.com/gorilla/websocket"
+import (
+	"context"
+
+	"github.com/2389-research/ourocodus/pkg/relay/session"
+	"github.com/gorilla/websocket"
+)
 
 // Logger abstracts logging operations
 type Logger interface {
@@ -27,6 +32,19 @@ type WebSocketConn interface {
 // Upgrader abstracts WebSocket upgrade operations
 type Upgrader interface {
 	Upgrade(w interface{}, r interface{}, responseHeader interface{}) (WebSocketConn, error)
+}
+
+// SessionManagerInterface abstracts session management operations
+// Allows mocking for testing while maintaining dependency injection
+type SessionManagerInterface interface {
+	// CreateUserSession creates a new user session with WebSocket connection
+	CreateUserSession(ctx context.Context, ws session.WebSocketConn) (*session.UserSession, error)
+
+	// SpawnAgent spawns an agent in an existing session
+	SpawnAgent(ctx context.Context, sessionID, role, workspace string) error
+
+	// GetAgent retrieves an agent by session ID and role
+	GetAgent(sessionID, role string) (*session.AgentSession, error)
 }
 
 // Ensure gorilla websocket implements our interface

@@ -20,11 +20,11 @@ type Server struct {
 	clock          Clock
 	sessionClock   *SessionClockAdapter // Adapts relay.Clock to time.Time for internal use
 	upgrader       Upgrader
-	sessionManager *session.Manager
+	sessionManager SessionManagerInterface
 }
 
 // NewServer creates a new relay server with dependency injection
-func NewServer(idGen IDGenerator, logger Logger, clock Clock, upgrader Upgrader, sessionManager *session.Manager) *Server {
+func NewServer(idGen IDGenerator, logger Logger, clock Clock, upgrader Upgrader, sessionManager SessionManagerInterface) *Server {
 	return &Server{
 		serverID:       idGen.Generate(),
 		logger:         logger,
@@ -288,7 +288,22 @@ func (s *Server) handleAgentSpawn(ctx context.Context, conn WebSocketConn, rawMe
 }
 
 // handleAgentMessage handles agent:message messages
-// Forwards messages to agents and returns agent:response
+// Forwards messages from PWA to ACP agent process and returns agent:response back to PWA
+//
+// Message Flow:
+//  1. Parse and validate agent:message from PWA
+//  2. Route to correct agent via sessionManager.GetAgent(sessionID, role)
+//  3. Send to ACP process via agent.GetACPClient().SendMessage(content)
+//  4. Parse ACP response (*acp.AgentMessage)
+//  5. Store both user+agent messages in conversation history
+//  6. Format and send agent:response back to PWA
+//
+// Error Handling Philosophy:
+//   - Recoverable errors: Keep connection open, client can retry (AGENT_NOT_READY, AGENT_MESSAGE_FAILED)
+//   - Non-recoverable errors: Keep connection open anyway - client can create missing resources
+//     (SESSION_NOT_FOUND, AGENT_NOT_FOUND)
+//   - Write errors: Close connection immediately (can't communicate with client)
+//
 // Note: ctx is not currently used by ACPClient.SendMessage, but is kept for future timeout/cancellation support
 func (s *Server) handleAgentMessage(ctx context.Context, conn WebSocketConn, rawMessage []byte) bool {
 	// Parse message

@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"testing"
+	"time"
 
+	"github.com/2389-research/ourocodus/pkg/acp"
 	"github.com/2389-research/ourocodus/pkg/relay/session"
 )
 
@@ -537,6 +540,508 @@ func TestMapError_AgentNotFoundSentinel(t *testing.T) {
 	}
 }
 
-// TODO: Add handler tests for handleSessionCreate, handleAgentSpawn, handleAgentMessage
-// Requires creating a SessionManager interface to allow mocking
-// Deferred to follow-up work
+// Mock infrastructure for handler testing
+
+type mockSessionManager struct {
+	createSessionFunc func(ctx context.Context, ws session.WebSocketConn) (*session.UserSession, error)
+	spawnAgentFunc    func(ctx context.Context, sessionID, role, workspace string) error
+	getAgentFunc      func(sessionID, role string) (*session.AgentSession, error)
+}
+
+func (m *mockSessionManager) CreateUserSession(ctx context.Context, ws session.WebSocketConn) (*session.UserSession, error) {
+	if m.createSessionFunc != nil {
+		return m.createSessionFunc(ctx, ws)
+	}
+	return nil, fmt.Errorf("mock not configured")
+}
+
+func (m *mockSessionManager) SpawnAgent(ctx context.Context, sessionID, role, workspace string) error {
+	if m.spawnAgentFunc != nil {
+		return m.spawnAgentFunc(ctx, sessionID, role, workspace)
+	}
+	return fmt.Errorf("mock not configured")
+}
+
+func (m *mockSessionManager) GetAgent(sessionID, role string) (*session.AgentSession, error) {
+	if m.getAgentFunc != nil {
+		return m.getAgentFunc(sessionID, role)
+	}
+	return nil, fmt.Errorf("mock not configured")
+}
+
+type mockACPClient struct {
+	sendMessageFunc func(content string) (*acp.AgentMessage, error)
+	closeFunc       func() error
+}
+
+func (m *mockACPClient) SendMessage(content string) (*acp.AgentMessage, error) {
+	if m.sendMessageFunc != nil {
+		return m.sendMessageFunc(content)
+	}
+	return nil, fmt.Errorf("mock not configured")
+}
+
+func (m *mockACPClient) Close() error {
+	if m.closeFunc != nil {
+		return m.closeFunc()
+	}
+	return nil
+}
+
+type mockAgent struct {
+	state     session.AgentState
+	acpClient *mockACPClient
+	messages  []session.Message
+	mu        sync.RWMutex
+}
+
+func (m *mockAgent) GetState() session.AgentState {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.state
+}
+
+func (m *mockAgent) GetACPClient() interface{} {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.acpClient
+}
+
+func (m *mockAgent) AddMessage(from, content string, timestamp time.Time) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.messages = append(m.messages, session.Message{
+		From:      from,
+		Content:   content,
+		Timestamp: timestamp,
+	})
+}
+
+func (m *mockAgent) GetHistory() []session.Message {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return append([]session.Message{}, m.messages...)
+}
+
+// Test message builders
+
+func buildValidSessionCreateMessage() []byte {
+	return []byte(`{"version":"1.0","type":"session:create"}`)
+}
+
+func buildValidAgentSpawnMessage() []byte {
+	return []byte(`{"version":"1.0","type":"agent:spawn","sessionId":"test-session","role":"test-agent","workspace":"/tmp/workspace"}`)
+}
+
+func buildValidAgentMessageRequest() []byte {
+	return []byte(`{"version":"1.0","type":"agent:message","sessionId":"test-session","role":"test-agent","content":"hello"}`)
+}
+
+// handleAgentMessage tests
+// Note: Success path tested in integration test with real session.Manager
+// Unit tests focus on error handling and validation
+
+func TestHandleAgentMessage_ParseError(t *testing.T) {
+	logger := &mockLogger{}
+	clock := &mockClock{timestamp: "2025-10-28T12:00:00Z"}
+	conn := &mockWebSocketConn{}
+	sessionMgr := &mockSessionManager{}
+
+	server := &Server{
+		logger:         logger,
+		clock:          clock,
+		sessionClock:   &SessionClockAdapter{clock: clock},
+		sessionManager: sessionMgr,
+	}
+
+	ctx := context.Background()
+	rawMessage := []byte(`{invalid json}`)
+
+	shouldClose := server.handleAgentMessage(ctx, conn, rawMessage)
+
+	if shouldClose {
+		t.Error("expected shouldClose=false for recoverable parse error")
+	}
+
+	// Verify error was written
+	if len(conn.written) != 1 {
+		t.Fatalf("expected 1 error message, got %d", len(conn.written))
+	}
+
+	errorMsg, ok := conn.written[0].(ErrorMessage)
+	if !ok {
+		t.Fatal("expected ErrorMessage")
+	}
+
+	if errorMsg.Error.Code != "INVALID_MESSAGE" {
+		t.Errorf("expected code INVALID_MESSAGE, got %s", errorMsg.Error.Code)
+	}
+}
+
+func TestHandleAgentMessage_MissingSessionID(t *testing.T) {
+	logger := &mockLogger{}
+	clock := &mockClock{timestamp: "2025-10-28T12:00:00Z"}
+	conn := &mockWebSocketConn{}
+	sessionMgr := &mockSessionManager{}
+
+	server := &Server{
+		logger:         logger,
+		clock:          clock,
+		sessionClock:   &SessionClockAdapter{clock: clock},
+		sessionManager: sessionMgr,
+	}
+
+	ctx := context.Background()
+	rawMessage := []byte(`{"version":"1.0","type":"agent:message","role":"test-agent","content":"hello"}`)
+
+	shouldClose := server.handleAgentMessage(ctx, conn, rawMessage)
+
+	if shouldClose {
+		t.Error("expected shouldClose=false for validation error")
+	}
+
+	errorMsg, ok := conn.written[0].(ErrorMessage)
+	if !ok {
+		t.Fatal("expected ErrorMessage")
+	}
+
+	if errorMsg.Error.Code != "INVALID_MESSAGE" {
+		t.Errorf("expected code INVALID_MESSAGE, got %s", errorMsg.Error.Code)
+	}
+}
+
+func TestHandleAgentMessage_SessionNotFound(t *testing.T) {
+	logger := &mockLogger{}
+	clock := &mockClock{timestamp: "2025-10-28T12:00:00Z"}
+	conn := &mockWebSocketConn{}
+
+	sessionMgr := &mockSessionManager{
+		getAgentFunc: func(sessionID, role string) (*session.AgentSession, error) {
+			return nil, fmt.Errorf("%w: %s", session.ErrSessionNotFound, sessionID)
+		},
+	}
+
+	server := &Server{
+		logger:         logger,
+		clock:          clock,
+		sessionClock:   &SessionClockAdapter{clock: clock},
+		sessionManager: sessionMgr,
+	}
+
+	ctx := context.Background()
+	rawMessage := buildValidAgentMessageRequest()
+
+	shouldClose := server.handleAgentMessage(ctx, conn, rawMessage)
+
+	if shouldClose {
+		t.Error("expected shouldClose=false even for non-recoverable session not found")
+	}
+
+	errorMsg, ok := conn.written[0].(ErrorMessage)
+	if !ok {
+		t.Fatal("expected ErrorMessage")
+	}
+
+	if errorMsg.Error.Code != "SESSION_NOT_FOUND" {
+		t.Errorf("expected code SESSION_NOT_FOUND, got %s", errorMsg.Error.Code)
+	}
+
+	if errorMsg.Error.Recoverable {
+		t.Error("expected recoverable=false for session not found")
+	}
+}
+
+func TestHandleAgentMessage_AgentNotFound(t *testing.T) {
+	logger := &mockLogger{}
+	clock := &mockClock{timestamp: "2025-10-28T12:00:00Z"}
+	conn := &mockWebSocketConn{}
+
+	sessionMgr := &mockSessionManager{
+		getAgentFunc: func(sessionID, role string) (*session.AgentSession, error) {
+			return nil, fmt.Errorf("%w: role=%s session=%s", session.ErrAgentNotFound, role, sessionID)
+		},
+	}
+
+	server := &Server{
+		logger:         logger,
+		clock:          clock,
+		sessionClock:   &SessionClockAdapter{clock: clock},
+		sessionManager: sessionMgr,
+	}
+
+	ctx := context.Background()
+	rawMessage := buildValidAgentMessageRequest()
+
+	shouldClose := server.handleAgentMessage(ctx, conn, rawMessage)
+
+	if shouldClose {
+		t.Error("expected shouldClose=false")
+	}
+
+	errorMsg, ok := conn.written[0].(ErrorMessage)
+	if !ok {
+		t.Fatal("expected ErrorMessage")
+	}
+
+	if errorMsg.Error.Code != "AGENT_NOT_FOUND" {
+		t.Errorf("expected code AGENT_NOT_FOUND, got %s", errorMsg.Error.Code)
+	}
+
+	if errorMsg.Error.Recoverable {
+		t.Error("expected recoverable=false for agent not found")
+	}
+}
+
+// handleSessionCreate tests
+
+func TestHandleSessionCreate_ParseError(t *testing.T) {
+	logger := &mockLogger{}
+	clock := &mockClock{timestamp: "2025-10-28T12:00:00Z"}
+	conn := &mockWebSocketConn{}
+	sessionMgr := &mockSessionManager{}
+
+	server := &Server{
+		logger:         logger,
+		clock:          clock,
+		sessionClock:   &SessionClockAdapter{clock: clock},
+		sessionManager: sessionMgr,
+	}
+
+	ctx := context.Background()
+	rawMessage := []byte(`{invalid json}`)
+
+	shouldClose := server.handleSessionCreate(ctx, conn, rawMessage)
+
+	if shouldClose {
+		t.Error("expected shouldClose=false for parse error")
+	}
+
+	if len(conn.written) != 1 {
+		t.Fatalf("expected 1 error message, got %d", len(conn.written))
+	}
+
+	errorMsg, ok := conn.written[0].(ErrorMessage)
+	if !ok {
+		t.Fatal("expected ErrorMessage")
+	}
+
+	if errorMsg.Error.Code != "INVALID_MESSAGE" {
+		t.Errorf("expected INVALID_MESSAGE, got %s", errorMsg.Error.Code)
+	}
+}
+
+func TestHandleSessionCreate_CreateSessionFails(t *testing.T) {
+	logger := &mockLogger{}
+	clock := &mockClock{timestamp: "2025-10-28T12:00:00Z"}
+	conn := &mockWebSocketConn{}
+
+	sessionMgr := &mockSessionManager{
+		createSessionFunc: func(ctx context.Context, ws session.WebSocketConn) (*session.UserSession, error) {
+			return nil, errors.New("database connection failed")
+		},
+	}
+
+	server := &Server{
+		logger:         logger,
+		clock:          clock,
+		sessionClock:   &SessionClockAdapter{clock: clock},
+		sessionManager: sessionMgr,
+	}
+
+	ctx := context.Background()
+	rawMessage := buildValidSessionCreateMessage()
+
+	shouldClose := server.handleSessionCreate(ctx, conn, rawMessage)
+
+	if shouldClose {
+		t.Error("expected shouldClose=false for recoverable error")
+	}
+
+	errorMsg, ok := conn.written[0].(ErrorMessage)
+	if !ok {
+		t.Fatal("expected ErrorMessage")
+	}
+
+	if errorMsg.Error.Code != "SESSION_CREATE_FAILED" {
+		t.Errorf("expected SESSION_CREATE_FAILED, got %s", errorMsg.Error.Code)
+	}
+
+	if !errorMsg.Error.Recoverable {
+		t.Error("expected recoverable=true")
+	}
+}
+
+// handleAgentSpawn tests
+
+func TestHandleAgentSpawn_ParseError(t *testing.T) {
+	logger := &mockLogger{}
+	clock := &mockClock{timestamp: "2025-10-28T12:00:00Z"}
+	conn := &mockWebSocketConn{}
+	sessionMgr := &mockSessionManager{}
+
+	server := &Server{
+		logger:         logger,
+		clock:          clock,
+		sessionClock:   &SessionClockAdapter{clock: clock},
+		sessionManager: sessionMgr,
+	}
+
+	ctx := context.Background()
+	rawMessage := []byte(`{invalid json}`)
+
+	shouldClose := server.handleAgentSpawn(ctx, conn, rawMessage)
+
+	if shouldClose {
+		t.Error("expected shouldClose=false")
+	}
+
+	if len(conn.written) != 1 {
+		t.Fatalf("expected 1 error message, got %d", len(conn.written))
+	}
+
+	errorMsg, ok := conn.written[0].(ErrorMessage)
+	if !ok {
+		t.Fatal("expected ErrorMessage")
+	}
+
+	if errorMsg.Error.Code != "INVALID_MESSAGE" {
+		t.Errorf("expected INVALID_MESSAGE, got %s", errorMsg.Error.Code)
+	}
+}
+
+func TestHandleAgentSpawn_MissingWorkspace(t *testing.T) {
+	logger := &mockLogger{}
+	clock := &mockClock{timestamp: "2025-10-28T12:00:00Z"}
+	conn := &mockWebSocketConn{}
+	sessionMgr := &mockSessionManager{}
+
+	server := &Server{
+		logger:         logger,
+		clock:          clock,
+		sessionClock:   &SessionClockAdapter{clock: clock},
+		sessionManager: sessionMgr,
+	}
+
+	ctx := context.Background()
+	rawMessage := []byte(`{"version":"1.0","type":"agent:spawn","sessionId":"test-session","role":"test-agent"}`)
+
+	shouldClose := server.handleAgentSpawn(ctx, conn, rawMessage)
+
+	if shouldClose {
+		t.Error("expected shouldClose=false")
+	}
+
+	errorMsg, ok := conn.written[0].(ErrorMessage)
+	if !ok {
+		t.Fatal("expected ErrorMessage")
+	}
+
+	if errorMsg.Error.Code != "INVALID_MESSAGE" {
+		t.Errorf("expected INVALID_MESSAGE, got %s", errorMsg.Error.Code)
+	}
+}
+
+func TestHandleAgentSpawn_SessionNotFound(t *testing.T) {
+	logger := &mockLogger{}
+	clock := &mockClock{timestamp: "2025-10-28T12:00:00Z"}
+	conn := &mockWebSocketConn{}
+
+	sessionMgr := &mockSessionManager{
+		spawnAgentFunc: func(ctx context.Context, sessionID, role, workspace string) error {
+			return fmt.Errorf("%w: %s", session.ErrSessionNotFound, sessionID)
+		},
+	}
+
+	server := &Server{
+		logger:         logger,
+		clock:          clock,
+		sessionClock:   &SessionClockAdapter{clock: clock},
+		sessionManager: sessionMgr,
+	}
+
+	ctx := context.Background()
+	rawMessage := buildValidAgentSpawnMessage()
+
+	shouldClose := server.handleAgentSpawn(ctx, conn, rawMessage)
+
+	if !shouldClose {
+		t.Error("expected shouldClose=true for non-recoverable error")
+	}
+
+	errorMsg, ok := conn.written[0].(ErrorMessage)
+	if !ok {
+		t.Fatal("expected ErrorMessage")
+	}
+
+	if errorMsg.Error.Code != "SESSION_NOT_FOUND" {
+		t.Errorf("expected SESSION_NOT_FOUND, got %s", errorMsg.Error.Code)
+	}
+
+	if errorMsg.Error.Recoverable {
+		t.Error("expected recoverable=false")
+	}
+}
+
+// Test infrastructure validation - ensures mock types work correctly
+// These mocks will be used for integration tests in future work
+
+func TestMockACPClient_SendMessage(t *testing.T) {
+	mockACP := &mockACPClient{
+		sendMessageFunc: func(content string) (*acp.AgentMessage, error) {
+			return &acp.AgentMessage{
+				Type:    "text",
+				Content: "Response to: " + content,
+			}, nil
+		},
+	}
+
+	msg, err := mockACP.SendMessage("test")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if msg.Type != "text" {
+		t.Errorf("expected type text, got %s", msg.Type)
+	}
+
+	if msg.Content != "Response to: test" {
+		t.Errorf("expected response content, got %s", msg.Content)
+	}
+}
+
+func TestMockAgent_StateAndHistory(t *testing.T) {
+	mockACP := &mockACPClient{}
+	agent := &mockAgent{
+		state:     session.AgentActive,
+		acpClient: mockACP,
+		messages:  []session.Message{},
+	}
+
+	// Test state
+	if agent.GetState() != session.AgentActive {
+		t.Errorf("expected AgentActive, got %s", agent.GetState())
+	}
+
+	// Test ACP client
+	if agent.GetACPClient() != mockACP {
+		t.Error("expected same ACP client")
+	}
+
+	// Test message history
+	now := time.Now()
+	agent.AddMessage("user", "hello", now)
+	agent.AddMessage("agent", "hi there", now)
+
+	history := agent.GetHistory()
+	if len(history) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(history))
+	}
+
+	if history[0].From != "user" || history[0].Content != "hello" {
+		t.Error("first message incorrect")
+	}
+
+	if history[1].From != "agent" || history[1].Content != "hi there" {
+		t.Error("second message incorrect")
+	}
+}
