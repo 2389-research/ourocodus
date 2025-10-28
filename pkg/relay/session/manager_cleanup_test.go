@@ -4,17 +4,17 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 )
 
 // TestTerminateAgent_CloseError tests agent termination when Close() fails
 func TestTerminateAgent_CloseError(t *testing.T) {
-	manager, _, _, _, logger, _ := setupManager()
-	ctx := context.Background()
-	ws := &mockWebSocket{}
-
-	// Create session with agent that fails to close
-	session, _ := manager.CreateUserSession(ctx, ws)
-
+	// Create manager with factory that returns agents that fail to close
+	store := NewMemoryStore()
+	idGen := &mockIDGenerator{nextID: "test-session-id"}
+	clock := &mockClock{now: time.Date(2025, 10, 23, 12, 0, 0, 0, time.UTC)}
+	cleaner := &mockCleaner{}
+	logger := &mockLogger{}
 	failingFactory := &mockClientFactory{
 		clientFunc: func(workspace string) (ACPClient, error) {
 			return &mockACPClient{
@@ -24,12 +24,23 @@ func TestTerminateAgent_CloseError(t *testing.T) {
 			}, nil
 		},
 	}
-	manager.clientFactory = failingFactory
+	manager := NewManager(store, idGen, clock, cleaner, logger, failingFactory, ".")
 
-	_ = manager.SpawnAgent(ctx, session.GetID(), "auth", "testdata/agent/auth")
+	ctx := context.Background()
+	ws := &mockWebSocket{}
+
+	// Create session with agent that fails to close
+	session, err := manager.CreateUserSession(ctx, ws)
+	if err != nil {
+		t.Fatalf("Failed to create session: %v", err)
+	}
+
+	if err := manager.SpawnAgent(ctx, session.GetID(), "auth", "testdata/agent/auth"); err != nil {
+		t.Fatalf("Failed to spawn agent: %v", err)
+	}
 
 	// Terminate should log error but continue
-	err := manager.TerminateAgent(ctx, session.GetID(), "auth")
+	err = manager.TerminateAgent(ctx, session.GetID(), "auth")
 	if err != nil {
 		t.Fatalf("Expected no error (close error logged), got: %v", err)
 	}
@@ -48,10 +59,13 @@ func TestTerminateUserSession_CleanerError(t *testing.T) {
 	// Make cleaner fail
 	cleaner.shouldErr = true
 
-	session, _ := manager.CreateUserSession(ctx, &mockWebSocket{})
+	session, err := manager.CreateUserSession(ctx, &mockWebSocket{})
+	if err != nil {
+		t.Fatalf("Failed to create session: %v", err)
+	}
 	sessionID := session.GetID()
 
-	err := manager.TerminateUserSession(ctx, sessionID)
+	err = manager.TerminateUserSession(ctx, sessionID)
 	if err != nil {
 		t.Fatalf("Expected no error (cleaner error logged), got: %v", err)
 	}

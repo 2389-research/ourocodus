@@ -32,6 +32,11 @@ func NewACPClientFactory() (*ACPClientFactory, error) {
 	}, nil
 }
 
+// GetACPBinaryPath returns the custom ACP binary path (empty string if not set)
+func (f *ACPClientFactory) GetACPBinaryPath() string {
+	return f.acpBinaryPath
+}
+
 // NewClient spawns a new ACP process in the given workspace
 // Uses custom binary path if OUROCODUS_ACP_BINARY was set, otherwise defaults to claude-code-acp
 func (f *ACPClientFactory) NewClient(workspace string) (ACPClient, error) {

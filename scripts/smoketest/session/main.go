@@ -107,6 +107,12 @@ func testCreateUserSession(ctx context.Context, manager *session.Manager, verbos
 		return fmt.Errorf("expected ACTIVE state, got %s", userSession.GetState())
 	}
 
+	// Verify initial state has 0 agents
+	agents := userSession.ListAgents()
+	if len(agents) != 0 {
+		return fmt.Errorf("expected 0 agents initially, got %d", len(agents))
+	}
+
 	debug(verbose, "  ✓ Created session %s in ACTIVE state", userSession.GetID())
 	debug(verbose, "  ✓ Session has 0 agents initially")
 	success("✅", "UserSession created successfully")
@@ -115,10 +121,13 @@ func testCreateUserSession(ctx context.Context, manager *session.Manager, verbos
 
 func testSpawnSingleAgent(ctx context.Context, manager *session.Manager, verbose bool) error {
 	ws := &fakeWebSocket{}
-	userSession, _ := manager.CreateUserSession(ctx, ws)
+	userSession, err := manager.CreateUserSession(ctx, ws)
+	if err != nil {
+		return fmt.Errorf("failed to create session: %w", err)
+	}
 	sessionID := userSession.GetID()
 
-	err := manager.SpawnAgent(ctx, sessionID, "auth", "./workspaces/auth")
+	err = manager.SpawnAgent(ctx, sessionID, "auth", "./workspaces/auth")
 	if err != nil {
 		return fmt.Errorf("failed to spawn: %w", err)
 	}
@@ -145,7 +154,10 @@ func testSpawnSingleAgent(ctx context.Context, manager *session.Manager, verbose
 
 func testSpawnMultipleAgents(ctx context.Context, manager *session.Manager, verbose bool) error {
 	ws := &fakeWebSocket{}
-	userSession, _ := manager.CreateUserSession(ctx, ws)
+	userSession, err := manager.CreateUserSession(ctx, ws)
+	if err != nil {
+		return fmt.Errorf("failed to create session: %w", err)
+	}
 	sessionID := userSession.GetID()
 
 	roles := []string{"auth", "db", "tests"}
@@ -200,7 +212,10 @@ func testAgentSpawnFailureIsolation(ctx context.Context, verbose bool) error {
 	manager := session.NewManager(store, idGen, clock, cleaner, logger, failingFactory, "")
 
 	ws := &fakeWebSocket{}
-	userSession, _ := manager.CreateUserSession(ctx, ws)
+	userSession, err := manager.CreateUserSession(ctx, ws)
+	if err != nil {
+		return fmt.Errorf("failed to create session: %w", err)
+	}
 	sessionID := userSession.GetID()
 
 	// Spawn successful agent first
@@ -209,7 +224,7 @@ func testAgentSpawnFailureIsolation(ctx context.Context, verbose bool) error {
 	}
 
 	// Try to spawn failing agent
-	err := manager.SpawnAgent(ctx, sessionID, "failing", "./workspaces/failing")
+	err = manager.SpawnAgent(ctx, sessionID, "failing", "./workspaces/failing")
 	if err == nil {
 		return fmt.Errorf("expected spawn to fail, but it succeeded")
 	}
@@ -241,7 +256,10 @@ func testAgentSpawnFailureIsolation(ctx context.Context, verbose bool) error {
 
 func testTerminateSingleAgent(ctx context.Context, manager *session.Manager, verbose bool) error {
 	ws := &fakeWebSocket{}
-	userSession, _ := manager.CreateUserSession(ctx, ws)
+	userSession, err := manager.CreateUserSession(ctx, ws)
+	if err != nil {
+		return fmt.Errorf("failed to create session: %w", err)
+	}
 	sessionID := userSession.GetID()
 
 	// Spawn two agents
@@ -258,7 +276,7 @@ func testTerminateSingleAgent(ctx context.Context, manager *session.Manager, ver
 	}
 
 	// Verify auth agent is gone
-	_, err := manager.GetAgent(sessionID, "auth")
+	_, err = manager.GetAgent(sessionID, "auth")
 	if err == nil {
 		return fmt.Errorf("terminated agent still exists")
 	}
@@ -287,7 +305,10 @@ func testTerminateSingleAgent(ctx context.Context, manager *session.Manager, ver
 
 func testTerminateSession(ctx context.Context, manager *session.Manager, verbose bool) error {
 	ws := &fakeWebSocket{}
-	userSession, _ := manager.CreateUserSession(ctx, ws)
+	userSession, err := manager.CreateUserSession(ctx, ws)
+	if err != nil {
+		return fmt.Errorf("failed to create session: %w", err)
+	}
 	sessionID := userSession.GetID()
 
 	// Spawn multiple agents
@@ -313,7 +334,7 @@ func testTerminateSession(ctx context.Context, manager *session.Manager, verbose
 	}
 
 	// Verify agents are gone
-	_, err := manager.ListAgents(sessionID)
+	_, err = manager.ListAgents(sessionID)
 	if err == nil {
 		return fmt.Errorf("agents still exist after session termination")
 	}
@@ -327,7 +348,10 @@ func testTerminateSession(ctx context.Context, manager *session.Manager, verbose
 
 func testIdempotentTermination(ctx context.Context, manager *session.Manager, verbose bool) error {
 	ws := &fakeWebSocket{}
-	userSession, _ := manager.CreateUserSession(ctx, ws)
+	userSession, err := manager.CreateUserSession(ctx, ws)
+	if err != nil {
+		return fmt.Errorf("failed to create session: %w", err)
+	}
 	sessionID := userSession.GetID()
 
 	if err := manager.SpawnAgent(ctx, sessionID, "auth", "./workspaces/auth"); err != nil {
@@ -373,12 +397,23 @@ func testListAndFilter(ctx context.Context, verbose bool) error {
 
 	freshManager := session.NewManager(store, idGen, clock, cleaner, logger, clientFactory, "")
 
+	// Verify initial state has 0 sessions
+	if initialCount := freshManager.Count(); initialCount != 0 {
+		return fmt.Errorf("expected 0 sessions initially, got %d", initialCount)
+	}
+
 	// Create multiple sessions
 	ws1 := &fakeWebSocket{}
-	session1, _ := freshManager.CreateUserSession(ctx, ws1)
+	session1, err := freshManager.CreateUserSession(ctx, ws1)
+	if err != nil {
+		return fmt.Errorf("failed to create session1: %w", err)
+	}
 
 	ws2 := &fakeWebSocket{}
-	session2, _ := freshManager.CreateUserSession(ctx, ws2)
+	session2, err := freshManager.CreateUserSession(ctx, ws2)
+	if err != nil {
+		return fmt.Errorf("failed to create session2: %w", err)
+	}
 
 	// List all sessions
 	allSessions := freshManager.List(nil)

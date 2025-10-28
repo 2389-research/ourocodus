@@ -98,7 +98,7 @@ func NewManager(store Store, idGen IDGenerator, clock Clock, cleaner Cleaner, lo
 func (m *Manager) CreateUserSession(ctx context.Context, ws WebSocketConn) (*UserSession, error) {
 	// Validate input
 	if ws == nil {
-		return nil, fmt.Errorf("websocket connection cannot be nil")
+		return nil, ErrWebSocketNil
 	}
 
 	// Generate unique ID and create session
@@ -133,10 +133,10 @@ func (m *Manager) List(filter *SessionFilter) []*UserSession {
 func (m *Manager) SpawnAgent(ctx context.Context, sessionID, role, workspace string) error {
 	// Validate inputs
 	if strings.TrimSpace(role) == "" {
-		return fmt.Errorf("role cannot be empty or whitespace-only")
+		return ErrEmptyRole
 	}
 	if strings.TrimSpace(workspace) == "" {
-		return fmt.Errorf("workspace cannot be empty or whitespace-only")
+		return ErrEmptyWorkspace
 	}
 
 	// Validate and constrain workspace path under base directory
