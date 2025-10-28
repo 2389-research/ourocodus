@@ -15,6 +15,7 @@ mise install
 ```
 
 This installs:
+
 - **Go 1.23.0** - Programming language runtime
 - **golangci-lint** - Comprehensive linter
 - **staticcheck** - Advanced static analysis tool
@@ -37,6 +38,7 @@ mise list
 **When to use**: Before committing any Go code changes.
 
 **Usage**:
+
 ```bash
 # Via mise
 mise run fmt
@@ -49,6 +51,7 @@ gofumpt -l -w .
 ```
 
 **What it does**:
+
 - Formats all Go files in the current directory and subdirectories
 - Enforces stricter formatting rules than `gofmt`
 - Modifies files in place (`-w` flag)
@@ -62,6 +65,7 @@ gofumpt -l -w .
 **When to use**: After making code changes, before committing.
 
 **Usage**:
+
 ```bash
 # Via mise
 mise run lint
@@ -74,6 +78,7 @@ golangci-lint run --timeout=5m
 ```
 
 **What it checks**:
+
 - Code formatting (gofmt)
 - Static analysis (govet)
 - Error checking (errcheck)
@@ -84,7 +89,8 @@ golangci-lint run --timeout=5m
 
 **Configuration**: See `.golangci.yml` for enabled linters and settings.
 
-**Expected behavior**: 
+**Expected behavior**:
+
 - No output if all checks pass
 - Detailed error messages with file locations if issues are found
 - Exit code 0 on success, non-zero on failure
@@ -96,6 +102,7 @@ golangci-lint run --timeout=5m
 **When to use**: After making significant code changes.
 
 **Usage**:
+
 ```bash
 # Via mise
 mise run check
@@ -108,6 +115,7 @@ staticcheck ./...
 ```
 
 **What it finds**:
+
 - Unused code
 - Incorrect API usage
 - Performance issues
@@ -123,6 +131,7 @@ staticcheck ./...
 **Purpose**: Examines Go source code and reports suspicious constructs.
 
 **Usage**:
+
 ```bash
 go vet ./...
 ```
@@ -134,6 +143,7 @@ go vet ./...
 **Purpose**: Run all tests in the project.
 
 **Usage**:
+
 ```bash
 # Via Makefile
 make test
@@ -188,6 +198,7 @@ make build    # Verify build
 ```
 
 The `pre-commit` task runs:
+
 1. `gofumpt -l -w .` - Format all Go files
 2. `go vet ./...` - Basic static analysis
 3. `golangci-lint run --timeout=5m` - Comprehensive linting
@@ -210,7 +221,8 @@ The hooks will automatically run formatting, linting, and building checks.
 
 **Error**: `command -v gofumpt: command not found` or similar
 
-**Solution**: 
+**Solution**:
+
 ```bash
 mise install
 ```
@@ -222,6 +234,7 @@ If mise is not installed, see the installation instructions in `CONTRIBUTING.md`
 **Error**: `golangci-lint` reports errors
 
 **Solution**:
+
 1. Review the error messages carefully
 2. Fix the reported issues
 3. Some issues can be auto-fixed with `golangci-lint run --fix`
@@ -232,6 +245,7 @@ If mise is not installed, see the installation instructions in `CONTRIBUTING.md`
 **Error**: Files are not formatted correctly
 
 **Solution**:
+
 ```bash
 make fmt
 ```
@@ -243,6 +257,7 @@ This will automatically format all Go files according to gofumpt rules.
 **Error**: `make build` fails
 
 **Solution**:
+
 1. Check the error message for specific compilation errors
 2. Fix the code issues
 3. Run `make build` again
@@ -258,10 +273,12 @@ This will automatically format all Go files according to gofumpt rules.
 ## Integration with CI/CD
 
 All quality checks run automatically in GitHub Actions on:
+
 - All pull requests
 - Pushes to main branch
 
 The CI pipeline runs:
+
 - Build verification
 - Test suite
 - Linting with golangci-lint
@@ -284,5 +301,5 @@ The CI pipeline runs:
 
 - **General contribution guidelines**: See `CONTRIBUTING.md`
 - **Project overview**: See `README.md`
-- **mise documentation**: https://mise.jdx.dev/
-- **golangci-lint documentation**: https://golangci-lint.run/
+- **mise documentation**: <https://mise.jdx.dev/>
+- **golangci-lint documentation**: <https://golangci-lint.run/>

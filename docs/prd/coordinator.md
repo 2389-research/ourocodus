@@ -28,7 +28,7 @@ Orchestrates development workflows by reading graph definitions and driving agen
 
 ## High-Level Flow
 
-```
+```text
 1. Load graph.yaml
 2. For each chunk in graph:
    a. Send work.coding message to NATS
@@ -42,7 +42,7 @@ Orchestrates development workflows by reading graph definitions and driving agen
    i. Wait for result
    j. Mark chunk complete
 3. Workflow complete
-```
+```text
 
 ## Graph Definition (YAML)
 
@@ -75,12 +75,13 @@ chunks:
       - coding
       - testing
     depends_on: [chunk_1]
-```
+```text
 
 ## Message Interaction
 
 ### Send Work
-```
+
+```text
 Topic: sessions.{session_id}.work.coding
 Message: {
   "id": "msg_123",
@@ -91,16 +92,18 @@ Message: {
     "requirements": [...]
   }
 }
-```
+```text
 
 ### Wait for Result
-```
+
+```text
 Topic: sessions.{session_id}.results.coding
 Subscribe and block until message received
-```
+```text
 
 ### Request Approval
-```
+
+```text
 Topic: sessions.{session_id}.approvals
 Message: {
   "type": "approval.request",
@@ -109,13 +112,14 @@ Message: {
     "summary": "Coding complete. Proceed to testing?"
   }
 }
-```
+```text
 
 ### Wait for Approval
-```
+
+```text
 Topic: sessions.{session_id}.approvals
 Block until approval.granted received
-```
+```text
 
 ## Implementation (Deferred to Phase 2)
 

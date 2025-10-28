@@ -5,15 +5,17 @@
 **Implementation:** Simplified from original design - integrated directly into `pkg/relay/session/` package instead of creating separate `pkg/relay/agent/` package. Uses UserSession/AgentSession architecture with variable agent count (0-N) and independent agent lifecycles.
 
 ## Goal
+
 Wire the relay session manager to real ACP agent processes so that each active session has a spawned `claude-code-acp` client, a prepared git worktree, and deterministic hooks for message translation. The result should be narrowly scoped, dependency-injected components that the upcoming routing issues (#8/#9) can call without touching process or filesystem details directly.
 
 ## Background
+
 - [Relay PRD](../prd/relay.md) defines ACP process supervision, connection management, and protocol translation responsibilities that begin with this issue.
 - [Session Lifecycle](../SESSION_LIFECYCLE.md) shows which transitions (#6 implements) must be triggered while spawning and shutting down ACP processes.
 - The [ACP client package](../../pkg/acp) already spawns `claude-code-acp`, exposes `SendMessage`, and handles JSON-RPC plumbing; this issue composes that client, rather than re-implementing protocol logic.
-- [Phase 1 Plan](../PHASE1_PLAN.md#4-relay-with-acp-integration) sketches a monolithic relay; this brief decomposes that sketch into small, testable units aligned with our design preferences.
 
 ## Design Principles
+
 - **Constructor-driven wiring** – Provide factories (`NewRuntime`, `NewSpawner`) that accept interfaces for filesystem prep, command execution, and cleanup; never instantiate concrete dependencies inline.
 - **Pure translators** – Keep JSON ↔ internal model conversions in pure functions that take structs and return structs/errors. Avoid hidden globals so #8/#9 can reuse the same translators.
 - **One responsibility per function** – Separate worktree preparation, ACP client spawning, session attachment, and I/O loop setup into dedicated functions with clear inputs/outputs.
@@ -44,6 +46,7 @@ Wire the relay session manager to real ACP agent processes so that each active s
    - Cover bridge helpers with stubbed `Source/Sink` proving they are pure loops around the provided interfaces.
 
 ## Out of Scope
+
 - Real message routing between PWA/NATS and ACP (issues #8 and #9 implement the actual pipelines).
 - Observability/metrics hooks beyond simple logging stubs.
 - Container orchestration; continue spawning local binaries per Phase 1 assumptions.
@@ -64,6 +67,7 @@ Wire the relay session manager to real ACP agent processes so that each active s
 - Inline Go doc comments describing how the routing layer should interact with the new abstractions.
 
 ## Acceptance Criteria (Actual Implementation)
+
 - [x] ClientFactory abstraction created with ACPClientFactory and FakeClientFactory
 - [x] Session Manager uses injected dependencies (Store, IDGenerator, Clock, Cleaner, Logger, ClientFactory)
 - [x] UserSession/AgentSession architecture with independent lifecycles
@@ -75,6 +79,7 @@ Wire the relay session manager to real ACP agent processes so that each active s
 - [x] All tests passing, no lint errors
 
 ## Follow-Ups / Dependencies
+
 - **Prerequisites:** Issues #5 and #6 must land so the WebSocket server and session manager abstractions exist.
 - **Unblocked next steps:** Issues #8 and #9 will plug routing sources/sinks into the bridges created here.
 - **Monitoring:** Capture TODOs for replacing direct binary spawning with container orchestration in Phase 2 once the daemon/API server takes over process management.

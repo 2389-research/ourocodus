@@ -8,6 +8,7 @@
 - **AgentSession**: Individual ACP process with 4 states (SPAWNING, ACTIVE, FAILED, TERMINATED)
 
 **Key Design Principles:**
+
 - UserSession can have 0 to N agents
 - Agents can be spawned/terminated independently
 - Agent failure doesn't terminate the UserSession
@@ -19,7 +20,7 @@
 
 ## Session Architecture
 
-```
+```text
 UserSession (ID: uuid)
 ├── State: ACTIVE | TERMINATED
 ├── WebSocket Connection (to PWA)
@@ -40,13 +41,13 @@ UserSession (ID: uuid)
     │
     └── AgentSession (role: "tests")
         └── ...
-```
+```text
 
 ---
 
 ## UserSession States
 
-```
+```text
    ┌─────────┐
    │ ACTIVE  │  Session created, WebSocket connected
    └────┬────┘
@@ -58,15 +59,17 @@ UserSession (ID: uuid)
    ┌─────────────┐
    │ TERMINATED  │  Session stopped, resources cleaned
    └─────────────┘
-```
+```text
 
 **ACTIVE:**
+
 - WebSocket connection established
 - Can spawn 0-N agents
 - Agents can be added/removed dynamically
 - Session stays ACTIVE even if all agents fail
 
 **TERMINATED:**
+
 - All agents terminated
 - WebSocket closed
 - Session removed from store
@@ -76,7 +79,7 @@ UserSession (ID: uuid)
 
 ## AgentSession States
 
-```
+```text
    ┌──────────┐
    │ SPAWNING │  Worktree + ACP process being created
    └────┬─────┘
@@ -102,26 +105,30 @@ UserSession (ID: uuid)
              ┌─────────────┐
              │ TERMINATED  │  Cleaned up
              └─────────────┘
-```
+```text
 
 **SPAWNING:**
+
 - Workspace directory being created
 - ACP process being spawned
 - May transition to ACTIVE or FAILED
 - Session remains ACTIVE during spawn
 
 **ACTIVE:**
+
 - ACP process running (has ACPClient)
 - Can send/receive messages
 - Workspace ready for git operations
 
 **FAILED:**
+
 - Spawn failed or process crashed
 - Error message recorded
 - UserSession stays ACTIVE
 - Can retry with new agent
 
 **TERMINATED:**
+
 - Agent stopped gracefully
 - ACP process terminated
 - Resources cleaned
@@ -135,9 +142,10 @@ UserSession (ID: uuid)
 
 ```go
 manager.CreateUserSession(ctx, websocketConn)
-```
+```text
 
 **What happens:**
+
 1. Generate unique session ID
 2. Create UserSession with ACTIVE state
 3. Attach WebSocket connection
@@ -154,7 +162,7 @@ manager.CreateUserSession(ctx, websocketConn)
   "sessionId": "550e8400-e29b-41d4-a716-446655440000",
   "timestamp": "2025-10-24T12:34:56Z"
 }
-```
+```text
 
 ---
 
@@ -164,9 +172,10 @@ manager.CreateUserSession(ctx, websocketConn)
 
 ```go
 manager.SpawnAgent(ctx, sessionID, role, workspace)
-```
+```text
 
 **Validation:**
+
 - Session must exist
 - Session must be ACTIVE
 - Role must not already exist
@@ -175,6 +184,7 @@ manager.SpawnAgent(ctx, sessionID, role, workspace)
 ### 2. Agent Creation (SPAWNING)
 
 **What happens:**
+
 1. Create AgentSession in SPAWNING state
 2. Create workspace directory (0o750 permissions)
 3. Spawn ACP client process
@@ -190,11 +200,12 @@ manager.SpawnAgent(ctx, sessionID, role, workspace)
   "role": "auth",
   "workspace": "/path/to/agent/auth"
 }
-```
+```text
 
 ### 4. Spawn Failure (Independent)
 
 **If agent fails to spawn:**
+
 - Agent transitions to FAILED state
 - Error message recorded in agent
 - **UserSession remains ACTIVE**
@@ -215,14 +226,16 @@ manager.SpawnAgent(ctx, sessionID, role, workspace)
   "role": "auth",
   "content": "Create a user authentication module"
 }
-```
+```text
 
 **Validation:**
+
 - Session must exist and be ACTIVE
 - Agent must exist for given role
 - Agent must be in ACTIVE state
 
 **Response:**
+
 ```json
 // Relay → PWA
 {
@@ -232,13 +245,13 @@ manager.SpawnAgent(ctx, sessionID, role, workspace)
   "content": "I've created auth.go with JWT implementation...",
   "timestamp": "2025-10-24T12:34:57Z"
 }
-```
+```text
 
 ### List Agents
 
 ```go
 agents, err := manager.ListAgents(sessionID)
-```
+```text
 
 Returns all agents for the session with their current states.
 
@@ -246,7 +259,7 @@ Returns all agents for the session with their current states.
 
 ```go
 agent, err := manager.GetAgent(sessionID, role)
-```
+```text
 
 Returns single agent by role.
 
@@ -255,21 +268,24 @@ Returns single agent by role.
 Retrieve stored conversation between user and agent.
 
 **Manager API:**
+
 ```go
 history, err := manager.GetAgentHistory(sessionID, role)
 // Returns []Message with conversation turns
-```
+```text
 
 **Message Structure:**
+
 ```go
 type Message struct {
     From      string    // "user" or "agent"
     Content   string    // Message content
     Timestamp time.Time // When message was sent
 }
-```
+```text
 
 **Example:**
+
 ```go
 history, err := manager.GetAgentHistory("session-123", "auth")
 if err != nil {
@@ -285,14 +301,16 @@ for _, msg := range history {
         msg.From,
         msg.Content)
 }
-```
+```text
 
 **Thread Safety:**
+
 - GetHistory() returns defensive copies
 - Safe for concurrent access
 - Messages stored transactionally after successful ACP responses
 
 **Error Handling:**
+
 - Returns `session.ErrSessionNotFound` if session doesn't exist
 - Returns `session.ErrAgentNotFound` if agent role not found
 
@@ -304,9 +322,10 @@ for _, msg := range history {
 
 ```go
 manager.TerminateAgent(ctx, sessionID, role)
-```
+```text
 
 **What happens:**
+
 1. Find agent by role
 2. Close ACP client connection
 3. Set agent state to TERMINATED
@@ -324,11 +343,12 @@ manager.TerminateAgent(ctx, sessionID, role)
   "role": "auth",
   "reason": "user requested"
 }
-```
+```text
 
 ### 3. Other Agents Unaffected
 
 **Independent lifecycles:**
+
 - Terminating "auth" doesn't affect "db" agent
 - Session continues with remaining agents
 - Can spawn new agents after termination
@@ -341,9 +361,10 @@ manager.TerminateAgent(ctx, sessionID, role)
 
 ```go
 manager.TerminateUserSession(ctx, sessionID)
-```
+```text
 
 **What happens:**
+
 1. Mark session as TERMINATED
 2. Terminate all active agents in parallel (with timeout)
 3. Close WebSocket connection
@@ -351,6 +372,7 @@ manager.TerminateUserSession(ctx, sessionID)
 5. Remove session from store
 
 **Parallel Termination:**
+
 - All agents closed concurrently
 - 5-second timeout per agent
 - Continues even if some agents fail to close
@@ -364,16 +386,18 @@ manager.TerminateUserSession(ctx, sessionID)
   "reason": "user requested",
   "agentsTerminated": 3
 }
-```
+```text
 
 ### 3. Cleanup
 
 **What gets cleaned:**
+
 - All ACP processes terminated
 - WebSocket connection closed
 - Session removed from memory
 
 **What persists:**
+
 - Git worktrees (for inspection)
 - Committed work
 
@@ -386,6 +410,7 @@ manager.TerminateUserSession(ctx, sessionID)
 **Scenario:** Workspace creation fails
 
 **Behavior:**
+
 - Agent enters FAILED state
 - Error message recorded
 - Session remains ACTIVE
@@ -396,6 +421,7 @@ manager.TerminateUserSession(ctx, sessionID)
 **Scenario:** ACP process exits unexpectedly
 
 **Behavior:**
+
 - Agent marked as FAILED
 - Error logged
 - Session remains ACTIVE
@@ -406,6 +432,7 @@ manager.TerminateUserSession(ctx, sessionID)
 **Scenario:** User terminates session while agent is SPAWNING
 
 **Behavior:**
+
 - Spawn continues or is cancelled
 - Agent transitions to TERMINATED
 - Session cleanup proceeds normally
@@ -422,9 +449,10 @@ type Manager struct {
     clientFactory ClientFactory
     // ... other dependencies
 }
-```
+```text
 
 **Thread-safe operations:**
+
 - CreateUserSession
 - SpawnAgent
 - TerminateAgent
@@ -446,7 +474,7 @@ type UserSession struct {
 
     mu sync.RWMutex
 }
-```
+```text
 
 ### AgentSession
 
@@ -465,7 +493,7 @@ type AgentSession struct {
 
     mu sync.RWMutex
 }
-```
+```text
 
 ---
 
@@ -510,6 +538,7 @@ type AgentSession struct {
 ## Testing Scenarios
 
 ### Happy Path
+
 - [ ] Create session → Verify ACTIVE state
 - [ ] Spawn agent → Verify agent ACTIVE
 - [ ] Send message → Verify response
@@ -517,18 +546,21 @@ type AgentSession struct {
 - [ ] Terminate session → Verify all cleaned
 
 ### Multiple Agents
+
 - [ ] Spawn 3 agents → All ACTIVE
 - [ ] Terminate 1 agent → Others unaffected
 - [ ] Send messages to remaining agents
 - [ ] Terminate session → All agents cleaned
 
 ### Failure Scenarios
+
 - [ ] Spawn agent with invalid workspace → Agent FAILED, session ACTIVE
 - [ ] Terminate agent during spawn → Graceful handling
 - [ ] Terminate session with SPAWNING agents → All cleaned
 - [ ] Agent process crashes → Session stays ACTIVE
 
 ### Edge Cases
+
 - [ ] Spawn duplicate role → Error returned
 - [ ] Send message to non-existent agent → Error
 - [ ] Terminate already-terminated agent → Idempotent
@@ -539,15 +571,18 @@ type AgentSession struct {
 ## Summary
 
 **Architecture:**
+
 - UserSession (container) → 0-N AgentSessions
 - Independent agent lifecycles
 - Dynamic roles (not hardcoded)
 
 **States:**
+
 - UserSession: ACTIVE → TERMINATED
 - AgentSession: SPAWNING → ACTIVE/FAILED → TERMINATED
 
 **Key Benefits:**
+
 - Agent isolation (failures don't cascade)
 - Flexibility (variable agent count)
 - Simplicity (only 2 states for UserSession)

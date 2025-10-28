@@ -4,52 +4,53 @@ This package provides in-memory session management for the relay, implementing t
 
 ## Overview
 
-The session package manages the lifecycle of WebSocket sessions between PWA clients and ACP agents. Each session represents one user conversation with one AI agent, progressing through defined states from creation to cleanup.
+The session package manages two-level session hierarchy:
+
+1. **UserSession** - Container for WebSocket connection and 0-N agents
+2. **AgentSession** - Individual ACP process with its own state machine
+
+**Key principle:** UserSession is a container, not tied to a single agent. Agents can be spawned/terminated independently without affecting the UserSession.
 
 ## Architecture
 
-The package follows strict separation of concerns with dependency injection:
-
-```
-┌─────────────────┐
-│    Manager      │ ← Public API
-│  (coordinator)  │
-└────────┬────────┘
-         │
-    ┌────┴────┬──────────┬──────────┐
-    │         │          │          │
-┌───▼────┐ ┌─▼────┐ ┌───▼──────┐ ┌──▼──────┐
-│  Store │ │State │ │  Cleaner │ │ IDGen   │
-│(memory)│ │Machine│ │  (hooks) │ │ Clock   │
-└────────┘ └──────┘ └──────────┘ └─────────┘
+```text
+UserSession (ACTIVE/TERMINATED)
+├── WebSocket Connection
+├── AgentSession "auth" (SPAWNING/ACTIVE/FAILED/TERMINATED)
+├── AgentSession "db" (SPAWNING/ACTIVE/FAILED/TERMINATED)
+└── AgentSession "tests" (SPAWNING/ACTIVE/FAILED/TERMINATED)
 ```
 
 ### Components
 
 1. **Manager** - Orchestrates session lifecycle, composes all dependencies
 2. **Store** - Thread-safe in-memory storage for sessions
-3. **StateMachine** - Pure functions for state transitions
-4. **Session** - Immutable domain model with controlled mutation
-5. **Cleaner** - Pluggable cleanup strategy (no-op in Phase 1)
+3. **UserSession** - Container for WebSocket and agents
+4. **AgentSession** - Individual ACP process with state machine
+5. **Cleaner** - Pluggable cleanup strategy for workspace directories
+6. **ClientFactory** - Creates ACP clients for agent processes
 
-## State Machine
+## State Machines
 
-Sessions progress through these states:
+### UserSession States
 
+```text
+ACTIVE → TERMINATED
 ```
-CREATED → SPAWNING → ACTIVE → TERMINATING → CLEANED
+
+- **ACTIVE**: Session created, WebSocket connected, can spawn 0-N agents
+- **TERMINATED**: All agents terminated, WebSocket closed, session removed
+
+### AgentSession States
+
+```text
+SPAWNING → ACTIVE/FAILED → TERMINATED
 ```
 
-Valid transitions:
-- `CREATED + SPAWN → SPAWNING`
-- `CREATED + TERMINATE → TERMINATING` (early cancel)
-- `SPAWNING + ACTIVATE → ACTIVE`
-- `SPAWNING + TERMINATE → TERMINATING` (spawn failure)
-- `ACTIVE + TERMINATE → TERMINATING`
-- `TERMINATING + CLEAN → CLEANED`
-- `TERMINATING + TERMINATE → TERMINATING` (idempotent)
-
-Invalid transitions return `TransitionError`.
+- **SPAWNING**: ACP process being spawned, workspace being created
+- **ACTIVE**: ACP process running, accepting messages
+- **FAILED**: Spawn failed or process crashed
+- **TERMINATED**: Agent gracefully stopped and cleaned up
 
 ## Usage
 
@@ -58,17 +59,28 @@ Invalid transitions return `TransitionError`.
 ```go
 import (
     "github.com/2389-research/ourocodus/pkg/relay/session"
+    "github.com/2389-research/ourocodus/pkg/acp"
 )
 
 // Setup dependencies
 store := session.NewMemoryStore()
 idGen := myIDGenerator{}  // implements session.IDGenerator
 clock := myClock{}        // implements session.Clock
-cleaner := session.NewNoOpCleaner()
+cleaner := myCleaner{}    // implements session.Cleaner
 logger := myLogger{}      // implements session.Logger
+clientFactory := myFactory{}  // implements session.ClientFactory
+baseWorkspaceDir := "./workspaces"
 
 // Create manager
-manager := session.NewManager(store, idGen, clock, cleaner, logger)
+manager := session.NewManager(
+    store,
+    idGen,
+    clock,
+    cleaner,
+    logger,
+    clientFactory,
+    baseWorkspaceDir,
+)
 ```
 
 ### Session Lifecycle
@@ -76,74 +88,72 @@ manager := session.NewManager(store, idGen, clock, cleaner, logger)
 ```go
 ctx := context.Background()
 
-// 1. Create session (CREATED state)
-sess, err := manager.Create(ctx, "auth", websocketConn)
+// 1. Create UserSession (ACTIVE state)
+sess, err := manager.CreateUserSession(ctx, websocketConn)
 if err != nil {
-    // Handle duplicate role or validation error
+    // Handle error
+}
+sessionID := sess.ID
+
+// 2. Spawn agent (creates AgentSession in SPAWNING → ACTIVE)
+err = manager.SpawnAgent(ctx, sessionID, "auth", "./workspaces/auth")
+if err != nil {
+    // Handle spawn failure, session remains ACTIVE
 }
 
-// 2. Begin spawning ACP process (CREATED → SPAWNING)
-err = manager.BeginSpawn(ctx, sess.GetID())
+// 3. Send message to agent
+err = manager.SendMessageToAgent(ctx, sessionID, "auth", "Implement authentication")
+if err != nil {
+    // Handle message failure
+}
 
-// 3. Attach ACP client after spawn succeeds (SPAWNING → ACTIVE)
-err = manager.AttachAgent(ctx, sess.GetID(), "/path/to/worktree", acpClient)
+// 4. Spawn more agents (independent lifecycles)
+manager.SpawnAgent(ctx, sessionID, "db", "./workspaces/db")
+manager.SpawnAgent(ctx, sessionID, "tests", "./workspaces/tests")
 
-// 4. Track activity
-manager.RecordHeartbeat(ctx, sess.GetID())
-manager.IncrementMessageCount(ctx, sess.GetID())
+// 5. Terminate specific agent (others unaffected)
+err = manager.TerminateAgent(ctx, sessionID, "auth")
 
-// 5. Begin termination (ACTIVE → TERMINATING)
-err = manager.MarkTerminating(ctx, sess.GetID(), "user requested")
-
-// 6. Complete cleanup (TERMINATING → CLEANED, removes from store)
-err = manager.CompleteCleanup(ctx, sess.GetID())
+// 6. Terminate entire session (all agents terminated)
+err = manager.TerminateUserSession(ctx, sessionID)
 ```
 
 ### Querying Sessions
 
 ```go
-// Get by ID
-session := manager.Get(sessionID)
+// Get session by ID
+session, err := manager.GetUserSession(sessionID)
 
-// Get by agent role
-session := manager.GetByRole("auth")
+// List all agents in a session
+agents, err := manager.ListAgents(sessionID)
 
-// List all sessions
-allSessions := manager.List(nil)
+// Get specific agent
+agent, err := manager.GetAgent(sessionID, "auth")
 
-// List by state
-activeState := session.StateActive
-activeSessions := manager.List(&session.SessionFilter{
-    State: &activeState,
-})
-
-// List by agent role
-authID := "auth"
-authSessions := manager.List(&session.SessionFilter{
-    AgentID: &authID,
-})
+// Get conversation history
+history, err := manager.GetAgentHistory(sessionID, "auth")
 
 // Count sessions
-count := manager.Count()
+count := manager.CountUserSessions()
+
+// List all sessions
+sessions := manager.ListUserSessions()
 ```
 
 ## Design Principles
 
-### 1. Separation of Concerns
+### 1. Two-Level Hierarchy
 
-- **Data containers** (Session, Handle) - Hold state, no behavior
-- **State transitions** (StateMachine) - Pure logic, no side effects
-- **Coordination** (Manager) - Orchestrates dependencies, handles concurrency
+- **UserSession** = WebSocket + 0-N agents
+- **AgentSession** = ACP process + state + history
+- Independent agent lifecycles (failure isolation)
 
-### 2. Pure Logic First
+### 2. Separation of Concerns
 
-State transitions are implemented as pure functions:
-
-```go
-func NextState(current SessionState, event Event) (SessionState, error)
-```
-
-No side effects, fully deterministic, trivial to test.
+- **UserSession**: WebSocket lifecycle, agent container
+- **AgentSession**: ACP process lifecycle, message history
+- **Manager**: Orchestration, dependency injection
+- **Store**: Thread-safe storage
 
 ### 3. Dependency Injection
 
@@ -156,6 +166,8 @@ func NewManager(
     clock Clock,
     cleaner Cleaner,
     logger Logger,
+    clientFactory ClientFactory,
+    baseWorkspaceDir string,
 ) *Manager
 ```
 
@@ -167,9 +179,14 @@ Depend on contracts, not implementations:
 
 ```go
 type Store interface {
-    Create(session *Session) error
-    Get(id string) *Session
+    AddUserSession(session *UserSession)
+    GetUserSession(id string) (*UserSession, error)
+    RemoveUserSession(id string) error
     // ...
+}
+
+type ClientFactory interface {
+    NewClient(workspace string) (ACPClient, error)
 }
 ```
 
@@ -179,17 +196,41 @@ Future phases can swap implementations without changing callers.
 
 ### Manager Operations
 
-All Manager methods are thread-safe. Concurrent calls to `Create`, `Get`, `List`, etc. are safe.
+All Manager methods are thread-safe. Concurrent calls to `CreateUserSession`, `SpawnAgent`, etc. are safe.
 
 ### Session Mutations
 
-Session fields are protected by internal mutex (`sync.RWMutex`). All state changes flow through Manager methods that acquire appropriate locks.
+- UserSession uses `sync.RWMutex` for agents map and state
+- AgentSession uses `sync.RWMutex` for internal state
+- All mutations go through Manager methods that acquire appropriate locks
 
 ### Store
 
-MemoryStore uses `sync.RWMutex` for thread-safe access to session maps.
+MemoryStore uses `sync.RWMutex` for thread-safe access to session map.
 
 **Verified with:** `go test -race ./pkg/relay/session/...`
+
+## Error Handling
+
+The package defines sentinel errors for common failures:
+
+```go
+var (
+    ErrSessionNotFound = errors.New("session not found")
+    ErrAgentNotFound   = errors.New("agent not found")
+)
+```
+
+Use `errors.Is()` to check for specific errors:
+
+```go
+err := manager.GetAgent(sessionID, "auth")
+if errors.Is(err, session.ErrSessionNotFound) {
+    // Session doesn't exist
+} else if errors.Is(err, session.ErrAgentNotFound) {
+    // Agent role not found in session
+}
+```
 
 ## Testing
 
@@ -204,49 +245,60 @@ go test -race ./pkg/relay/session/...
 
 # Verbose output
 go test -v ./pkg/relay/session/...
+
+# Coverage
+go test -cover ./pkg/relay/session/...
 ```
 
 ### Test Coverage
 
-- **State machine**: Table-driven tests for all valid/invalid transitions
-- **Manager**: Creation, lookup, lifecycle, cleanup, concurrency
-- **Store**: CRUD operations, filtering, thread safety
-- **Mocks**: All dependencies have test mocks (IDGenerator, Clock, Cleaner, Logger)
-
-## Future Enhancements
-
-Issue #7 will extend this package with:
-- Real cleanup logic (close WebSocket, terminate ACP, remove worktree)
-- Integration with ACP client from `pkg/acp`
-- Process management hooks
-
-Later phases will add:
-- Persistent storage (SQLite/PostgreSQL)
-- Session reconnection support
-- Metrics and observability hooks
-
-## Dependencies
-
-- Standard library only
-- No external dependencies for core logic
-- `pkg/acp` integration comes in Issue #7
+- **Manager**: Session lifecycle, agent lifecycle, error handling, concurrency
+- **Store**: CRUD operations, thread safety
+- **Models**: State transitions, validation
+- **Mocks**: All dependencies have test mocks (ClientFactory, Clock, Cleaner, Logger)
 
 ## Files
 
-```
+```text
 pkg/relay/session/
 ├── README.md              # This file
-├── models.go              # Session, Handle, SessionState
-├── state_machine.go       # Pure transition functions
-├── store_memory.go        # In-memory Store implementation
-├── manager.go             # Public API with DI
-├── cleaner.go             # NoOpCleaner for Phase 1
-├── state_machine_test.go  # State machine tests
-└── manager_test.go        # Manager + integration tests
+├── models.go              # UserSession, AgentSession, states
+├── manager.go             # Public API with dependency injection
+├── store.go               # Store interface
+├── memory_store.go        # In-memory Store implementation
+├── client_factory.go      # ACP client factory
+├── cleaner.go             # Workspace cleanup
+├── errors.go              # Sentinel errors
+├── manager_test.go        # Manager tests
+├── models_test.go         # Model tests
+└── *_test.go              # Additional test files
 ```
+
+## Phase 1 Limitations
+
+- **No persistence**: Sessions lost on relay restart
+- **No reconnection**: WebSocket disconnect terminates session
+- **In-memory only**: Not suitable for horizontal scaling
+- **Manual cleanup**: Workspaces persist after session termination
+
+## Future Enhancements
+
+Later phases will add:
+
+- Persistent storage (SQLite/PostgreSQL event store)
+- Session reconnection support
+- Automatic workspace cleanup
+- Metrics and observability hooks
+- Session recovery after relay restart
+
+## Dependencies
+
+- **Standard library** for core logic
+- **pkg/acp** for ACP client integration
+- **gorilla/websocket** (via relay server, not direct dependency)
 
 ## References
 
-- [SESSION_LIFECYCLE.md](../../../docs/SESSION_LIFECYCLE.md) - State machine spec
-- [Issue #6](../../../docs/issues/06-relay-session-management.md) - Implementation brief
-- [Issue #7](../../../docs/issues/07-relay-acp-integration.md) - Next steps
+- [SESSION_LIFECYCLE.md](../../../docs/SESSION_LIFECYCLE.md) - Detailed state machine spec
+- [docs/ARCHITECTURE.md](../../../docs/ARCHITECTURE.md) - Overall system architecture
+- [docs/ERROR_HANDLING.md](../../../docs/ERROR_HANDLING.md) - Error handling strategy
