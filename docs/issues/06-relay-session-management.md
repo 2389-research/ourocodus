@@ -1,20 +1,24 @@
 # Issue #6 · Relay Session Management
 
 ## Goal
+
 Build the in-memory session manager that keeps per-session state inside the relay so that multiple ACP agents can be coordinated safely. The manager must expose primitives the WebSocket server (issue #5) and the forthcoming ACP integration layer (issue #7) can call to create, inspect, and tear down sessions while reinforcing our engineering preferences for narrow, composable functions and dependency-injected collaborators.
 
 ## Background
+
 - [Session Lifecycle](../SESSION_LIFECYCLE.md) documents the state machine (CREATED → SPAWNING → ACTIVE → TERMINATING → CLEANED) that this issue must enforce.
 - [Relay PRD](../prd/relay.md) expects the relay to own the "connection management" and "session routing" responsibilities, with composite keys of `session_id:role` for lookups.
 - During Phase 1 the relay keeps everything in memory (see [Assumptions](../ASSUMPTIONS.md#4-session-lifecycle)), so no persistence layer is required yet.
 
 ## Design Principles
+
 - **Separation of concerns** – Keep data containers, state-transition logic, and side-effectful coordination in distinct types so functions remain small and testable.
 - **Pure logic first** – Encode lifecycle transitions in pure functions that accept current state + event and return the new state (or error) without touching shared data. Wrap them with thin methods that apply synchronization.
 - **Dependency injection** – Inject pluggable collaborators (clock, UUID generator, cleanup hooks) through constructor functions so tests can supply fakes.
 - **Interface boundaries** – Favor interfaces that model behaviour (`SessionStore`, `SessionLifecycle`, `ConnectionRegistry`) so higher layers depend on contracts rather than concrete structs.
 
 ## Scope
+
 1. **Session domain model** – Define immutable-ish core types under `pkg/relay/session/`:
    - `type Session struct` limited to identifiers, declarative metadata, and counters. Provide read-only getters; all mutation should flow through lifecycle methods.
    - `type Handle struct` (or similar) encapsulating references to user/agent WebSockets and process handles so they are not spread across the codebase.
@@ -31,11 +35,13 @@ Build the in-memory session manager that keeps per-session state inside the rela
 5. **Testing strategy** – Add table-driven tests around the pure transition helper, plus concurrency-focused tests on the concrete manager verifying double-create guards, lookup correctness, and cleanup removal.
 
 ## Out of Scope
+
 - Persisting session state anywhere other than memory.
 - Spawning ACP binaries or creating git worktrees (handled in issue #7).
 - User-facing REST endpoints (API server covers that in a different milestone).
 
 ## Deliverables
+
 - New package `pkg/relay/session/` containing:
   - `manager.go` (constructor + public API that wires injected collaborators),
   - `state_machine.go` (pure transition helpers + tests),
@@ -49,6 +55,7 @@ Build the in-memory session manager that keeps per-session state inside the rela
   - Concurrent `Create` + `List` calls do not race (validated with `-race`).
 
 ## Acceptance Criteria
+
 - [ ] The relay exposes a session manager interface whose methods map directly to single-responsibility actions (`Create`, `AttachAgent`, `RecordHeartbeat`, `MarkTerminating`, `Cleanup`).
 - [ ] Lifecycle transitions are implemented via pure helper functions with exhaustive table-driven tests for legal + illegal flows.
 - [ ] The in-memory store and manager accept injected dependencies for ID generation, clock/time, and cleanup hooks; unit tests assert collaborators are invoked.
@@ -56,6 +63,7 @@ Build the in-memory session manager that keeps per-session state inside the rela
 - [ ] README/inline Go docstrings describe how the relay expects callers to drive session lifecycles pending ACP integration.
 
 ## Follow-Ups / Dependencies
+
 - **Predecessor:** Issue #5 must land first so the agent WebSocket plumbing exists.
 - **Successor:** Issue #7 will call into the manager to attach ACP clients and propagate ACP state.
 - Consider adding a lightweight metrics hook (`Session.Count()`, `Session.StateCounts()`) once observability work begins (not required for this issue but leave extension points).

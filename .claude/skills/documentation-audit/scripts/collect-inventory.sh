@@ -2,7 +2,7 @@
 # Documentation Audit - Inventory Collection
 # Discovers all documentation and builds code index
 
-set -euo pipefail
+set -eo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILL_DIR="$(dirname "$SCRIPT_DIR")"
@@ -73,14 +73,15 @@ TEMP_CODE_INDEX="$REPORTS_DIR/.temp_code_index.json"
 log_info "Discovering documentation files..."
 
 # Find all markdown files (excluding excluded paths)
-cd "$REPO_ROOT"
-
-find . -type f \( -name "*.md" -o -name "doc.go" \) \
+# Note: Working from current directory, using absolute paths
+find "$REPO_ROOT" -type f \( -name "*.md" -o -name "doc.go" \) \
   ! -path "*/vendor/*" \
   ! -path "*/node_modules/*" \
   ! -path "*/.git/*" \
   ! -path "*/build/*" \
   ! -path "*/dist/*" \
+  ! -path "*/.worktrees/*" \
+  ! -path "*/.claude/skills/documentation-audit/*" \
   > "$TEMP_DOCS_LIST" || true
 
 DOCS_COUNT=$(wc -l < "$TEMP_DOCS_LIST" | tr -d ' ')
@@ -89,14 +90,11 @@ log_success "Found $DOCS_COUNT documentation files"
 # Build documentation index
 log_info "Categorizing documentation files..."
 
-README_FILES=$(grep -i "readme.md" "$TEMP_DOCS_LIST" 2>/dev/null | wc -l 2>/dev/null | tr -d ' ')
-README_FILES=${README_FILES:-0}
-CONTRIBUTING_FILES=$(grep -i "contributing.md" "$TEMP_DOCS_LIST" 2>/dev/null | wc -l 2>/dev/null | tr -d ' ')
-CONTRIBUTING_FILES=${CONTRIBUTING_FILES:-0}
-SECURITY_FILES=$(grep -i "security.md" "$TEMP_DOCS_LIST" 2>/dev/null | wc -l 2>/dev/null | tr -d ' ')
-SECURITY_FILES=${SECURITY_FILES:-0}
-DOC_GO_FILES=$(grep "doc.go" "$TEMP_DOCS_LIST" 2>/dev/null | wc -l 2>/dev/null | tr -d ' ')
-DOC_GO_FILES=${DOC_GO_FILES:-0}
+# Use awk instead of grep to avoid bash/grep interaction issues
+README_FILES=$(awk '/[Rr][Ee][Aa][Dd][Mm][Ee]\.md/ {count++} END {print count+0}' "$TEMP_DOCS_LIST")
+CONTRIBUTING_FILES=$(awk '/[Cc][Oo][Nn][Tt][Rr][Ii][Bb][Uu][Tt][Ii][Nn][Gg]\.md/ {count++} END {print count+0}' "$TEMP_DOCS_LIST")
+SECURITY_FILES=$(awk '/[Ss][Ee][Cc][Uu][Rr][Ii][Tt][Yy]\.md/ {count++} END {print count+0}' "$TEMP_DOCS_LIST")
+DOC_GO_FILES=$(awk '/doc\.go/ {count++} END {print count+0}' "$TEMP_DOCS_LIST")
 OTHER_DOCS=$(( DOCS_COUNT - README_FILES - CONTRIBUTING_FILES - SECURITY_FILES - DOC_GO_FILES ))
 
 log_info "  README files: $README_FILES"
@@ -109,17 +107,17 @@ log_info "  Other docs: $OTHER_DOCS"
 log_info "Building code index..."
 
 if command -v go &> /dev/null; then
-    go list -json ./... > "$TEMP_CODE_INDEX" 2>/dev/null || {
+    (cd "$REPO_ROOT" && go list -json ./...) > "$TEMP_CODE_INDEX" 2>/dev/null || {
         log_warning "Failed to run 'go list', code index will be incomplete"
         echo "[]" > "$TEMP_CODE_INDEX"
     }
 
     # Count packages
-    PACKAGE_COUNT=$(go list ./... 2>/dev/null | wc -l | tr -d ' ')
+    PACKAGE_COUNT=$( (cd "$REPO_ROOT" && go list ./...) 2>/dev/null | wc -l | tr -d ' ')
     log_success "Found $PACKAGE_COUNT Go packages"
 
     # Count total Go files
-    GO_FILES=$(find . -type f -name "*.go" \
+    GO_FILES=$(find "$REPO_ROOT" -type f -name "*.go" \
         ! -path "*/vendor/*" \
         ! -path "*_test.go" \
         ! -name "*_gen.go" \
@@ -128,7 +126,7 @@ if command -v go &> /dev/null; then
 
     # Count exported symbols (approximate using grep)
     # This is a rough heuristic - Phase 2 will do proper AST analysis
-    EXPORTED_SYMBOLS=$(grep -r "^func [A-Z]" . --include="*.go" \
+    EXPORTED_SYMBOLS=$(grep -r "^func [A-Z]" "$REPO_ROOT" --include="*.go" \
         --exclude-dir=vendor \
         --exclude-dir=.git 2>/dev/null | wc -l 2>/dev/null | tr -d ' ')
     EXPORTED_SYMBOLS=${EXPORTED_SYMBOLS:-0}
@@ -156,12 +154,12 @@ log_info "  Total documentation lines: $TOTAL_DOC_LINES"
 
 # Calculate basic doc coverage (will be more accurate in Phase 2)
 if [ "$EXPORTED_SYMBOLS" -gt 0 ]; then
-    # Count documented exports (functions with doc comments)
-    DOCUMENTED_EXPORTS=$(grep -B1 "^func [A-Z]" . -r --include="*.go" \
-        --exclude-dir=vendor \
-        --exclude-dir=.git 2>/dev/null | \
-        grep -E "^--$|^//" 2>/dev/null | \
-        grep -c "^//" 2>/dev/null)
+    # Count documented exports (use awk to avoid bash/grep issues)
+    # This is a rough estimate - Phase 2 will do proper AST analysis
+    DOCUMENTED_EXPORTS=$(find "$REPO_ROOT" -name "*.go" \
+        ! -path "*/vendor/*" \
+        ! -path "*/.git/*" \
+        -exec awk '/^\/\// {doc=1} /^func [A-Z]/ && doc {count++; doc=0} /^[^\/]/ && !/^func/ {doc=0} END {print count+0}' {} + | awk '{sum+=$1} END {print sum+0}')
     DOCUMENTED_EXPORTS=${DOCUMENTED_EXPORTS:-0}
 
     DOC_COVERAGE_PCT=$((DOCUMENTED_EXPORTS * 100 / EXPORTED_SYMBOLS))

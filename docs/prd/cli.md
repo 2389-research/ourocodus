@@ -23,17 +23,20 @@ Command-line interface for interacting with Ourocodus system. Used for manual te
 ### System Management
 
 #### Start System
+
 ```bash
 ourocodus start
 # Starts: NATS, Relay, API server
-```
+```text
 
 #### Stop System
+
 ```bash
 ourocodus stop
-```
+```text
 
 #### Status
+
 ```bash
 ourocodus status
 # Output:
@@ -41,76 +44,86 @@ ourocodus status
 #   Relay:   running (localhost:8080)
 #   API:     running (localhost:9000)
 #   Agents:  1 active
-```
+```text
 
 ### Agent Management
 
 #### Launch Agent
+
 ```bash
 ourocodus agent start --session sess_123 --role coding
 # Output: Agent agent_abc started in container docker_xyz
-```
+```text
 
 #### Stop Agent
+
 ```bash
 ourocodus agent stop agent_abc
-```
+```text
 
 #### List Agents
+
 ```bash
 ourocodus agent list
 # Output:
 #   agent_abc  sess_123  coding   running  2m ago
 #   agent_def  sess_123  testing  running  1m ago
-```
+```text
 
 ### Manual Workflow (Phase 1)
 
 #### Send Work
+
 ```bash
 ourocodus send work \
   --session sess_123 \
   --role coding \
   --task "Implement user authentication" \
   --requirements "Use bcrypt, JWT tokens"
-```
+```text
 
 #### Tail Results
+
 ```bash
 ourocodus tail results --session sess_123
 # Blocks and prints results as they arrive
-```
+```text
 
 ### Observability
 
 #### Tail Events
+
 ```bash
 ourocodus logs --session sess_123 --follow
-```
+```text
 
 #### Show Session
+
 ```bash
 ourocodus session show sess_123
-```
+```text
 
 ## Phase 2 Commands (Automation)
 
 ### Workflow Management
 
 #### Start Workflow
+
 ```bash
 ourocodus run --graph config/graph.yaml
-```
+```text
 
 #### Approve Gate
+
 ```bash
 ourocodus approve gate_123
-```
+```text
 
 #### Reject Gate
+
 ```bash
 ourocodus reject gate_123 --reason "Missing tests"
-```
+```text
 
 ## Configuration
 
@@ -119,11 +132,11 @@ ourocodus reject gate_123 --reason "Missing tests"
 nats_url: nats://localhost:4222
 api_url: http://localhost:9000
 relay_url: ws://localhost:8080
-```
+```text
 
 ## Implementation
 
-```
+```text
 cmd/cli/
   main.go
   cmd/
@@ -134,7 +147,7 @@ cmd/cli/
     send.go     # Send messages
     tail.go     # Tail logs/results
     session.go  # Session management
-```
+```text
 
 ## Success Criteria (Phase 1)
 

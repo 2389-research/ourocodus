@@ -1,6 +1,6 @@
 ---
 name: documentation-audit
-description: Comprehensive documentation audit that verifies accuracy, identifies outdated content, ensures completeness for different audiences, and maintains optimal documentation volume - executable as a repeatable Claude Code skill
+description: Systematic documentation audit that validates every documentation claim against code and identifies undocumented features - executable as a repeatable Claude Code skill
 ---
 
 # Documentation Audit Skill
@@ -8,344 +8,212 @@ description: Comprehensive documentation audit that verifies accuracy, identifie
 ## Purpose
 
 This skill performs systematic documentation audits to ensure:
-1. **Accuracy**: All documentation claims match actual code behavior
-2. **Currency**: No outdated or obsolete information
-3. **Completeness**: Important aspects documented for all audiences (users, contributors, maintainers)
-4. **Balance**: "Just right" documentation volume - not too much, not too little
+1. **Accuracy**: Every claim in documentation matches actual code behavior (90-95% of effort)
+2. **Completeness**: All features, protocols, and behaviors in code are documented
+3. **Quality**: Basic formatting/link/spelling checks (5% of effort)
 
-## When to Use
+## Core Workflow
 
-- **Regular maintenance**: Run quarterly or before major releases
-- **After significant refactoring**: Verify docs still match code
-- **Pre-release**: Ensure all user-facing changes documented
-- **Onboarding issues**: When new contributors struggle with docs
-- **Manual trigger**: When requested by maintainers
+### Forward Pass: Documentation → Code Validation (70% of work)
 
-## How It Works
+**Goal**: Verify every claim in documentation is accurate
 
-This skill uses a **phased approach** with increasing sophistication:
+**Process**:
+1. Create TODO for each documentation section
+2. Read documentation section carefully
+3. Extract factual claims (what does the doc SAY the code does?)
+4. Read relevant code to verify each claim
+5. Update documentation if claims are inaccurate or outdated
 
-### Phase 1: Quick Wins (Automated Checks)
-Fast automated checks that catch common issues:
-- Broken links and anchors
-- Markdown formatting issues
-- Spelling errors
-- Stale code examples
-- Basic doc coverage metrics
+**Example**:
+```
+Doc says: "Manager.Create() returns an error if the role already exists"
+→ Read pkg/relay/session/manager.go Create() method
+→ Verify error handling for duplicate roles
+→ Update doc if behavior differs
+```
 
-### Phase 2: Deep Analysis (Code-Driven Audit)
-Sophisticated analysis comparing code reality to documentation claims:
-- Extract "ground truth" from code (CLI flags, config, APIs)
-- Parse documentation claims
-- Cross-validate for accuracy drift
-- Check completeness by audience
-- Identify over/under-documentation
+### Reverse Pass: Code → Documentation Gap Finding (25% of work)
 
-### Phase 3: Continuous Integration
-Automation to prevent future drift:
-- CI checks on PRs
-- Scheduled audits
-- Auto-generation of reference docs
-- Trend tracking
+**Goal**: Find features/behaviors in code that aren't documented
 
-## Workflow Steps
+**Process**:
+1. Create TODO for each Go package/major file
+2. Read the code to understand what it does
+3. Identify key features, protocols, state machines, error handling
+4. Check if these behaviors are explained in documentation
+5. Add documentation for undocumented features
 
-### Step 1: Collect Inventory
+**Example**:
+```
+Read: pkg/relay/session/manager.go
+Find: SessionClockAdapter for time injection
+Check: Is this pattern documented?
+→ If no, add section to docs/TESTING.md
+```
 
-**Goal**: Discover all documentation and build code index
+### Quick Quality Checks (5% of work)
 
-**Actions**:
+**Goal**: Catch obvious issues with minimal effort
+
+**Process**:
+- Run markdownlint to check formatting
+- Run link checker for broken links
+- Quick spelling check with codespell
+
+## How to Use This Skill
+
+### Step 1: List All Documentation Sections
+
+Create a TODO for each major section that makes factual claims:
+
 ```bash
-cd .claude/skills/documentation-audit/scripts
-./collect-inventory.sh
+# List all markdown files
+find . -name "*.md" -not -path "*/vendor/*" -not -path "*/.git/*"
+
+# For each file, identify sections:
+# - README: Quick Start, Environment Variables, Architecture, etc.
+# - ARCHITECTURE: Phase 1, Long-term, Components
+# - SESSION_LIFECYCLE: States, Transitions, Cleanup
+# etc.
 ```
 
-**Discovers**:
-- Documentation files: README.md, CONTRIBUTING.md, docs/**/*.md, doc.go files
-- Code structure: packages, exported APIs, CLI commands, config structs
-- Current metrics: doc coverage, test count, link health
+Create one TODO per section to validate.
 
-**Output**: `reports/inventory.json`
+### Step 2: Validate Each Section Against Code
 
-### Step 2: Run Quick Checks
+For each TODO:
+1. Read the documentation section
+2. List every factual claim it makes
+3. Use Read/Grep/Glob to find relevant code
+4. Verify claim is accurate
+5. Update docs if wrong/outdated
 
-**Goal**: Fast automated validation
+### Step 3: List All Code Packages/Files
 
-**Actions**:
 ```bash
-./run-quick-checks.sh
+# List Go packages
+go list ./...
+
+# Or list key files
+find pkg cmd -name "*.go" -not -name "*_test.go"
 ```
 
-**Checks**:
-- **Links**: Broken URLs, invalid anchors (via lychee)
-- **Markdown**: Formatting, style consistency (via markdownlint)
-- **Spelling**: Typos, common errors (via codespell)
-- **Examples**: Go Example tests compile and run (via go test)
-- **Coverage**: Exported symbol documentation (via golangci-lint)
+Create TODO for each package/file to check for documentation gaps.
 
-**Output**: `reports/quick-checks-report.md`
+### Step 4: Find Undocumented Features
 
-### Step 3: Extract Code Facts (Phase 2+)
+For each TODO:
+1. Read the code file/package
+2. Understand what it does
+3. Ask: "Is this behavior explained anywhere in docs?"
+4. If no, add documentation
 
-**Goal**: Build source of truth from code
+### Step 5: Quick Quality Checks
 
-**What it extracts**:
-- **CLI flags**: From flag/pflag usage in cmd/
-- **Config keys**: From struct tags and defaults
-- **Exported APIs**: Public types, functions, methods
-- **Environment variables**: os.Getenv patterns
-- **Version requirements**: go.mod, build constraints
-
-**Output**: `reports/code-facts.json`
-
-### Step 4: Extract Doc Claims (Phase 2+)
-
-**Goal**: Parse what documentation claims
-
-**What it parses**:
-- CLI reference sections
-- Configuration documentation
-- API documentation
-- Quickstart/tutorial code blocks
-- Compatibility statements
-
-**Output**: `reports/doc-claims.json`
-
-### Step 5: Cross-Validate (Phase 2+)
-
-**Goal**: Find accuracy drift and completeness gaps
-
-**Validation checks**:
-- **Accuracy**: Code facts vs. doc claims
-- **Completeness**: Required sections by audience
-- **Volume**: Over/under-documentation heuristics
-
-**Output**: `reports/validation-report.md` (with severity levels)
-
-### Step 6: Generate Recommendations
-
-**Goal**: Actionable remediation steps
-
-**Provides**:
-- **Blockers**: Must-fix accuracy issues (fail CI)
-- **Warnings**: Completeness gaps
-- **Suggestions**: Volume/duplication improvements
-- **Auto-fixes**: Patches and generated content
-
-**Output**: `reports/recommendations.md` + patches in `artifacts/`
-
-## Integration with Zen
-
-This skill is **designed for zen's multi-step workflows**:
-
-```
-Use zen's debug, analyze, or thinkdeep tools to:
-1. Investigate complex documentation drift issues
-2. Design documentation structure improvements
-3. Plan large-scale documentation refactoring
-4. Validate remediation approaches
-```
-
-**Example zen workflow**:
-```
-User: "Our API documentation seems out of sync"
-
-Claude: I'll use the documentation-audit skill to investigate.
-Step 1: Running inventory and quick checks...
-Step 2: Extracting code facts from exported APIs...
-Step 3: Using zen's analyze tool to cross-validate API docs against code...
-Step 4: Generating prioritized remediation plan...
-```
-
-## What to Document vs. Skip
-
-### ALWAYS DOCUMENT
-
-**Code Elements**:
-- Exported APIs (types, functions, methods, constants)
-- CLI flags, subcommands, arguments
-- Configuration keys, defaults, env vars
-- HTTP endpoints, request/response formats
-- Non-obvious invariants and contracts
-- Concurrency patterns and goroutine usage
-- Performance-critical paths and optimization notes
-- Security-sensitive behavior
-- Error handling patterns
-- Public contracts and guarantees
-
-**User Content**:
-- Installation instructions
-- Quickstart guide
-- Common usage patterns
-- Configuration examples
-- Troubleshooting guide
-- Migration guides (for breaking changes)
-- FAQ
-
-**Contributor Content**:
-- Development setup
-- Building and testing
-- Code organization
-- Contributing guidelines
-- PR process and expectations
-- Linting and formatting requirements
-- Release process
-
-**Maintainer Content**:
-- Architecture decisions (ADRs)
-- Security policy and reporting
-- Release checklist
-- Dependency management policy
-- Backport policies
-- Support lifecycle
-
-### SKIP OR MINIMIZE
-
-- Trivial getters/setters with obvious behavior
-- Self-explanatory code with clear names
-- Auto-generated code internals
-- Implementation details of private functions
-- Duplicated content (use links to canonical source)
-- Obvious patterns (e.g., standard Go idioms)
-
-## Documentation Volume Heuristics
-
-### Target Metrics
-- **Exported symbols**: ≥85% documented
-- **Top-level packages**: 100% have package docs
-- **Example tests**: ≥3 per major feature
-- **CLI commands**: 100% documented
-- **Config keys**: 100% documented
-
-### Signs of Over-Documentation
-- Same concept explained in 3+ places
-- Line-by-line explanation of obvious code
-- Documentation longer than the code it describes
-- Repeating information available in godoc
-- Excessive implementation details in user docs
-
-### Signs of Under-Documentation
-- Exported APIs with no comments
-- CLI flags with empty help text
-- Config keys with unclear purpose
-- Missing installation instructions
-- No quickstart or examples
-- Implicit assumptions not stated
-- No error handling guidance
-
-## Configuration
-
-See `config.yaml` for:
-- Thresholds (coverage minimums, drift tolerance)
-- Audiences to check (user, contributor, maintainer)
-- Exclusions (vendor/, generated files)
-- Tool paths and options
-
-## Output Files
-
-All outputs in `.claude/skills/documentation-audit/reports/`:
-- `inventory.json` - Documentation and code index
-- `quick-checks-report.md` - Phase 1 results
-- `code-facts.json` - Extracted code ground truth
-- `doc-claims.json` - Parsed documentation claims
-- `validation-report.md` - Cross-validation findings
-- `recommendations.md` - Actionable next steps
-- `metrics.json` - Historical trend data
-
-## CI Integration
-
-### On Pull Requests
-```yaml
-- name: Documentation Audit
-  run: |
-    cd .claude/skills/documentation-audit
-    ./scripts/run-quick-checks.sh
-    # Fail on accuracy regressions
-```
-
-### Scheduled (Weekly)
-```yaml
-- name: Full Documentation Audit
-  run: |
-    cd .claude/skills/documentation-audit
-    ./scripts/run-full-audit.sh
-    # Generate report, track trends
-```
-
-## Maintenance
-
-- **Weekly**: Review validation reports
-- **Monthly**: Update thresholds based on trends
-- **Quarterly**: Full deep audit with manual review
-- **Per-release**: Mandatory audit before tagging
-
-## Tool Dependencies
-
-**Required** (Phase 1):
-- `go` - Code analysis
-- `golangci-lint` - Doc coverage
-- Standard unix tools: grep, awk, jq
-
-**Recommended** (better Phase 1):
-- `lychee` - Link checking (install: `cargo install lychee`)
-- `markdownlint-cli` - Markdown linting (install: `npm install -g markdownlint-cli`)
-- `codespell` - Spell checking (install: `pip install codespell`)
-
-**Optional** (Phase 2):
-- `embedmd` - Code snippet sync (install: `go install github.com/campoy/embedmd@latest`)
-
-## Examples
-
-### Run Quick Audit (Phase 1)
+Run automated checks (optional, least important):
 ```bash
-cd .claude/skills/documentation-audit
-./scripts/run-quick-checks.sh
-cat reports/quick-checks-report.md
+# Markdown linting
+markdownlint '**/*.md' --ignore .worktrees
+
+# Link checking
+lychee '**/*.md'
+
+# Spelling
+codespell docs/ *.md
 ```
 
-### Full Audit (Phase 2)
-```bash
-./scripts/run-full-audit.sh
-cat reports/validation-report.md
-cat reports/recommendations.md
+## What to Validate
+
+### Types of Claims to Check
+
+1. **Existence Claims**
+   - "The Manager type provides session lifecycle management"
+   - "Use OUROCODUS_ACP_BINARY to specify custom ACP binary"
+   - → Verify type/variable exists
+
+2. **Behavior Claims**
+   - "Create() returns error if role already exists"
+   - "Sessions progress through CREATED → SPAWNING → ACTIVE → TERMINATING → CLEANED"
+   - → Read code to verify behavior
+
+3. **Configuration Claims**
+   - "Default timeout is 30 seconds"
+   - "ANTHROPIC_API_KEY is required"
+   - → Check default values in code
+
+4. **API/Protocol Claims**
+   - "Messages use JSON-RPC format"
+   - "WebSocket handshake returns connection:established"
+   - → Verify message formats and protocol details
+
+5. **Example Claims**
+   - "Run `make build` to compile"
+   - "Use `mise run smoke` for smoke tests"
+   - → Verify commands actually work
+
+### What Counts as Undocumented
+
+Code features that should be documented but aren't:
+
+1. **Public APIs**: Exported functions, types, methods
+2. **Configuration**: Environment variables, config files, flags
+3. **Protocols**: Message formats, state machines, handshakes
+4. **Patterns**: Dependency injection, testing patterns, error handling
+5. **Workflows**: Build process, deployment, development setup
+6. **Architecture**: Major design decisions, component relationships
+
+## Tools You Have
+
+**No fancy automation needed**. Use your normal tools:
+
+- **Read**: Read documentation and code files
+- **Grep**: Search for specific functions, types, patterns
+- **Glob**: Find files matching patterns
+- **Edit/Write**: Update documentation
+
+## Output
+
+**DO NOT generate reports**. Instead:
+- Update documentation files directly as you find issues
+- Keep TODO list updated with progress
+- Summarize findings at the end (brief, conversational)
+
+## Example Workflow
+
+```
+User: Run documentation audit
+
+Claude:
+1. Lists all doc files and creates TODOs for major sections
+2. For each section:
+   - Reads doc section
+   - Extracts claims
+   - Reads relevant code
+   - Updates docs if inaccurate
+3. Lists all Go packages and creates TODOs
+4. For each package:
+   - Reads code
+   - Identifies features/behaviors
+   - Checks if documented
+   - Adds missing documentation
+5. Runs quick quality checks (optional)
+6. Summarizes findings conversationally
 ```
 
-### Check Specific Package
-```bash
-./scripts/check-package.sh ./pkg/session
-```
+## Anti-Patterns (What NOT to Do)
 
-### Generate Baseline
-```bash
-./scripts/collect-inventory.sh
-cat reports/inventory.json | jq '.metrics'
-```
+❌ **Don't generate reports** - Update docs directly instead
+❌ **Don't build NLP extraction pipelines** - Just read and validate manually
+❌ **Don't focus on formatting/linting** - That's only 5% of the work
+❌ **Don't batch updates** - Fix docs as you find issues
+❌ **Don't skip code reading** - Every claim must be verified against code
 
-## Troubleshooting
+## Summary
 
-**Issue**: Script fails with "command not found"
-- **Solution**: Check tool dependencies, install missing tools
+This skill is simple:
+1. Read doc → Read code → Verify match → Fix docs
+2. Read code → Check if documented → Add docs
+3. Quick automated checks (least important)
 
-**Issue**: Too many false positives
-- **Solution**: Tune config.yaml thresholds, add exclusions
-
-**Issue**: Reports say everything is fine but docs feel wrong
-- **Solution**: Phase 1 only does basic checks. Run Phase 2 deep analysis or use zen's analyze tool
-
-**Issue**: Overwhelming backlog of issues
-- **Solution**: Start with blockers only, use .docauditignore for legacy exceptions, ratchet thresholds gradually
-
-## Next Steps After Audit
-
-1. **Triage findings**: Blockers → Warnings → Suggestions
-2. **Quick wins**: Fix broken links, spelling, formatting first
-3. **Accuracy issues**: Update docs to match code (or vice versa)
-4. **Completeness gaps**: Prioritize by audience impact
-5. **Volume issues**: De-duplicate, simplify, or expand as needed
-6. **Automation**: Set up CI checks to prevent regression
-
-## References
-
-- [Go Doc Comments](https://go.dev/doc/comment)
-- [Kubernetes Documentation Style Guide](https://kubernetes.io/docs/contribute/style/style-guide/)
-- [Write the Docs](https://www.writethedocs.org/guide/)
+90-95% of effort is reading and validating, not automation.

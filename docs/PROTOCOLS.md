@@ -14,7 +14,7 @@ This document defines the communication boundaries, message formats, and interac
 
 ## System Boundaries
 
-```
+```text
 ┌─────────────────────────────────────────────────────────┐
 │  External Clients (CLI, Web UI)                         │
 └───────────────┬─────────────────────────────────────────┘
@@ -47,7 +47,7 @@ This document defines the communication boundaries, message formats, and interac
                 │  Worktree  │
                 │  (git)     │
                 └────────────┘
-```
+```text
 
 ## Communication Channels
 
@@ -58,12 +58,14 @@ This document defines the communication boundaries, message formats, and interac
 **Protocol:** HTTP/1.1, JSON request/response
 
 **Characteristics:**
+
 - Synchronous request/response
 - Stateless
 - Human-readable
 - Well-understood tooling
 
 **Use Cases:**
+
 - Create/list/stop sessions
 - Query agent status
 - Access event log
@@ -78,24 +80,27 @@ This document defines the communication boundaries, message formats, and interac
 **Protocol:** SSE (text/event-stream)
 
 **Characteristics:**
+
 - Unidirectional (server → client)
 - Long-lived connection
 - Automatic reconnection
 - Simple browser support
 
 **Use Cases:**
+
 - Live event log updates
 - Agent status changes
 - Session progress updates
 
 **Format:**
-```
+
+```text
 event: message
 data: {"type":"work.started","session_id":"sess_123"}
 
 event: message
 data: {"type":"work.completed","session_id":"sess_123"}
-```
+```text
 
 ### 3. NATS Pub/Sub (All Backend Components)
 
@@ -104,12 +109,14 @@ data: {"type":"work.completed","session_id":"sess_123"}
 **Protocol:** NATS (proprietary but open)
 
 **Characteristics:**
+
 - Topic-based routing
 - At-least-once delivery
 - Low latency (~1ms)
 - Automatic failover
 
 **Use Cases:**
+
 - Work distribution (Coordinator → Agent)
 - Result reporting (Agent → Coordinator)
 - Approval requests (Coordinator → Approval Service)
@@ -124,11 +131,13 @@ data: {"type":"work.completed","session_id":"sess_123"}
 **Protocol:** Docker REST API over Unix socket
 
 **Characteristics:**
+
 - Synchronous
 - Well-defined SDK
 - Local only (POC)
 
 **Use Cases:**
+
 - Launch agent containers
 - Query container status
 - Stop containers
@@ -138,7 +147,7 @@ data: {"type":"work.completed","session_id":"sess_123"}
 
 NATS topics follow a hierarchical naming convention:
 
-```
+```text
 <domain>.<entity>.<action>
 
 Examples:
@@ -147,7 +156,7 @@ Examples:
   sessions.sess_123.approvals      # Approval requests
   sessions.sess_123.events         # Event broadcast
   system.health                    # System health messages
-```
+```text
 
 ### Topic Patterns
 
@@ -162,18 +171,22 @@ Examples:
 ### Subscription Strategy
 
 **Coordinator:**
+
 - Publishes to: `sessions.{id}.work`, `sessions.{id}.approvals`
 - Subscribes to: `sessions.{id}.results`
 
 **Agent:**
+
 - Publishes to: `sessions.{id}.results`, `sessions.{id}.events`
 - Subscribes to: `sessions.{id}.work`
 
 **Event Logger:**
+
 - Publishes to: (nothing)
 - Subscribes to: `sessions.*.events`, `sessions.*.work`, `sessions.*.results` (wildcard)
 
 **API Server:**
+
 - Publishes to: (nothing, uses HTTP)
 - Subscribes to: `sessions.*.events` (for SSE streaming)
 
@@ -192,9 +205,10 @@ All NATS messages use a standard envelope format:
     // Type-specific data
   }
 }
-```
+```text
 
 **Fields:**
+
 - `version` (string, required) - Envelope format version (currently "1")
 - `id` (string, required) - Unique message ID (for deduplication)
 - `timestamp` (RFC3339, required) - Message creation time
@@ -207,6 +221,7 @@ All NATS messages use a standard envelope format:
 ### Work Messages
 
 #### `work.coding`
+
 Coordinator → Agent: Write implementation code
 
 ```json
@@ -225,9 +240,10 @@ Coordinator → Agent: Write implementation code
     }
   }
 }
-```
+```text
 
 #### `work.testing`
+
 Coordinator → Agent: Write tests
 
 ```json
@@ -246,9 +262,10 @@ Coordinator → Agent: Write tests
     }
   }
 }
-```
+```text
 
 #### `work.review`
+
 Coordinator → Agent: Review code quality
 
 ```json
@@ -264,11 +281,12 @@ Coordinator → Agent: Review code quality
     }
   }
 }
-```
+```text
 
 ### Result Messages
 
 #### `result.success`
+
 Agent → Coordinator: Work completed successfully
 
 ```json
@@ -285,9 +303,10 @@ Agent → Coordinator: Work completed successfully
     }
   }
 }
-```
+```text
 
 #### `result.failure`
+
 Agent → Coordinator: Work failed
 
 ```json
@@ -303,11 +322,12 @@ Agent → Coordinator: Work failed
     }
   }
 }
-```
+```text
 
 ### Approval Messages
 
 #### `approval.request`
+
 Coordinator → Approval Service: Request human approval
 
 ```json
@@ -325,9 +345,10 @@ Coordinator → Approval Service: Request human approval
     }
   }
 }
-```
+```text
 
 #### `approval.granted`
+
 Approval Service → Coordinator: Approval granted
 
 ```json
@@ -340,9 +361,10 @@ Approval Service → Coordinator: Approval granted
     "notes": "Looks good"
   }
 }
-```
+```text
 
 #### `approval.rejected`
+
 Approval Service → Coordinator: Approval rejected
 
 ```json
@@ -355,11 +377,12 @@ Approval Service → Coordinator: Approval rejected
     "reason": "Missing error handling in auth.go:42"
   }
 }
-```
+```text
 
 ### Event Messages
 
 #### `event.agent.started`
+
 System → Event Logger: Agent started
 
 ```json
@@ -371,9 +394,10 @@ System → Event Logger: Agent started
     "container_id": "docker_abc"
   }
 }
-```
+```text
 
 #### `event.agent.stopped`
+
 System → Event Logger: Agent stopped
 
 ```json
@@ -384,18 +408,20 @@ System → Event Logger: Agent stopped
     "reason": "work_complete"
   }
 }
-```
+```text
 
 ## Message Ordering
 
 **Guarantee:** NATS provides at-least-once delivery with topic ordering
 
 **Implications:**
+
 - Messages on the same topic arrive in order
 - Messages on different topics may be reordered
 - Consumers must handle duplicate messages (idempotency)
 
 **Strategy:**
+
 - Use message IDs for deduplication
 - Coordinator maintains state machine per chunk
 - Ignore out-of-order messages for completed work
@@ -407,6 +433,7 @@ System → Event Logger: Agent stopped
 **Scenario:** NATS server unavailable
 
 **Behavior:**
+
 - Publishers buffer messages (up to limit)
 - Subscribers reconnect automatically
 - Coordinator pauses workflow until reconnected
@@ -416,6 +443,7 @@ System → Event Logger: Agent stopped
 **Scenario:** No subscriber for topic
 
 **Behavior:**
+
 - NATS silently drops (no error)
 - Consider: add request-reply pattern for critical messages
 - POC: acceptable, add monitoring post-POC
@@ -425,6 +453,7 @@ System → Event Logger: Agent stopped
 **Scenario:** JSON parsing fails or missing required fields
 
 **Behavior:**
+
 - Log error with full message content
 - Send `event.error` to event log
 - Continue processing other messages
@@ -434,17 +463,20 @@ System → Event Logger: Agent stopped
 ### Envelope Version
 
 `version` field in envelope allows breaking changes:
+
 - Current: `"1"`
 - Future: `"2"` with backward compatibility layer
 
 ### Message Type Versioning
 
 Embed version in type name when needed:
-```
+
+```text
 "work.coding" → "work.coding.v2"
-```
+```text
 
 **Rules:**
+
 1. Add new fields freely (consumers ignore unknown fields)
 2. Never remove required fields
 3. Deprecate old types with 2-release grace period
@@ -456,12 +488,13 @@ Embed version in type name when needed:
 **Consumer:** Must handle current + previous version
 
 **Example:**
+
 ```go
 switch msg.Type {
 case "work.coding", "work.coding.v1":
     // Handle both old and new
 }
-```
+```text
 
 ## Schema Validation
 
@@ -473,6 +506,7 @@ case "work.coding", "work.coding.v1":
 ### Logging
 
 Every message sent/received is logged:
+
 ```json
 {
   "timestamp": "2025-10-22T10:00:00Z",
@@ -483,7 +517,7 @@ Every message sent/received is logged:
   "message_id": "msg_abc123",
   "message_type": "work.coding"
 }
-```
+```text
 
 ### Tracing
 
@@ -497,6 +531,7 @@ Future: Track message counts, latencies, error rates
 
 **POC:** No encryption, authentication, or authorization
 **Post-POC:**
+
 - TLS for NATS connections
 - Message signing for authenticity
 - Topic ACLs for authorization
@@ -504,18 +539,20 @@ Future: Track message counts, latencies, error rates
 ## Testing
 
 ### Unit Tests
+
 Mock NATS connections, verify message formatting
 
 ### Integration Tests
+
 Real NATS server, verify end-to-end delivery
 
 ### Contract Tests
+
 Verify producer/consumer compatibility
 
 ## References
 
 - [NATS Documentation](https://docs.nats.io/)
-- [Message Schemas](./SCHEMAS.md)
 - [API Server PRD](./prd/api.md)
 - [Coordinator PRD](./prd/coordinator.md)
-- [Agent PRD](./prd/agent.md)
+- [Relay PRD](./prd/relay.md)

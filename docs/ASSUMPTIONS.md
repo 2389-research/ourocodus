@@ -9,6 +9,7 @@
 **Status:** ⚠️ **UNVERIFIED**
 
 **Validation needed:**
+
 ```bash
 # Test this before Issue #3:
 cd test-worktree
@@ -26,6 +27,7 @@ claude-code-acp --workspace .
 **Status:** ⚠️ **UNVERIFIED**
 
 **Validation:**
+
 ```bash
 npm install -g @zed-industries/claude-code-acp
 which claude-code-acp  # Should return path
@@ -50,11 +52,13 @@ which claude-code-acp  # Should return path
 **Status:** ⚠️ **UNVERIFIED**
 
 **Known risks:**
+
 - Shared `.git/refs` directory - concurrent updates may conflict
 - Shared `.git/index` - lock file contention
 - Shared `.gitignore` - all worktrees use same ignore rules
 
 **Mitigation (if problems occur):**
+
 - Serialize agent operations (queue)
 - Use git worktree locking
 - Monitor for `.git/index.lock` conflicts
@@ -66,6 +70,7 @@ which claude-code-acp  # Should return path
 **Status:** ⚠️ **DECISION NEEDED**
 
 **Options:**
+
 - Start empty (agents create files from scratch)
 - Initialize with base files (README, .gitignore, etc.)
 
@@ -80,6 +85,7 @@ which claude-code-acp  # Should return path
 **Status:** ✅ **ACCEPTABLE FOR PHASE 1**
 
 **Limitations:**
+
 - No automatic reconnection (must refresh page)
 - No offline support
 - No request/response correlation built-in
@@ -95,6 +101,7 @@ which claude-code-acp  # Should return path
 **Status:** ✅ **ACCEPTABLE FOR PHASE 1**
 
 **Implications:**
+
 - Relay restart = all sessions lost
 - No reconnection to existing sessions
 - Conversation history lost on disconnect
@@ -122,6 +129,7 @@ which claude-code-acp  # Should return path
 **Status:** ✅ **VERIFIED** (from npm package documentation)
 
 **Example:**
+
 ```json
 // Request (stdin)
 {"jsonrpc":"2.0","id":1,"method":"agent/sendMessage","params":{"content":"hello"}}
@@ -195,14 +203,17 @@ Before starting Issue #3, validate these assumptions:
 ## When Assumptions Fail
 
 **If A1 fails (no auto-commit):**
+
 - Add git commit logic to relay after each agent response
 - Issue to create: "Add git commit automation"
 
 **If A3 fails (need approval UI):**
+
 - Add tool approval modal to PWA
 - Issue to create: "PWA tool approval interface"
 
 **If A4 fails (worktree conflicts):**
+
 - Implement operation queue (serialize agent work)
 - Issue to create: "Add agent operation queue"
 

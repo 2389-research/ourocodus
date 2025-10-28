@@ -4,11 +4,12 @@
 
 **Goal:** Validate multi-agent communication and concurrent work
 
-```
+```text
 ┌────────────────────────────────┐
-│ PWA (Browser)                  │
-│ - User Session View            │
-│ - 0-N agent chat UIs           │
+│ WebSocket Client               │
+│ (PWA planned, currently demos) │
+│ - scripts/demo/                │
+│ - scripts/interactive/         │
 └────────────┬───────────────────┘
              │ WebSocket
              │
@@ -36,6 +37,7 @@ Note: Roles are dynamic, not hardcoded
 ```
 
 **Key Characteristics:**
+
 - No NATS (direct WebSocket + stdio)
 - No Coordinator (user drives manually)
 - Processes not containers
@@ -45,6 +47,7 @@ Note: Roles are dynamic, not hardcoded
 - Independent agent lifecycles (agents can fail without affecting session)
 
 **Limitations:**
+
 - Not fault-tolerant (process crash = lost state)
 - Not scalable (in-memory only)
 - No workflow automation
@@ -57,7 +60,7 @@ Note: Roles are dynamic, not hardcoded
 
 **Goal:** Autonomous multi-agent workflow system
 
-```
+```text
 ┌──────────────────────┐
 │ PWA (Browser)        │
 └──────────┬───────────┘
@@ -87,6 +90,7 @@ Note: Roles are dynamic, not hardcoded
 ```
 
 **Key Characteristics:**
+
 - NATS for all backend communication
 - Coordinator drives workflow
 - Relay is protocol adapter only
@@ -96,6 +100,7 @@ Note: Roles are dynamic, not hardcoded
 - Dynamic workflow generation
 
 **Additions:**
+
 - Fault tolerance (event sourcing)
 - Horizontal scaling (NATS clustering)
 - Workflow automation (coordinator)
@@ -108,18 +113,21 @@ Note: Roles are dynamic, not hardcoded
 ## Migration Path
 
 ### Phase 1 → Phase 2: Add NATS
+
 - Keep relay + ACP integration
 - Add NATS between PWA and relay
 - Relay subscribes to NATS topics
 - Still no coordinator
 
 ### Phase 2 → Phase 3: Add Coordinator
+
 - Coordinator reads graph
 - Coordinator publishes work to NATS
 - Relay stays as ACP adapter
 - Add approval gate service
 
 ### Phase 3 → Phase 4: Production-ize
+
 - SQLite event store
 - Container isolation
 - Error recovery
@@ -130,11 +138,13 @@ Note: Roles are dynamic, not hardcoded
 ## Why This Phased Approach?
 
 **Phase 1 validates the hard part:**
+
 - Can we route messages to multiple ACP instances?
 - Can agents work concurrently on same codebase?
 - Does the UX model (PWA with multiple chats) work?
 
 **Later phases add infrastructure:**
+
 - Once routing works, add NATS for scalability
 - Once manual works, add coordinator for automation
 - Once POC works, add production features

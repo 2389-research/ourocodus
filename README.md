@@ -22,20 +22,37 @@ export ANTHROPIC_API_KEY=sk-...
 make build
 make run
 
-# Open PWA
-open http://localhost:3000
-```
+# Open WebSocket endpoint
+# Note: PWA not yet implemented, relay WebSocket available at:
+# ws://localhost:8080/ws
+```text
+
+## Environment Variables
+
+**Required:**
+
+- `ANTHROPIC_API_KEY` - Your Anthropic API key for Claude Code agents
+
+**Optional:**
+
+- `OUROCODUS_ACP_BINARY` - Path to custom ACP binary (default: `claude-code-acp` from PATH)
+  - Set this to use alternative ACP implementations like the echo agent for testing
+  - Example: `export OUROCODUS_ACP_BINARY=./bin/echo-agent`
+  - Useful for: Running demos/tests without an API key, testing custom agent implementations
 
 ## Architecture
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for Phase 1 vs Long-term design.
 
 **Phase 1 (Current):**
-```
-PWA (Browser) ←WebSocket→ Relay (Go) ←stdio→ 3x Claude Code ACP processes
+
+```text
+PWA (Browser) ←WebSocket→ Relay (Go) ←stdio→ N× Claude Code ACP processes
                                               ↓
                                          Git Worktrees
 ```
+
+The system supports multiple concurrent agents (no hard limit).
 
 ## Documentation
 
@@ -54,6 +71,7 @@ PWA (Browser) ←WebSocket→ Relay (Go) ←stdio→ 3x Claude Code ACP processe
 **Progress:** [13 issues](https://github.com/2389-research/ourocodus/issues) | [Milestone](https://github.com/2389-research/ourocodus/milestone/1) | [Issue Map](docs/ISSUES.md)
 
 ### Quick Links
+
 - [Issue #1: Project Initialization](https://github.com/2389-research/ourocodus/issues/1) ← **Start here**
 - [Issue Dependency Graph](docs/ISSUES.md)
 - [Session Lifecycle](docs/SESSION_LIFECYCLE.md)
@@ -80,7 +98,7 @@ mise run smoke
 
 # Full validation suite
 mise run pre-commit
-```
+```text
 
 Under the hood these call the following Make targets/scripts:
 
@@ -120,11 +138,11 @@ make stop
 # Clean build artifacts
 make clean
 # → Removes: bin/ directory
-```
+```text
 
 ### Project Structure
 
-```
+```text
 ourocodus/
 ├── cmd/                  # Binary entry points
 │   ├── relay/           # WebSocket relay server
@@ -134,7 +152,7 @@ ourocodus/
 ├── web/                  # PWA frontend
 ├── scripts/              # Build and setup scripts
 └── docs/                 # Documentation
-```
+```text
 
 ### Code Quality
 
@@ -145,6 +163,7 @@ The project uses automated quality gates:
 The project runs two GitHub Actions workflows on all PRs and pushes to main:
 
 *ci.yml* - Core quality checks:
+
 - Build all binaries (relay, cli, echo-agent)
 - Run unit tests (`go test ./...`)
 - golangci-lint verification
@@ -153,6 +172,7 @@ The project runs two GitHub Actions workflows on all PRs and pushes to main:
 - Binary smoke test
 
 *smoke.yml* - Integration testing:
+
 - Session management smoke tests (8 test scenarios)
 - WebSocket relay integration tests (handshake, echo, session lifecycle, error handling)
 - Fuzz testing available via `--fuzz N` flag (disabled by default for CI stability)
@@ -160,6 +180,7 @@ The project runs two GitHub Actions workflows on all PRs and pushes to main:
 Note: Local dev uses gofumpt for stricter formatting than gofmt
 
 **Pre-commit Hooks (Optional)**
+
 ```bash
 # Install pre-commit
 pip install pre-commit  # or: brew install pre-commit
@@ -169,9 +190,10 @@ pre-commit install
 
 # Run manually
 pre-commit run --all-files
-```
+```text
 
 Hooks run:
+
 - `gofumpt` - Format Go code (stricter than gofmt)
 - `go vet` - Static analysis
 - `golangci-lint` - Comprehensive linting
@@ -179,6 +201,7 @@ Hooks run:
 - `make build` - Verify build succeeds
 
 **Manual Linting**
+
 ```bash
 # Install golangci-lint
 brew install golangci-lint  # macOS
@@ -189,13 +212,14 @@ golangci-lint run
 
 # Auto-fix issues
 golangci-lint run --fix
-```
+```text
 
 ## Demo
 
 Two interactive demos are available to showcase the relay system features. Both run a local relay server with an echo agent and work without requiring an ANTHROPIC_API_KEY.
 
 **Prerequisites for both demos:**
+
 - Run `make build` first to ensure all binaries are compiled
 - No ANTHROPIC_API_KEY required (uses echo-agent for testing)
 
@@ -209,9 +233,10 @@ mise run interactive
 
 # Or via Makefile
 make interactive
-```
+```text
 
 **Available Commands:**
+
 - `create` - Create a new session
 - `spawn <role> [workspace]` - Spawn an agent (default: ./workspaces/interactive)
 - `msg <role> <message>` - Send message to agent
@@ -220,7 +245,8 @@ make interactive
 - `quit` - Exit the REPL
 
 **Example Session:**
-```
+
+```text
 [no session] > create
 ✅ Session created: 4ad2f420
 
@@ -243,9 +269,10 @@ make interactive
 
 [session:4ad2f420] > quit
 👋 Goodbye!
-```
+```text
 
 **Features:**
+
 - Full REPL interface with command history
 - Session tracking (shows current session ID in prompt)
 - Agent management (tracks spawned agents)
@@ -265,18 +292,20 @@ mise run demo
 
 # Or via Makefile
 make demo
-```
+```text
 
 **What the Automated Demo Showcases:**
 
 **1. Session Lifecycle & Agent Communication**
+
 - Complete workflow: `session:create` → `agent:spawn` → `agent:message`
 - Bidirectional communication between user and agent
 - Multiple message exchanges in a single session
 - Agent state transitions (SPAWNING → ACTIVE)
 
 Example output:
-```
+
+```text
 ━━━ Scenario 1: Session Lifecycle & Agent Communication ━━━
 ✅ Session created: 4ad2f420-73d5-4b98-9517-f7e78ebd7e11
 ✅ Agent spawned and ready (state: ACTIVE)
@@ -286,37 +315,41 @@ Example output:
    Agent: Echo: Hello, agent!
    User: Can you count to three?
    Agent: Echo: Can you count to three?
-```
+```text
 
 **2. Clear Error Semantics with Recoverability**
+
 - Structured error responses with error codes
 - Recoverable vs non-recoverable error distinction
 - `SESSION_NOT_FOUND` error (non-recoverable)
 - `AGENT_NOT_FOUND` error (non-recoverable)
 
 Example output:
-```
+
+```text
 ━━━ Scenario 2: Clear Error Semantics ━━━
 ✅ Error received:
    Code: SESSION_NOT_FOUND
    Message: session not found: 00000000-0000-0000-0000-000000000000
    Recoverable: false
-```
+```text
 
 **Source code:** `scripts/demo/main.go`
 
 ### For Automated Testing
 
 For non-interactive automated testing, use the smoke test suite:
+
 ```bash
 mise run smoke
-```
+```text
 
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed setup instructions using mise for consistent development environments.
 
 Quick overview:
+
 1. Install [mise](https://mise.jdx.dev/) and run `mise install` to get all dev tools
 2. Check [GitHub Issues](https://github.com/2389-research/ourocodus/issues)
 3. Issues are ordered by dependency (work top-down)

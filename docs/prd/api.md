@@ -31,7 +31,8 @@ HTTP control plane for Ourocodus system. Provides REST endpoints for session man
 ### Session Management
 
 #### Create Session
-```
+
+```http
 POST /api/sessions
 Content-Type: application/json
 
@@ -47,10 +48,11 @@ Response 201:
   "status": "created",
   "created_at": "2025-10-22T10:00:00Z"
 }
-```
+```http
 
 #### List Sessions
-```
+
+```http
 GET /api/sessions
 
 Response 200:
@@ -64,10 +66,11 @@ Response 200:
     }
   ]
 }
-```
+```http
 
 #### Get Session
-```
+
+```http
 GET /api/sessions/{id}
 
 Response 200:
@@ -80,19 +83,21 @@ Response 200:
   "chunks_completed": 0,
   "chunks_total": 5
 }
-```
+```http
 
 #### Stop Session
-```
+
+```http
 DELETE /api/sessions/{id}
 
 Response 204: (no content)
-```
+```http
 
 ### Agent Management
 
 #### List Agents
-```
+
+```http
 GET /api/agents
 
 Response 200:
@@ -108,10 +113,11 @@ Response 200:
     }
   ]
 }
-```
+```http
 
 #### Get Agent Status
-```
+
+```http
 GET /api/agents/{id}
 
 Response 200:
@@ -124,19 +130,21 @@ Response 200:
   "started_at": "2025-10-22T10:05:00Z",
   "last_message_at": "2025-10-22T10:10:00Z"
 }
-```
+```http
 
 #### Stop Agent
-```
+
+```http
 DELETE /api/agents/{id}
 
 Response 204: (no content)
-```
+```http
 
 ### Event Log
 
 #### Tail Events
-```
+
+```http
 GET /api/events?session={id}&limit=100&since={timestamp}
 
 Response 200:
@@ -152,21 +160,23 @@ Response 200:
     }
   ]
 }
-```
+```http
 
 #### Stream Events (SSE)
-```
+
+```http
 GET /api/events/stream?session={id}
 Accept: text/event-stream
 
 Response 200:
 (Server-Sent Events stream)
-```
+```http
 
 ### Health & Status
 
 #### Health Check
-```
+
+```http
 GET /health
 
 Response 200:
@@ -175,10 +185,11 @@ Response 200:
   "nats": "connected",
   "docker": "available"
 }
-```
+```http
 
 #### System Info
-```
+
+```http
 GET /api/info
 
 Response 200:
@@ -188,18 +199,19 @@ Response 200:
   "active_sessions": 1,
   "active_agents": 2
 }
-```
+```http
 
 ### Static Files
 
-```
+```http
 GET /              → web/index.html
 GET /assets/*      → web/assets/*
-```
+```http
 
 ## Data Models
 
 ### Session
+
 ```go
 type Session struct {
     ID              string    `json:"id"`
@@ -211,9 +223,10 @@ type Session struct {
     ChunksCompleted int       `json:"chunks_completed"`
     ChunksTotal     int       `json:"chunks_total"`
 }
-```
+```http
 
 ### Agent
+
 ```go
 type Agent struct {
     ID            string    `json:"id"`
@@ -224,9 +237,10 @@ type Agent struct {
     StartedAt     time.Time `json:"started_at"`
     LastMessageAt time.Time `json:"last_message_at,omitempty"`
 }
-```
+```http
 
 ### Event
+
 ```go
 type Event struct {
     ID        string                 `json:"id"`
@@ -236,7 +250,7 @@ type Event struct {
     Topic     string                 `json:"topic"`
     Payload   map[string]interface{} `json:"payload"`
 }
-```
+```http
 
 ## State Management
 
@@ -249,9 +263,10 @@ type APIServer struct {
     nats     *nats.Conn
     docker   *client.Client
 }
-```
+```http
 
 **On startup:**
+
 1. Connect to NATS
 2. Connect to Docker daemon
 3. Query Docker for running agent containers
@@ -268,9 +283,10 @@ type Config struct {
     EventLogPath   string // Default: ./events.log
     WebRoot        string // Default: ./web
 }
-```
+```http
 
 **Environment Variables:**
+
 - `OUROCODUS_PORT`
 - `OUROCODUS_NATS_URL`
 - `OUROCODUS_DOCKER_HOST`
@@ -280,6 +296,7 @@ type Config struct {
 ## Error Handling
 
 **HTTP Status Codes:**
+
 - `200` - Success
 - `201` - Created
 - `204` - No Content (successful deletion)
@@ -289,13 +306,14 @@ type Config struct {
 - `503` - Service Unavailable (NATS or Docker unavailable)
 
 **Error Response Format:**
+
 ```json
 {
   "error": "session not found",
   "code": "SESSION_NOT_FOUND",
   "details": "Session 'sess_abc123' does not exist"
 }
-```
+```http
 
 ## Security (Deferred for POC)
 
@@ -305,6 +323,7 @@ type Config struct {
 ## Logging
 
 Use structured logging (JSON format):
+
 ```json
 {
   "timestamp": "2025-10-22T10:00:00Z",
@@ -313,15 +332,17 @@ Use structured logging (JSON format):
   "message": "Session created",
   "session_id": "sess_abc123"
 }
-```
+```http
 
 ## Testing
 
 **Unit Tests:**
+
 - HTTP handler tests with `httptest`
 - Mock NATS and Docker clients
 
 **Integration Tests:**
+
 - Real NATS server (test container)
 - Real Docker daemon
 
@@ -334,26 +355,27 @@ Use structured logging (JSON format):
 
 ## Dependencies
 
-```
+```http
 go.mod:
   - github.com/nats-io/nats.go
   - github.com/docker/docker/client
-```
+```http
 
 ## File Structure
 
-```
+```http
 cmd/api/
   main.go           # Entry point
   handlers.go       # HTTP handlers
   middleware.go     # CORS, logging middleware
   state.go          # In-memory state management
   events.go         # Event log reader/subscriber
-```
+```http
 
 ## Success Criteria
 
 API server is complete when:
+
 1. Can create/list/stop sessions via REST
 2. Can query agent status
 3. Can tail event log

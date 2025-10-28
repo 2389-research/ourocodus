@@ -11,11 +11,13 @@ We use [mise](https://mise.jdx.dev/) to manage development tools and ensure ever
 #### Install mise
 
 **macOS:**
+
 ```bash
 brew install mise
 ```
 
 **Linux:**
+
 ```bash
 curl https://mise.run | sh
 ```
@@ -26,11 +28,13 @@ See [mise installation docs](https://mise.jdx.dev/getting-started.html)
 #### Activate mise
 
 Add to your shell profile (`~/.bashrc`, `~/.zshrc`, etc.):
+
 ```bash
 eval "$(mise activate bash)"  # or zsh, fish, etc.
 ```
 
 Then reload your shell or run:
+
 ```bash
 source ~/.bashrc  # or your shell config file
 ```
@@ -45,6 +49,7 @@ mise install
 ```
 
 This will automatically install:
+
 - **Go 1.23.0** - Programming language
 - **golangci-lint** - Comprehensive linter
 - **staticcheck** - Advanced static analysis
@@ -109,6 +114,7 @@ golangci-lint run --timeout=5m
 ```
 
 The linter configuration is in `.golangci.yml` and includes:
+
 - gofmt, govet, errcheck, staticcheck
 - unused, gosimple, ineffassign, typecheck
 - revive, gocyclo, misspell, unparam
@@ -175,6 +181,7 @@ pre-commit install
 #### What the hooks do
 
 The pre-commit hooks will automatically:
+
 - Format code with gofumpt
 - Run go vet for basic static analysis
 - Organize imports with go-imports
@@ -202,6 +209,7 @@ make build
 ```
 
 This produces binaries in `bin/`:
+
 - `bin/relay` - WebSocket relay server
 - `bin/cli` - Command-line interface
 - `bin/echo-agent` - Echo test agent
@@ -236,17 +244,19 @@ Removes build artifacts.
 2. **Create a branch** from `main`
 3. **Make your changes** with frequent commits
 4. **Run quality checks**:
+
    ```bash
    mise run lint
    mise run fmt
    make test
    ```
+
 5. **Push and create a PR**
 6. **Address review feedback**
 
 ## Project Structure
 
-```
+```text
 ourocodus/
 ├── cmd/                  # Binary entry points
 │   ├── relay/           # WebSocket relay server

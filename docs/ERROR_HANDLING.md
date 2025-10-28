@@ -44,18 +44,21 @@ func (s *Server) mapError(err error) (code, message string, recoverable bool)
 ```
 
 **Mapping Logic:**
+
 - `session.ErrSessionNotFound` → SESSION_NOT_FOUND (non-recoverable)
 - `session.ErrAgentNotFound` → AGENT_NOT_FOUND (non-recoverable)
 - `ValidationError` → Preserves code and recoverability from validation layer
 - Unknown errors → INTERNAL_ERROR (recoverable fallback)
 
 **Implementation Details:**
+
 - Uses `errors.Is()` for typed sentinel errors
 - Single source of truth for error semantics
 - No string-based error checking
 - Consistent error handling across all handlers
 
 **Code Location:**
+
 - Error mapper: `pkg/relay/server.go` (mapError function)
 - Sentinel errors: `pkg/relay/session/errors.go`
 - Error documentation: `pkg/relay/message.go` (comprehensive comments)
@@ -73,12 +76,14 @@ The following sections describe historical error handling patterns. Current impl
 These errors indicate fundamental problems that prevent the system from functioning. The relay should shut down gracefully.
 
 **Examples:**
+
 - Failed to bind to port (already in use)
 - ANTHROPIC_API_KEY missing or invalid
 - Unable to create agent worktree directory
 - ACP binary not found in PATH
 
 **Handling:**
+
 ```go
 log.Fatal("FATAL: %v", err)
 os.Exit(1)
@@ -93,12 +98,14 @@ os.Exit(1)
 These errors affect a single session but other sessions can continue.
 
 **Examples:**
+
 - ACP process spawn failure (bad workspace path)
 - ACP process crash during operation
 - WebSocket client disconnection
 - Invalid JSON-RPC from ACP process
 
 **Handling:**
+
 ```go
 log.Error("Session %s: %v", sessionID, err)
 session.Close()
@@ -116,12 +123,14 @@ ws.Close()
 These errors affect a single message but the session continues.
 
 **Examples:**
+
 - Malformed WebSocket message from client
 - Empty message content
 - Message too large (>1MB)
 - Rate limit exceeded
 
 **Handling:**
+
 ```go
 log.Warn("Session %s: Invalid message: %v", sessionID, err)
 ws.WriteJSON(ErrorMessage{Type: "error", Error: "Invalid message format"})
@@ -137,12 +146,14 @@ ws.WriteJSON(ErrorMessage{Type: "error", Error: "Invalid message format"})
 These errors may resolve themselves with retry.
 
 **Examples:**
+
 - Anthropic API rate limit (429)
 - Anthropic API server error (500, 502, 503)
 - Network timeout reading from ACP stdout
 - Git lock file contention (.git/index.lock)
 
 **Handling:**
+
 ```go
 for attempt := 1; attempt <= 3; attempt++ {
     err := operation()
@@ -189,6 +200,7 @@ The relay converts these errors into `NewErrorMessage` payloads:
 ```
 
 **Current codes:**
+
 - `INVALID_MESSAGE` — malformed JSON or missing required fields (recoverable)
 - `VERSION_MISMATCH` — protocol version mismatch (non-recoverable; connection closes)
 
@@ -220,27 +232,32 @@ Phase 1 uses the simple `ValidationError` shape above. The structured error form
 ### Log Levels
 
 **FATAL:** System cannot continue, about to exit
+
 - Missing API key
 - Port bind failure
 - ACP binary not found
 
 **ERROR:** Session-level failure, session terminated
+
 - ACP process crash
 - Worktree creation failed
 - JSON-RPC parse error
 
 **WARN:** Message-level failure, session continues
+
 - Invalid message format
 - Rate limit warning
 - Retry attempt
 
 **INFO:** Normal operations
+
 - Session created
 - Agent spawned
 - Message relayed
 - Session closed
 
 **DEBUG:** Detailed flow (disabled in production)
+
 - Raw JSON-RPC messages
 - WebSocket frame details
 - Goroutine lifecycle
@@ -305,6 +322,7 @@ Failed messages are logged but not stored for retry.
 **Detection:** Process exit detected, session.cmd.Wait() returns
 
 **Response:**
+
 1. Log error with session ID, agent ID, exit code, stderr
 2. Send error message to PWA client
 3. Close WebSocket connection
@@ -312,6 +330,7 @@ Failed messages are logged but not stored for retry.
 5. User must create new session to resume
 
 **No Attempt To:**
+
 - Restart process automatically (may repeat crash)
 - Preserve conversation history (not persisted)
 
@@ -322,6 +341,7 @@ Failed messages are logged but not stored for retry.
 **Detection:** `ws.ReadMessage()` returns error
 
 **Response:**
+
 1. Log disconnection (INFO level)
 2. Terminate ACP process gracefully (SIGTERM)
 3. Wait up to 5 seconds for process to exit
@@ -329,6 +349,7 @@ Failed messages are logged but not stored for retry.
 5. Clean up session from memory
 
 **No Attempt To:**
+
 - Keep ACP process running for reconnect (no session persistence)
 
 ---
@@ -338,6 +359,7 @@ Failed messages are logged but not stored for retry.
 **Detection:** Git command fails with "index.lock" in error message
 
 **Response:**
+
 1. Retry with exponential backoff (1s, 2s, 4s)
 2. After 3 attempts, treat as session error
 3. Log error, notify client, terminate session
@@ -351,12 +373,14 @@ Failed messages are logged but not stored for retry.
 **Detection:** ACP process stderr contains "authentication" or "API key"
 
 **Response:**
+
 1. Log as ERROR (likely configuration issue)
 2. Treat as fatal if no sessions have succeeded yet
 3. Treat as session error if other sessions working
 4. Clear error message to user: "Check ANTHROPIC_API_KEY"
 
 **No Attempt To:**
+
 - Validate key before spawning (adds latency)
 - Prompt user for key (not in Phase 1)
 
@@ -381,6 +405,7 @@ Before Issue #13, validate error handling:
 ### Error Message Validation
 
 For each error code:
+
 - [ ] Message is clear and actionable
 - [ ] No stack traces or internal details exposed
 - [ ] Includes session ID for debugging
@@ -393,6 +418,7 @@ For each error code:
 ### Phase 1 Minimal Observability
 
 **What to log:**
+
 - Session lifecycle (created, closed)
 - Agent spawn success/failure
 - Message count per session
@@ -400,6 +426,7 @@ For each error code:
 - ACP process crashes with stderr
 
 **What NOT to log:**
+
 - Message content (privacy concern)
 - API key (security concern)
 - Full JSON-RPC payloads (noise)
@@ -437,12 +464,14 @@ For each error code:
 When adding NATS (Phase 2), error handling changes:
 
 **New Patterns:**
+
 - Message acknowledgement (at-least-once delivery)
 - Dead letter queue for failed messages
 - Circuit breaker for failing agents
 - Health checks and automatic recovery
 
 **Keep From Phase 1:**
+
 - Structured logging format
 - Error code taxonomy
 - Fatal vs recoverable distinction

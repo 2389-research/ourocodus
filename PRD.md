@@ -27,7 +27,7 @@ Enable anyone to transform ideas into working software through AI agent orchestr
 
 **Note:** Phase 1 validates concurrent agent communication. Sequential workflow comes in Phase 3.
 
-```
+```text
 User Idea
     ↓
 [Decomposition Phase]
@@ -46,9 +46,9 @@ Concurrent agents work on different aspects:
   → Run completed software
   → Specialized agents evaluate (performance, security, UX)
   → Report findings
-```
+```text
 
-**Phase 1 Reality:** 3 agents work concurrently, user directs each manually via PWA
+**Phase 1 Reality:** Multiple agents work concurrently (no hard limit), user directs each manually via WebSocket
 **Phase 3+:** Coordinator automates workflow, can be sequential or parallel based on dependencies
 
 ## System Architecture
@@ -58,6 +58,7 @@ Concurrent agents work on different aspects:
 **Purpose:** Message routing, container orchestration, workspace management
 
 **Components:**
+
 - **NATS** - Message bus (external dependency)
 - **Docker** - Container runtime (external dependency)
 - **API Server** (Go) - HTTP control plane
@@ -71,6 +72,7 @@ Concurrent agents work on different aspects:
 **Purpose:** Drive software development workflow
 
 **Components:**
+
 - **Coordinator** (Go) - Workflow driver, reads graph, sends ACP messages via relay
 - **ACP Relay** - Routes ACP protocol messages between coordinator and agent containers
 - **Agent Containers** - Run Claude Code, OpenAI Codex, etc. (existing ACP servers)
@@ -112,6 +114,7 @@ Concurrent agents work on different aspects:
 ### Success Criteria
 
 POC is successful if:
+
 1. User can start system locally (`make run`)
 2. User can submit work via CLI
 3. Agent processes work in isolated container
@@ -121,34 +124,43 @@ POC is successful if:
 
 ## Directory Structure
 
-```
+**Phase 1 (Current):**
+```text
 ourocodus/
   cmd/
-    api/          # Go HTTP API server
-    relay/        # Go ACP relay server
-    coordinator/  # Go workflow driver
-    cli/          # Go CLI tool
+    relay/        # WebSocket relay server (implemented)
+    cli/          # CLI tool (implemented)
+    echo-agent/   # Test agent (implemented)
+  pkg/
+    relay/        # Relay implementation
+    acp/          # ACP protocol client
+  scripts/
+    demo/         # Interactive demos
+    smoketest/    # Integration tests
+  docs/
+    prd/          # Component PRDs
+    PROTOCOLS.md
+    ACP.md
+    SESSION_LIFECYCLE.md
+    ERROR_HANDLING.md
+```
+
+**Long-term (Planned):**
+```text
+Additional components:
+  cmd/
+    api/          # HTTP API server
+    coordinator/  # Workflow driver
   pkg/
     nats/         # NATS client wrapper
-    acp/          # ACP protocol client/server
     graph/        # YAML graph parser
     events/       # Event logging
   containers/
     claude-code/  # Dockerfile for Claude Code
-    codex/        # Dockerfile for OpenAI Codex
   config/
-    graph.yaml           # Workflow definition
-    agent-config.yaml    # Agent container configs
+    graph.yaml    # Workflow definition
   web/
-    index.html    # Simple UI
-  docs/
-    prd/          # This directory
-      api.md
-      relay.md
-      coordinator.md
-      cli.md
-    PROTOCOLS.md  # Communication protocols
-    ACP.md        # ACP integration details
+    index.html    # PWA frontend
 ```
 
 ## Non-Goals (For POC)
@@ -192,22 +204,26 @@ ourocodus/
 ## Timeline Estimate
 
 **Phase 1: Infrastructure (Week 1)**
+
 - NATS integration
 - Docker agent launcher
 - API server skeleton
 - Event logging
 
 **Phase 2: Basic Orchestration (Week 2)**
+
 - Coordinator implementation
 - Simple graph parser
 - Agent scaffold (echo service)
 
 **Phase 3: Real Agent (Week 3)**
+
 - Anthropic API integration
 - Git worktree setup
 - Agent processes real coding tasks
 
 **Phase 4: UI & Polish (Week 4)**
+
 - Web UI for monitoring
 - CLI improvements
 - Documentation
@@ -216,8 +232,7 @@ ourocodus/
 
 ## References
 
-- [API Server PRD](./prd/api.md)
-- [Coordinator PRD](./prd/coordinator.md)
-- [CLI PRD](./prd/cli.md)
-- [Agent PRD](./prd/agent.md)
-- [Web UI PRD](./prd/web.md)
+- [API Server PRD](./docs/prd/api.md)
+- [Coordinator PRD](./docs/prd/coordinator.md)
+- [CLI PRD](./docs/prd/cli.md)
+- [Relay PRD](./docs/prd/relay.md)

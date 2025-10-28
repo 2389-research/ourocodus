@@ -6,7 +6,7 @@ Phase 1 is broken down into 13 iterative issues, ordered by dependency. Work top
 
 ## Issue Dependency Graph
 
-```
+```text
 #1 Project Initialization (no deps)
   ├─> #2 Git Worktree Script
   ├─> #3 ACP Client Package
@@ -27,7 +27,8 @@ Phase 1 is broken down into 13 iterative issues, ordered by dependency. Work top
 ## Critical Path
 
 The critical path (longest dependency chain) is:
-```
+
+```text
 #1 → #5 → #6 → #7 → #8 → #9 → #12 → #13
 ```
 
@@ -38,6 +39,7 @@ This path takes approximately **32-42 hours** of work.
 After completing foundations, these can be worked in parallel:
 
 **After #7 (Relay ACP Integration):**
+
 - Track A: #8 → #9 (Relay routing)
 - Track B: #10 → #11 (PWA scaffold and cards)
 
@@ -67,7 +69,7 @@ After completing foundations, these can be worked in parallel:
 | #12 | PWA Chat Interface | 6-8h | 47-66h |
 | #13 | E2E Testing | 6-8h | 53-74h |
 
-**Total: 53-74 hours (~2 weeks at 40h/week)**
+### Total: 53-74 hours (~2 weeks at 40h/week)
 
 ## How to Use This
 
@@ -107,7 +109,7 @@ Each issue follows this structure:
 
 All issues are in the **"Phase 1: Foundation"** milestone with due date: Dec 15, 2025.
 
-Track progress: https://github.com/2389-research/ourocodus/milestone/1
+Track progress: <https://github.com/2389-research/ourocodus/milestone/1>
 
 ## Detailed Briefs
 
@@ -116,4 +118,4 @@ Track progress: https://github.com/2389-research/ourocodus/milestone/1
 
 ## Questions?
 
-See [docs/PHASE1.md](https://github.com/2389-research/ourocodus/blob/main/docs/PHASE1.md) for detailed implementation specification.
+See [ARCHITECTURE.md](ARCHITECTURE.md) and [SESSION_LIFECYCLE.md](SESSION_LIFECYCLE.md) for detailed implementation specifications.

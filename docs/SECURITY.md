@@ -20,7 +20,7 @@
 ```go
 // Test with mock command
 client, _ := acp.NewClient(workspace, apiKey,
-	acp.WithCommand("./testdata/mock-acp"))
+ acp.WithCommand("./testdata/mock-acp"))
 
 // Production with default binary
 client, _ := acp.NewClient(workspace, apiKey)
@@ -30,7 +30,7 @@ client, _ := acp.NewClient(workspace, apiKey)
 
 ```go
 if !isAllowedCommand(cfg.commandPath) {
-	return nil, fmt.Errorf("command path not in allowlist")
+ return nil, fmt.Errorf("command path not in allowlist")
 }
 ```
 

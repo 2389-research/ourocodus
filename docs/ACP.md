@@ -2,7 +2,34 @@
 
 **Note:** ACP is the "Agent Client Protocol" by Zed Industries/Google, not Anthropic. Anthropic has MCP (Model Context Protocol). We use ACP because Claude Code supports it.
 
-## Overview
+---
+
+## Phase 1 vs Long-term
+
+**Phase 1 (Current Implementation):**
+
+```text
+PWA → WebSocket → Relay → stdio → N× claude-code-acp processes
+```
+
+- Direct stdio communication with ACP processes (pkg/acp/client.go)
+- No NATS, no Coordinator, no containers
+- Relay spawns processes directly
+- User drives all agent interactions manually via WebSocket
+
+**Long-term (Described Below):**
+
+This document primarily describes the **long-term architecture** with:
+- Coordinator (workflow automation)
+- NATS message bus (decoupled communication)
+- Containers (isolation and orchestration)
+- WebSocket ACP relay (container communication)
+
+For Phase 1 implementation details, see pkg/acp/client.go and pkg/relay/session/
+
+---
+
+## Overview (Long-term Vision)
 
 Ourocodus does NOT implement custom AI agents. Instead, it orchestrates **existing ACP-compatible servers** (Claude Code, OpenAI Codex, etc.). The relay routes ACP messages between the PWA/coordinator and these agent processes/containers.
 
@@ -11,11 +38,13 @@ Ourocodus does NOT implement custom AI agents. Instead, it orchestrates **existi
 **We are ACP clients, not ACP servers.**
 
 The "agents" are Claude Code, OpenAI Codex, or other tools that:
+
 - Speak ACP protocol
 - Have access to git, code editing, terminal
 - Can be run in containers
 
 Ourocodus provides:
+
 1. Container orchestration (launch, stop, monitor)
 2. Message routing (NATS → ACP containers)
 3. Workflow coordination (sequential execution, approval gates)
@@ -23,7 +52,7 @@ Ourocodus provides:
 
 ## Architecture
 
-```
+```text
 ┌─────────────┐
 │ Coordinator │
 │    (Go)     │
@@ -55,6 +84,7 @@ Ourocodus provides:
 ### Message Flow
 
 1. **Coordinator → Agent (Sampling Request)**
+
 ```json
 {
   "id": "msg_123",
@@ -84,7 +114,8 @@ Ourocodus provides:
 }
 ```
 
-2. **Agent → Coordinator (Tool Use)**
+1. **Agent → Coordinator (Tool Use)**
+
 ```json
 {
   "id": "msg_123",
@@ -98,7 +129,8 @@ Ourocodus provides:
 }
 ```
 
-3. **Coordinator → Agent (Tool Result)**
+1. **Coordinator → Agent (Tool Result)**
+
 ```json
 {
   "id": "msg_124",
@@ -110,7 +142,8 @@ Ourocodus provides:
 }
 ```
 
-4. **Agent → Coordinator (Final Response)**
+1. **Agent → Coordinator (Final Response)**
+
 ```json
 {
   "id": "msg_125",
@@ -200,12 +233,14 @@ The ACP relay bridges NATS (internal) and ACP (containers):
 ### Relay API (Internal - NATS)
 
 **Subscribe to:**
-```
+
+```text
 sessions.{session_id}.work.{role}   # Work for specific agent role
 ```
 
 **Publish to:**
-```
+
+```text
 sessions.{session_id}.results.{role}  # Results from agent
 sessions.{session_id}.events          # Status events
 ```
@@ -213,12 +248,14 @@ sessions.{session_id}.events          # Status events
 ### Relay API (External - ACP Containers)
 
 **WebSocket endpoint:**
-```
+
+```text
 ws://relay:8080/acp/{session_id}/{role}
 ```
 
 **Headers:**
-```
+
+```http
 X-Agent-ID: agent_abc123
 X-Session-ID: sess_xyz789
 X-Agent-Role: coding
@@ -229,6 +266,7 @@ X-Agent-Role: coding
 ### Scenario: Implement authentication feature
 
 1. **Coordinator reads graph:**
+
 ```yaml
 # graph.yaml
 chunks:
@@ -239,8 +277,9 @@ chunks:
       - review
 ```
 
-2. **Coordinator launches coding agent:**
-```
+1. **Coordinator launches coding agent:**
+
+```http
 POST /api/agents
 {
   "session_id": "sess_123",
@@ -249,13 +288,15 @@ POST /api/agents
 }
 ```
 
-3. **Relay connects to agent container:**
+1. **Relay connects to agent container:**
+
 - Container starts with Claude Code
 - Claude Code connects to relay WebSocket
 - Relay registers: `sess_123` + `coding` → `ws://container_ip:5000`
 
-4. **Coordinator sends work via NATS:**
-```
+1. **Coordinator sends work via NATS:**
+
+```text
 Topic: sessions.sess_123.work.coding
 Message: {
   "type": "work.coding",
@@ -266,7 +307,8 @@ Message: {
 }
 ```
 
-5. **Relay translates to ACP:**
+1. **Relay translates to ACP:**
+
 ```json
 {
   "method": "sampling.request",
@@ -280,14 +322,16 @@ Message: {
 }
 ```
 
-6. **Claude Code executes:**
+1. **Claude Code executes:**
+
 - Checkouts branch: `git checkout -b agent/auth-implementation`
 - Creates files: `src/auth.go`
 - Writes tests: `src/auth_test.go`
 - Runs tests: `go test ./...`
 - Commits: `git commit -m "Add authentication"`
 
-7. **Relay receives result:**
+1. **Relay receives result:**
+
 ```json
 {
   "result": {
@@ -297,8 +341,9 @@ Message: {
 }
 ```
 
-8. **Relay publishes to NATS:**
-```
+1. **Relay publishes to NATS:**
+
+```text
 Topic: sessions.sess_123.results.coding
 Message: {
   "type": "result.success",
@@ -310,8 +355,9 @@ Message: {
 }
 ```
 
-9. **Coordinator receives result, requests approval:**
-```
+1. **Coordinator receives result, requests approval:**
+
+```text
 Topic: sessions.sess_123.approvals
 Message: {
   "type": "approval.request",
@@ -322,13 +368,14 @@ Message: {
 }
 ```
 
-10. **Human approves → Coordinator continues to testing phase**
+1. **Human approves → Coordinator continues to testing phase**
 
 ## Tool Availability
 
 Different agents may have different tools available:
 
 **Claude Code tools:**
+
 - `bash` - Execute shell commands
 - `edit_file` - Edit file with search/replace
 - `write_file` - Write new file
@@ -336,6 +383,7 @@ Different agents may have different tools available:
 - `search_files` - Grep/find files
 
 **Custom tools (future):**
+
 - `run_tests` - Run test suite
 - `lint` - Run linter
 - `format` - Format code
@@ -348,6 +396,7 @@ Different agents may have different tools available:
 **Detection:** WebSocket disconnect or container exit
 
 **Response:**
+
 1. Relay publishes event: `event.agent.crashed`
 2. Coordinator marks chunk as failed
 3. Manual intervention required (POC)
@@ -358,6 +407,7 @@ Different agents may have different tools available:
 **Scenario:** Malformed ACP message
 
 **Response:**
+
 1. Log error with full message
 2. Send error response to coordinator
 3. Continue processing (don't crash relay)
@@ -367,6 +417,7 @@ Different agents may have different tools available:
 **Scenario:** `bash` tool returns non-zero exit
 
 **Response:**
+
 - Agent decides how to handle (ACP server responsibility)
 - Coordinator treats as normal result
 - Agent may retry, ask for help, or fail gracefully
@@ -402,23 +453,26 @@ Different agents may have different tools available:
 ## Testing Strategy
 
 ### Unit Tests
+
 - ACP message parsing/formatting
 - Protocol translation (NATS ↔ ACP)
 
 ### Integration Tests
+
 - Real Claude Code container
 - Send work, receive results
 - Tool execution (bash, edit_file)
 - Multi-turn conversations
 
 ### E2E Tests
+
 - Full workflow: coding → approval → testing
 - Multiple agents sequentially
 - Error scenarios (crash, timeout)
 
 ## References
 
-- [ACP Specification](https://github.com/anthropics/anthropic-sdk-python/blob/main/acp/README.md)
 - [Claude Code Documentation](https://docs.claude.com/claude-code)
+- [ACP Protocol](https://github.com/zed-industries/acp) - Agent Client Protocol by Zed Industries/Google
 - [NATS Documentation](https://docs.nats.io/)
 - [Docker SDK for Go](https://pkg.go.dev/github.com/docker/docker)

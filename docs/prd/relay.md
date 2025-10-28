@@ -29,7 +29,7 @@ Bridge between internal NATS messaging and external ACP-speaking agents (Claude 
 
 ## Architecture
 
-```
+```text
 ┌──────────────┐
 │  NATS Bus    │
 │              │
@@ -73,14 +73,15 @@ Bridge between internal NATS messaging and external ACP-speaking agents (Claude 
     │ Claude Code    │  │ OpenAI Codex   │
     │ Container      │  │ Container      │
     └────────────────┘  └────────────────┘
-```
+```text
 
 ## API Specification
 
 ### Agent Connection (WebSocket)
 
 #### Connect to Relay
-```
+
+```text
 ws://relay:8080/acp/{session_id}/{role}
 
 Query params:
@@ -88,17 +89,19 @@ Query params:
 
 Example:
 ws://relay:8080/acp/sess_123/coding?agent_id=agent_abc
-```
+```text
 
 #### Connection Headers
-```
+
+```text
 X-Agent-ID: agent_abc123
 X-Session-ID: sess_xyz789
 X-Agent-Role: coding
 X-ACP-Version: 1.0
-```
+```text
 
 #### Registration Response
+
 ```json
 {
   "type": "connection.established",
@@ -107,14 +110,15 @@ X-ACP-Version: 1.0
   "agent_id": "agent_abc",
   "timestamp": "2025-10-22T10:00:00Z"
 }
-```
+```text
 
 ### Message Flow
 
 #### Inbound (NATS → Agent)
 
 **NATS Message:**
-```
+
+```text
 Topic: sessions.sess_123.work.coding
 Payload: {
   "id": "msg_123",
@@ -124,9 +128,10 @@ Payload: {
     "requirements": [...]
   }
 }
-```
+```text
 
 **Translated to ACP:**
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -145,11 +150,12 @@ Payload: {
     "tools": [...]
   }
 }
-```
+```text
 
 #### Outbound (Agent → NATS)
 
 **ACP Message from Agent:**
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -168,10 +174,11 @@ Payload: {
     ]
   }
 }
-```
+```text
 
 **Translated to NATS:**
-```
+
+```text
 Topic: sessions.sess_123.results.coding
 Payload: {
   "id": "msg_123",
@@ -184,11 +191,12 @@ Payload: {
     }
   }
 }
-```
+```text
 
 ## Data Models
 
 ### Connection
+
 ```go
 type Connection struct {
     ID           string
@@ -200,9 +208,10 @@ type Connection struct {
     LastActivity time.Time
     Alive        bool
 }
-```
+```text
 
 ### Message Envelope (Internal)
+
 ```go
 type InternalMessage struct {
     ID        string                 `json:"id"`
@@ -210,9 +219,10 @@ type InternalMessage struct {
     Type      string                 `json:"type"`
     Payload   map[string]interface{} `json:"payload"`
 }
-```
+```text
 
 ### ACP Message (External)
+
 ```go
 type ACPMessage struct {
     JSONRPC string                 `json:"jsonrpc"`
@@ -228,7 +238,7 @@ type ACPError struct {
     Message string `json:"message"`
     Data    any    `json:"data,omitempty"`
 }
-```
+```text
 
 ## State Management
 
@@ -241,17 +251,19 @@ type Relay struct {
     routes      map[string]*Connection  // session_id:role → connection
     mu          sync.RWMutex
 }
-```
+```text
 
 **Lookup strategies:**
+
 1. By agent_id: Direct map lookup
 2. By session_id + role: Composite key `sess_123:coding`
 
 **Connection lifecycle:**
-```
+
+```text
 Agent connects → Register in maps → Subscribe to NATS topic
 Agent disconnects → Remove from maps → Publish disconnect event
-```
+```text
 
 ## Configuration
 
@@ -263,9 +275,10 @@ type Config struct {
     PongTimeout  int    // WebSocket pong timeout (seconds)
     MaxMsgSize   int    // Max WebSocket message size (bytes)
 }
-```
+```text
 
 **Environment Variables:**
+
 - `OUROCODUS_RELAY_PORT`
 - `OUROCODUS_NATS_URL`
 - `OUROCODUS_PING_INTERVAL`
@@ -281,6 +294,7 @@ type Config struct {
 **Step 4:** Send over WebSocket
 
 **Mapping:**
+
 ```go
 var messageTypeToACPMethod = map[string]string{
     "work.coding":  "sampling/createMessage",
@@ -288,7 +302,7 @@ var messageTypeToACPMethod = map[string]string{
     "work.review":  "sampling/createMessage",
     "tool_result":  "sampling/createMessage", // Continue conversation
 }
-```
+```text
 
 ### ACP → NATS
 
@@ -298,6 +312,7 @@ var messageTypeToACPMethod = map[string]string{
 **Step 4:** Publish to NATS
 
 **Mapping:**
+
 ```go
 func translateACPToInternal(acp *ACPMessage) *InternalMessage {
     if acp.Result != nil {
@@ -324,7 +339,7 @@ func translateACPToInternal(acp *ACPMessage) *InternalMessage {
     }
     return nil
 }
-```
+```text
 
 ## Connection Management
 
@@ -347,7 +362,7 @@ func (r *Relay) maintainConnection(conn *Connection) {
         }
     }
 }
-```
+```text
 
 ### Reconnection
 
@@ -357,6 +372,7 @@ func (r *Relay) maintainConnection(conn *Connection) {
 ### Disconnect Handling
 
 **On disconnect:**
+
 1. Remove from connection registry
 2. Publish event to NATS: `sessions.{id}.events` → `agent.disconnected`
 3. Close WebSocket
@@ -393,6 +409,7 @@ func (r *Relay) maintainConnection(conn *Connection) {
 
 **POC:** No authentication, localhost only
 **Post-POC:**
+
 - TLS for WebSocket connections
 - Agent authentication tokens
 - Message signing/verification
@@ -401,6 +418,7 @@ func (r *Relay) maintainConnection(conn *Connection) {
 ## Logging
 
 **Structured logging (JSON):**
+
 ```json
 {
   "timestamp": "2025-10-22T10:00:00Z",
@@ -411,9 +429,10 @@ func (r *Relay) maintainConnection(conn *Connection) {
   "agent_id": "agent_abc",
   "role": "coding"
 }
-```
+```text
 
 **Log events:**
+
 - Agent connect/disconnect
 - Message sent/received
 - Protocol translation
@@ -430,16 +449,19 @@ func (r *Relay) maintainConnection(conn *Connection) {
 ## Testing
 
 ### Unit Tests
+
 - Protocol translation (NATS ↔ ACP)
 - Connection registry operations
 - Message routing logic
 
 ### Integration Tests
+
 - Real WebSocket connections
 - Real NATS server
 - End-to-end message flow
 
 ### Load Tests
+
 - Multiple concurrent agents
 - High message throughput
 - Connection churn (connect/disconnect)
@@ -453,15 +475,15 @@ func (r *Relay) maintainConnection(conn *Connection) {
 
 ## Dependencies
 
-```
+```text
 go.mod:
   - github.com/nats-io/nats.go
   - github.com/gorilla/websocket
-```
+```text
 
 ## File Structure
 
-```
+```text
 cmd/relay/
   main.go              # Entry point
   server.go            # WebSocket server
@@ -469,11 +491,12 @@ cmd/relay/
   translator.go        # Protocol translation
   registry.go          # Connection management
   config.go            # Configuration
-```
+```text
 
 ## Success Criteria
 
 Relay is complete when:
+
 1. Agent can connect via WebSocket
 2. Messages route: NATS → Agent
 3. Messages route: Agent → NATS
