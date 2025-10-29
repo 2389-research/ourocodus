@@ -57,9 +57,12 @@ simulate_request() {
     # More variance under load
     local variance=30
     local rand=$((RANDOM % (variance * 2) - variance))
-    local latency=$(echo "$base_latency * (100 + $rand) / 100 + $load_factor" | bc)
+    local latency
+    latency=$(echo "$base_latency * (100 + $rand) / 100 + $load_factor" | bc)
 
-    sleep $(echo "scale=3; $latency / 1000" | bc) 2>/dev/null || sleep 0.1
+    local sleep_duration
+    sleep_duration=$(echo "scale=3; $latency / 1000" | bc)
+    sleep "$sleep_duration" 2>/dev/null || sleep 0.1
     echo "$latency"
 }
 
@@ -69,7 +72,7 @@ simulate_user() {
     local base_latency=$3
     local requests=$4
 
-    for i in $(seq 1 $requests); do
+    for _ in $(seq 1 "$requests"); do
         # Calculate load factor (increases with concurrent users)
         local load_factor=0
         if [ "$version" = "old" ]; then
@@ -80,11 +83,14 @@ simulate_user() {
             load_factor=$(echo "$CONCURRENT_USERS * 3" | bc)
         fi
 
-        local latency=$(simulate_request $base_latency $load_factor)
+        local latency
+        latency=$(simulate_request "$base_latency" "$load_factor")
         record_metric "$version" "$latency" true
 
         # Small random delay between requests
-        sleep $(echo "scale=2; $RANDOM % 100 / 100" | bc) 2>/dev/null || sleep 0.05
+        local delay
+        delay=$(echo "scale=2; $RANDOM % 100 / 100" | bc)
+        sleep "$delay" 2>/dev/null || sleep 0.05
     done
 }
 
@@ -101,10 +107,11 @@ run_load_test() {
     echo -e "  ${MAGENTA}📊 Each user making ${REQUESTS_PER_USER} requests...${NC}"
     echo ""
 
-    local start_time=$(date +%s)
+    local start_time
+    start_time=$(date +%s)
 
     # Launch concurrent users as background jobs
-    for user_id in $(seq 1 $CONCURRENT_USERS); do
+    for user_id in $(seq 1 "$CONCURRENT_USERS"); do
         simulate_user "$user_id" "$version" "$base_latency" "$REQUESTS_PER_USER" &
     done
 
@@ -112,9 +119,10 @@ run_load_test() {
     local total_requests=$((CONCURRENT_USERS * REQUESTS_PER_USER))
     local completed=0
 
-    while [ $completed -lt $total_requests ]; do
+    while [ "$completed" -lt "$total_requests" ]; do
         # Query visualization server for current count
-        local current=$(curl -s http://localhost:${VIZ_PORT}/api/stats | \
+        local current
+        current=$(curl -s http://localhost:${VIZ_PORT}/api/stats | \
             grep -o "\"request_count\":[0-9]*" | tail -1 | grep -o "[0-9]*" || echo "0")
 
         if [ -n "$current" ] && [ "$current" -gt "$completed" ]; then
@@ -135,14 +143,16 @@ run_load_test() {
     # Wait for all background jobs to complete
     wait
 
-    local end_time=$(date +%s)
+    local end_time
+    end_time=$(date +%s)
     local duration=$((end_time - start_time))
 
     echo ""
     echo ""
 
     # Calculate throughput
-    local throughput=$(echo "scale=2; $total_requests / $duration" | bc)
+    local throughput
+    throughput=$(echo "scale=2; $total_requests / $duration" | bc)
 
     echo -e "  ${color}📊 Results:${NC}"
     echo -e "     Concurrent Users: ${color}${CONCURRENT_USERS}${NC}"
@@ -181,7 +191,7 @@ main() {
 
     # Wait for server
     echo -n "   Waiting for server to start"
-    for i in {1..10}; do
+    for _ in {1..10}; do
         if curl -s http://localhost:${VIZ_PORT} > /dev/null 2>&1; then
             echo ""
             break
@@ -213,7 +223,7 @@ main() {
     echo -e "${RED}   (No connection pooling - suffers under concurrent load)${NC}"
     echo ""
     sleep 2
-    run_load_test "old" $OLD_BASE_LATENCY "❌ OLD VERSION - LOAD TEST" "$RED"
+    run_load_test "old" "$OLD_BASE_LATENCY" "❌ OLD VERSION - LOAD TEST" "$RED"
 
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo ""
@@ -224,14 +234,16 @@ main() {
     echo -e "${GREEN}   (With connection pooling - handles load efficiently)${NC}"
     echo ""
     sleep 2
-    run_load_test "new" $NEW_BASE_LATENCY "✅ NEW VERSION - LOAD TEST" "$GREEN"
+    run_load_test "new" "$NEW_BASE_LATENCY" "✅ NEW VERSION - LOAD TEST" "$GREEN"
 
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo ""
 
     # Summary
-    local improvement=$(echo "scale=1; ($OLD_BASE_LATENCY - $NEW_BASE_LATENCY) / $OLD_BASE_LATENCY * 100" | bc)
-    local capacity_increase=$(echo "scale=1; $OLD_BASE_LATENCY / $NEW_BASE_LATENCY" | bc)
+    local improvement
+    improvement=$(echo "scale=1; ($OLD_BASE_LATENCY - $NEW_BASE_LATENCY) / $OLD_BASE_LATENCY * 100" | bc)
+    local capacity_increase
+    capacity_increase=$(echo "scale=1; $OLD_BASE_LATENCY / $NEW_BASE_LATENCY" | bc)
 
     echo -e "${GREEN}🎉 LOAD TEST COMPLETE!${NC}"
     echo ""
