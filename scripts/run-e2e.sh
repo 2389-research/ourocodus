@@ -133,6 +133,7 @@ fi
 # Run tests from project root with unbuffered output
 # Using | cat forces line-buffered output instead of block-buffered
 cd "$PROJECT_ROOT"
+# shellcheck disable=SC2086
 if go test $TEST_FLAGS -timeout 10m ./tests/e2e/... 2>&1 | cat; then
     echo ""
     log_success "E2E tests passed!"
