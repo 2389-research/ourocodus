@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Ourocodus - Multi-Agent AI Development Platform">
+    <meta name="theme-color" content="#1a1a2e">
+    <title>Ourocodus</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <h1 class="title">Ourocodus</h1>
+            <div class="connection-status" id="connectionStatus">
+                <span class="status-indicator" id="statusIndicator"></span>
+                <span class="status-text" id="statusText">Disconnected</span>
+            </div>
+        </header>
+
+        <main class="main-content">
+            <div class="card welcome-card">
+                <h2>Welcome to Ourocodus</h2>
+                <p>Multi-agent AI development platform powered by Claude Code</p>
+                <button class="btn btn-primary" id="newProjectBtn">
+                    <span class="btn-icon">+</span>
+                    New Project
+                </button>
+            </div>
+
+            <div class="card info-card" id="sessionInfo" style="display: none;">
+                <h3>Session Information</h3>
+                <div class="info-content">
+                    <div class="info-item">
+                        <span class="info-label">Session ID:</span>
+                        <span class="info-value" id="sessionId">-</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">Status:</span>
+                        <span class="info-value" id="sessionStatus">Initializing...</span>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <footer class="footer">
+            <p>Powered by Claude Code ACP</p>
+        </footer>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
