@@ -1,6 +1,7 @@
 package relay
 
 import (
+	"os"
 	"time"
 
 	"github.com/2389-research/ourocodus/pkg/relay/session"
@@ -68,6 +69,10 @@ func NewSessionManager(logger Logger, clock Clock, idGen IDGenerator) (*session.
 		return nil, err
 	}
 
-	// Use default base workspace directory ("./workspaces")
-	return session.NewManager(store, sessionIDGen, sessionClock, cleaner, sessionLogger, clientFactory, ""), nil
+	// Use base workspace directory from env or default to "./workspaces"
+	baseWorkspaceDir := os.Getenv("WORKSPACE_BASE_DIR")
+	if baseWorkspaceDir == "" {
+		baseWorkspaceDir = "./workspaces"
+	}
+	return session.NewManager(store, sessionIDGen, sessionClock, cleaner, sessionLogger, clientFactory, baseWorkspaceDir), nil
 }
