@@ -2,7 +2,6 @@ package e2e
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -136,7 +135,7 @@ func buildRelay(t *testing.T, ctx context.Context) {
 
 	// Create bin directory if it doesn't exist
 	binDir := filepath.Join(projectRoot, "bin")
-	if err := os.MkdirAll(binDir, 0755); err != nil {
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
 		t.Fatalf("Failed to create bin directory: %v", err)
 	}
 
@@ -307,4 +306,3 @@ func truncateString(s string, maxLen int) string {
 	}
 	return s[:maxLen] + "..."
 }
-
