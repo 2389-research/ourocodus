@@ -62,7 +62,7 @@ func StartRelay(ctx context.Context, binaryPath string, port string) (*RelayServ
 
 	// Wait for server to be ready (shorter timeout for faster failure)
 	if err := server.WaitForHealth(fmt.Sprintf("http://localhost:%s", port), 10*time.Second); err != nil {
-		server.Stop()
+		_ = server.Stop() // Ignore stop error when health check fails
 		return nil, fmt.Errorf("relay server failed to become healthy: %w", err)
 	}
 
