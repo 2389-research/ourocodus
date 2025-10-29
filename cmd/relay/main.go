@@ -46,6 +46,10 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", server.HandleWebSocket)
 
+	// Serve PWA static files from web directory
+	fs := http.FileServer(http.Dir("./web"))
+	mux.Handle("/", fs)
+
 	httpServer := &http.Server{
 		Addr:              fmt.Sprintf(":%d", port),
 		Handler:           mux,
@@ -55,6 +59,7 @@ func main() {
 	// Start server in goroutine
 	go func() {
 		log.Printf("Relay server starting on port %d", port)
+		log.Printf("PWA available at: http://localhost:%d/", port)
 		log.Printf("WebSocket endpoint: ws://localhost:%d/ws", port)
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("Server error: %v", err)
