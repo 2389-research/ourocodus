@@ -82,7 +82,7 @@ func (s *RelayServer) WaitForHealth(baseURL string, timeout time.Duration) error
 		attempts++
 		resp, err := client.Get(healthURL)
 		if err == nil {
-			resp.Body.Close()
+			_ = resp.Body.Close() // Ignore close error in health check
 			if resp.StatusCode == http.StatusOK {
 				fmt.Printf("[Health Check] Server is healthy after %d attempts\n", attempts)
 				return nil

@@ -97,7 +97,9 @@ func TestE2EFullFlow(t *testing.T) {
 func checkPrerequisites(t *testing.T) {
 	// Check ANTHROPIC_API_KEY
 	apiKey := os.Getenv("ANTHROPIC_API_KEY")
-	require.NotEmpty(t, apiKey, "ANTHROPIC_API_KEY environment variable must be set")
+	if apiKey == "" {
+		t.Skip("Skipping E2E test: ANTHROPIC_API_KEY not set (required for real API calls)")
+	}
 
 	// Check claude-code-acp is in PATH
 	// We'll skip this for now since the worktree setup should handle it
@@ -306,11 +308,3 @@ func truncateString(s string, maxLen int) string {
 	return s[:maxLen] + "..."
 }
 
-// Helper to pretty print JSON for debugging
-func prettyPrintJSON(data interface{}) string {
-	b, err := json.MarshalIndent(data, "", "  ")
-	if err != nil {
-		return fmt.Sprintf("%v", data)
-	}
-	return string(b)
-}

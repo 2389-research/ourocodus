@@ -42,6 +42,7 @@ func GetWorktreeCommits(ctx context.Context, worktreePath string, since time.Tim
 
 	// Get commit count since the specified time
 	sinceStr := since.Format(time.RFC3339)
+	// #nosec G204 -- worktreePath is validated to be under project root, not user input
 	cmd := exec.CommandContext(ctx, "git", "-C", worktreePath, "rev-list", "--count", fmt.Sprintf("--since=%s", sinceStr), "HEAD")
 
 	output, err := cmd.CombinedOutput()
