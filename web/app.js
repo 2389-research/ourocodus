@@ -122,6 +122,11 @@ class RelayConnection {
         const sessionIdEl = document.getElementById('sessionId');
         const sessionStatusEl = document.getElementById('sessionStatus');
 
+        if (!sessionInfoCard || !sessionIdEl || !sessionStatusEl) {
+            console.error('[RelayConnection] Session UI elements not found');
+            return;
+        }
+
         sessionInfoCard.style.display = 'block';
         sessionIdEl.textContent = message.session_id;
         sessionStatusEl.textContent = 'Active';
@@ -134,9 +139,14 @@ class RelayConnection {
      */
     handleError(message) {
         const sessionStatusEl = document.getElementById('sessionStatus');
-        if (sessionStatusEl) {
-            sessionStatusEl.textContent = `Error: ${message.message || 'Unknown error'}`;
+
+        if (!sessionStatusEl) {
+            console.error('[RelayConnection] Session status element not found');
+            return;
         }
+
+        sessionStatusEl.textContent = `Error: ${message.message || 'Unknown error'}`;
+        console.log('[RelayConnection] Error displayed:', message.message || 'Unknown error');
     }
 
     /**
@@ -164,7 +174,8 @@ class RelayConnection {
      */
     createSession() {
         const message = {
-            type: 'session:create'
+            type: 'session:create',
+            version: '1.0'
         };
 
         if (!this.sendMessage(message)) {
@@ -254,6 +265,9 @@ class RelayConnection {
 class App {
     constructor() {
         this.connection = new RelayConnection();
+        this.connectionCheckInterval = null;
+        this.connectionCheckTimeout = null;
+        this.isConnecting = false;
         this.init();
     }
 
@@ -275,8 +289,15 @@ class App {
     handleNewProject() {
         const btn = document.getElementById('newProjectBtn');
 
+        // Reentrancy guard: prevent multiple simultaneous connection attempts
+        if (this.isConnecting) {
+            console.log('[App] Connection attempt already in progress, ignoring click');
+            return;
+        }
+
         if (!this.connection.isConnected) {
             console.log('[App] Not connected, initiating connection...');
+            this.isConnecting = true;
             btn.disabled = true;
             btn.textContent = 'Connecting...';
 
@@ -284,9 +305,15 @@ class App {
             this.connection.connect();
 
             // Wait for connection, then create session
-            const checkConnection = setInterval(() => {
+            this.connectionCheckInterval = setInterval(() => {
                 if (this.connection.isConnected) {
-                    clearInterval(checkConnection);
+                    // Clean up interval and timeout
+                    clearInterval(this.connectionCheckInterval);
+                    clearTimeout(this.connectionCheckTimeout);
+                    this.connectionCheckInterval = null;
+                    this.connectionCheckTimeout = null;
+                    this.isConnecting = false;
+
                     console.log('[App] Connected, creating session...');
                     this.connection.createSession();
                     btn.disabled = false;
@@ -295,8 +322,13 @@ class App {
             }, 100);
 
             // Timeout after 10 seconds
-            setTimeout(() => {
-                clearInterval(checkConnection);
+            this.connectionCheckTimeout = setTimeout(() => {
+                // Clean up interval and reset state
+                clearInterval(this.connectionCheckInterval);
+                this.connectionCheckInterval = null;
+                this.connectionCheckTimeout = null;
+                this.isConnecting = false;
+
                 if (!this.connection.isConnected) {
                     console.error('[App] Connection timeout');
                     btn.disabled = false;
