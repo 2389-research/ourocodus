@@ -12,14 +12,20 @@
     <div class="container">
         <header class="header">
             <h1 class="title">Ourocodus</h1>
-            <div class="connection-status" id="connectionStatus">
-                <span class="status-indicator" id="statusIndicator"></span>
-                <span class="status-text" id="statusText">Disconnected</span>
+            <div class="connection-controls">
+                <div class="connection-status" id="connectionStatus">
+                    <span class="status-indicator" id="statusIndicator"></span>
+                    <span class="status-text" id="statusText">Disconnected</span>
+                </div>
+                <button class="btn btn-danger btn-small" id="disconnectBtn" style="display: none;" title="Close WebSocket connection only. Server will cleanup session automatically. UI state remains visible.">
+                    <span class="btn-icon">⏻</span>
+                    Disconnect
+                </button>
             </div>
         </header>
 
         <main class="main-content">
-            <div class="card welcome-card">
+            <div class="card welcome-card" id="welcomeCard">
                 <h2>Welcome to Ourocodus</h2>
                 <p>Multi-agent AI development platform powered by Claude Code</p>
                 <button class="btn btn-primary" id="newProjectBtn">
@@ -29,7 +35,13 @@
             </div>
 
             <div class="card info-card" id="sessionInfo" style="display: none;">
-                <h3>Session Information</h3>
+                <div class="card-header">
+                    <h3>Session Information</h3>
+                    <button class="btn btn-danger btn-small" id="endSessionBtn" title="Terminate all agents, end session, disconnect, and reset demo to initial state">
+                        <span class="btn-icon">🗑️</span>
+                        End Session
+                    </button>
+                </div>
                 <div class="info-content">
                     <div class="info-item">
                         <span class="info-label">Session ID:</span>
@@ -40,12 +52,115 @@
                         <span class="info-value" id="sessionStatus">Initializing...</span>
                     </div>
                 </div>
+
+                <div class="agent-spawn-section" id="agentSpawnSection">
+                    <h3>Spawn Agent</h3>
+                    <div class="form-group">
+                        <label for="agentRole">Agent Role:</label>
+                        <input type="text" id="agentRole" value="echo" placeholder="echo">
+                    </div>
+                    <div class="form-group">
+                        <label for="agentWorkspace">Workspace:</label>
+                        <input type="text" id="agentWorkspace" value="./workspaces/demo" placeholder="./workspaces/demo">
+                    </div>
+                    <button class="btn btn-secondary" id="spawnAgentBtn">
+                        <span class="btn-icon">🤖</span>
+                        Spawn Agent
+                    </button>
+                </div>
+            </div>
+
+            <div class="card agent-card" id="agentCard" style="display: none;">
+                <div class="card-header">
+                    <div class="agent-info">
+                        <h3>Agent: <span id="agentRoleDisplay">-</span></h3>
+                        <div class="agent-status" id="agentStatus">Ready</div>
+                    </div>
+                    <button class="btn btn-danger btn-small" id="terminateAgentBtn" title="Terminate only this agent. Session remains active, you can spawn a new agent.">
+                        <span class="btn-icon">×</span>
+                        Terminate
+                    </button>
+                </div>
+
+                <div class="chat-section">
+                    <label class="input-label">Conversation</label>
+                    <div class="message-history" id="messageHistory">
+                        <!-- Messages will appear here -->
+                    </div>
+                </div>
+
+                <div class="message-input-section">
+                    <label class="input-label">Your message</label>
+                    <textarea id="messageInput" placeholder="Type your message and press Enter..." rows="3"></textarea>
+                    <button class="btn btn-primary" id="sendMessageBtn">
+                        <span class="btn-icon">→</span>
+                        Send Message
+                    </button>
+                </div>
             </div>
         </main>
 
         <footer class="footer">
             <p>Powered by Claude Code ACP</p>
         </footer>
+    </div>
+
+    <!-- Disconnect Confirmation Modal -->
+    <div class="modal" id="disconnectModal" style="display: none;">
+        <div class="modal-overlay" aria-hidden="true"></div>
+        <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="disconnectModalTitle" aria-describedby="disconnectModalDesc">
+            <h3 id="disconnectModalTitle">Disconnect from Relay?</h3>
+            <div id="disconnectModalDesc">
+                <p>This will close the WebSocket connection to the relay server.</p>
+                <p class="modal-warning">⚠️ Note: The server will automatically clean up your session and agents when you disconnect.</p>
+                <p class="modal-info">ℹ️ Your UI state will remain visible so you can review messages and session details.</p>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" id="cancelDisconnect" aria-label="Cancel disconnect">Cancel</button>
+                <button class="btn btn-danger" id="confirmDisconnect" aria-label="Confirm disconnect">
+                    <span class="btn-icon" aria-hidden="true">⏻</span>
+                    Disconnect
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- End Session Confirmation Modal -->
+    <div class="modal" id="endSessionModal" style="display: none;">
+        <div class="modal-overlay" aria-hidden="true"></div>
+        <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="endSessionModalTitle" aria-describedby="endSessionModalDesc">
+            <h3 id="endSessionModalTitle">End Session?</h3>
+            <div id="endSessionModalDesc">
+                <p>This will terminate the session, close all agents, and disconnect from the relay.</p>
+                <p class="modal-warning">⚠️ All agents will be terminated and the demo will reset to its initial state.</p>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" id="cancelEndSession" aria-label="Cancel end session">Cancel</button>
+                <button class="btn btn-danger" id="confirmEndSession" aria-label="Confirm end session">
+                    <span class="btn-icon" aria-hidden="true">🗑️</span>
+                    End Session
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Terminate Agent Confirmation Modal -->
+    <div class="modal" id="terminateAgentModal" style="display: none;">
+        <div class="modal-overlay" aria-hidden="true"></div>
+        <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="terminateAgentModalTitle" aria-describedby="terminateAgentModalDesc">
+            <h3 id="terminateAgentModalTitle">Terminate Agent?</h3>
+            <div id="terminateAgentModalDesc">
+                <p>This will terminate the agent <strong id="terminateAgentRole">-</strong> and close its workspace.</p>
+                <p class="modal-info">ℹ️ The session will remain active, and you can spawn a new agent if needed.</p>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" id="cancelTerminateAgent" aria-label="Cancel terminate agent">Cancel</button>
+                <button class="btn btn-danger" id="confirmTerminateAgent" aria-label="Confirm terminate agent">
+                    <span class="btn-icon" aria-hidden="true">×</span>
+                    Terminate Agent
+                </button>
+            </div>
+        </div>
     </div>
 
     <script src="app.js"></script>

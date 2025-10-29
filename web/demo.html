@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Protocol Inspector - Ourocodus PWA</title>
+    <link rel="stylesheet" href="/demo.css">
+</head>
+<body>
+    <div class="container">
+        <div class="left-panel">
+            <iframe id="pwa-frame" src="/?demo=true" title="PWA Interface"></iframe>
+        </div>
+        <div class="right-panel">
+            <div class="message-stream">
+                <h2>Message Stream</h2>
+                <div id="message-list"></div>
+            </div>
+            <div class="connection-state">
+                <h2>Connection</h2>
+                <div id="state-indicator" class="state-disconnected">Connection: disconnected</div>
+            </div>
+            <div class="session-info">
+                <div id="session-panel">
+                    <h3>Session</h3>
+                    <div>No session</div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script src="/demo.js"></script>
+</body>
+</html>

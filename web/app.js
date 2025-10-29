@@ -3,6 +3,86 @@
  * Handles connection lifecycle, error handling, and reconnection strategies
  */
 
+/**
+ * Modal Manager - Handles modal display and interaction
+ */
+class ModalManager {
+    constructor(modalId) {
+        this.modal = document.getElementById(modalId);
+        this.overlay = null;
+        this.confirmBtn = null;
+        this.cancelBtn = null;
+        this.onConfirm = null;
+        this.onCancel = null;
+
+        if (!this.modal) {
+            console.error('[ModalManager] Modal not found:', modalId);
+            return;
+        }
+
+        // Find overlay and buttons
+        this.overlay = this.modal.querySelector('.modal-overlay');
+        this.confirmBtn = this.modal.querySelector('[id^="confirm"]');
+        this.cancelBtn = this.modal.querySelector('[id^="cancel"]');
+
+        // Setup event listeners
+        this.setupListeners();
+    }
+
+    setupListeners() {
+        // Confirm button
+        if (this.confirmBtn) {
+            this.confirmBtn.addEventListener('click', () => {
+                if (this.onConfirm) {
+                    this.onConfirm();
+                }
+                this.hide();
+            });
+        }
+
+        // Cancel button
+        if (this.cancelBtn) {
+            this.cancelBtn.addEventListener('click', () => {
+                if (this.onCancel) {
+                    this.onCancel();
+                }
+                this.hide();
+            });
+        }
+
+        // Overlay click
+        if (this.overlay) {
+            this.overlay.addEventListener('click', () => {
+                if (this.onCancel) {
+                    this.onCancel();
+                }
+                this.hide();
+            });
+        }
+    }
+
+    show(options = {}) {
+        if (!this.modal) return;
+
+        // Update callbacks
+        this.onConfirm = options.onConfirm || null;
+        this.onCancel = options.onCancel || null;
+
+        // Update dynamic content if provided
+        if (options.updateContent) {
+            options.updateContent(this.modal);
+        }
+
+        // Show modal
+        this.modal.style.display = 'flex';
+    }
+
+    hide() {
+        if (!this.modal) return;
+        this.modal.style.display = 'none';
+    }
+}
+
 class RelayConnection {
     constructor() {
         this.ws = null;
@@ -101,6 +181,16 @@ class RelayConnection {
                     this.handleSessionCreated(message);
                     break;
 
+                case 'agent:ready':
+                    console.log('[RelayConnection] Agent ready:', message);
+                    this.handleAgentReady(message);
+                    break;
+
+                case 'agent:response':
+                    console.log('[RelayConnection] Agent response:', message);
+                    this.handleAgentResponse(message);
+                    break;
+
                 case 'error':
                     console.error('[RelayConnection] Server error:', message);
                     this.handleError(message);
@@ -121,10 +211,16 @@ class RelayConnection {
         const sessionInfoCard = document.getElementById('sessionInfo');
         const sessionIdEl = document.getElementById('sessionId');
         const sessionStatusEl = document.getElementById('sessionStatus');
+        const welcomeCard = document.getElementById('welcomeCard');
 
         if (!sessionInfoCard || !sessionIdEl || !sessionStatusEl) {
             console.error('[RelayConnection] Session UI elements not found');
             return;
+        }
+
+        // Hide welcome card, show session info
+        if (welcomeCard) {
+            welcomeCard.style.display = 'none';
         }
 
         sessionInfoCard.style.display = 'block';
@@ -135,24 +231,127 @@ class RelayConnection {
     }
 
     /**
-     * Handle error messages from server
+     * Handle agent:ready response
      */
-    handleError(message) {
-        const sessionStatusEl = document.getElementById('sessionStatus');
+    handleAgentReady(message) {
+        const agentCard = document.getElementById('agentCard');
+        const agentRoleDisplay = document.getElementById('agentRoleDisplay');
+        const agentSpawnSection = document.getElementById('agentSpawnSection');
 
-        if (!sessionStatusEl) {
-            console.error('[RelayConnection] Session status element not found');
+        if (!agentCard || !agentRoleDisplay) {
+            console.error('[RelayConnection] Agent card elements not found');
             return;
         }
 
-        sessionStatusEl.textContent = `Error: ${message.message || 'Unknown error'}`;
-        console.log('[RelayConnection] Error displayed:', message.message || 'Unknown error');
+        // Hide spawn section, show agent card
+        if (agentSpawnSection) {
+            agentSpawnSection.style.display = 'none';
+        }
+
+        agentCard.style.display = 'block';
+        agentRoleDisplay.textContent = message.role;
+        this.currentAgentRole = message.role;
+
+        // Add welcome message from agent
+        this.displayMessage('agent', `Hi! I'm ${message.role}. I'm here to help. Send me a message to get started!`);
+
+        console.log('[RelayConnection] Agent UI displayed for role:', message.role);
+    }
+
+    /**
+     * Handle agent:response message
+     */
+    handleAgentResponse(message) {
+        this.displayMessage('agent', message.content);
+        console.log('[RelayConnection] Agent response displayed');
+    }
+
+    /**
+     * Display a message in the message history
+     */
+    displayMessage(sender, content) {
+        const messageHistory = document.getElementById('messageHistory');
+        if (!messageHistory) {
+            console.error('[RelayConnection] Message history element not found');
+            return;
+        }
+
+        const messageEl = document.createElement('div');
+        messageEl.className = `message message-${sender}`;
+
+        const senderEl = document.createElement('div');
+        senderEl.className = 'message-sender';
+        senderEl.textContent = sender;
+
+        const contentEl = document.createElement('div');
+        contentEl.className = 'message-content';
+        contentEl.textContent = content;
+
+        const timeEl = document.createElement('div');
+        timeEl.className = 'message-time';
+        timeEl.textContent = new Date().toLocaleTimeString();
+
+        messageEl.appendChild(senderEl);
+        messageEl.appendChild(contentEl);
+        messageEl.appendChild(timeEl);
+
+        messageHistory.appendChild(messageEl);
+        messageHistory.scrollTop = messageHistory.scrollHeight;
+    }
+
+    /**
+     * Handle error messages from server
+     */
+    handleError(message) {
+        console.error('[RelayConnection] Server error:', message);
+
+        // Extract error details
+        const errorCode = message.error?.code || message.code || 'UNKNOWN_ERROR';
+        const errorMessage = message.error?.message || message.message || 'Unknown error occurred';
+        const recoverable = message.error?.recoverable !== false;
+
+        // Show error in a prominent way
+        this.showErrorNotification(errorCode, errorMessage, recoverable);
+    }
+
+    /**
+     * Show error notification
+     */
+    showErrorNotification(code, message, recoverable) {
+        // Create error notification element
+        const errorDiv = document.createElement('div');
+        errorDiv.className = 'error-notification';
+        errorDiv.innerHTML = `
+            <div class="error-header">
+                <span class="error-icon">⚠️</span>
+                <span class="error-code">${code}</span>
+                <button class="error-close">&times;</button>
+            </div>
+            <div class="error-message">${message}</div>
+            ${recoverable ? '<div class="error-hint">You can retry this operation</div>' : '<div class="error-hint error-fatal">This error is not recoverable</div>'}
+        `;
+
+        // Add to page
+        document.body.appendChild(errorDiv);
+
+        // Auto-dismiss after 10 seconds
+        setTimeout(() => {
+            errorDiv.classList.add('error-fade-out');
+            setTimeout(() => errorDiv.remove(), 300);
+        }, 10000);
+
+        // Close button
+        errorDiv.querySelector('.error-close').addEventListener('click', () => {
+            errorDiv.classList.add('error-fade-out');
+            setTimeout(() => errorDiv.remove(), 300);
+        });
     }
 
     /**
      * Send a message to the relay
      */
     sendMessage(message) {
+        console.log('[RelayConnection] sendMessage debug - isConnected:', this.isConnected, 'ws:', !!this.ws, 'readyState:', this.ws?.readyState, 'OPEN:', WebSocket.OPEN);
         if (!this.isConnected || !this.ws || this.ws.readyState !== WebSocket.OPEN) {
             console.error('[RelayConnection] Cannot send message: not connected');
             return false;
@@ -188,6 +387,92 @@ class RelayConnection {
     }
 
     /**
+     * Spawn an agent in the current session
+     */
+    spawnAgent(role, workspace) {
+        if (!this.sessionId) {
+            console.error('[RelayConnection] Cannot spawn agent: no session');
+            return false;
+        }
+
+        const message = {
+            type: 'agent:spawn',
+            version: '1.0',
+            sessionId: this.sessionId,
+            role: role,
+            workspace: workspace
+        };
+
+        console.log('[RelayConnection] Spawning agent:', message);
+        return this.sendMessage(message);
+    }
+
+    /**
+     * Send a message to an agent
+     */
+    sendAgentMessage(role, content) {
+        if (!this.sessionId) {
+            console.error('[RelayConnection] Cannot send message: no session');
+            return false;
+        }
+
+        const message = {
+            type: 'agent:message',
+            version: '1.0',
+            sessionId: this.sessionId,
+            role: role,
+            content: content
+        };
+
+        // Display user message immediately
+        this.displayMessage('user', content);
+
+        console.log('[RelayConnection] Sending agent message:', message);
+        return this.sendMessage(message);
+    }
+
+    /**
+     * End the current session (Phase 3 feature)
+     * Sends session:end message to server for graceful shutdown
+     */
+    endSession() {
+        if (!this.sessionId) {
+            console.error('[RelayConnection] Cannot end session: no session');
+            return false;
+        }
+
+        const message = {
+            type: 'session:end',
+            version: '1.0',
+            sessionId: this.sessionId
+        };
+
+        console.log('[RelayConnection] Ending session:', message);
+        return this.sendMessage(message);
+    }
+
+    /**
+     * Terminate a specific agent (Phase 3 feature)
+     * Sends agent:terminate message to server
+     */
+    terminateAgent(role) {
+        if (!this.sessionId) {
+            console.error('[RelayConnection] Cannot terminate agent: no session');
+            return false;
+        }
+
+        const message = {
+            type: 'agent:terminate',
+            version: '1.0',
+            sessionId: this.sessionId,
+            role: role
+        };
+
+        console.log('[RelayConnection] Terminating agent:', message);
+        return this.sendMessage(message);
+    }
+
+    /**
      * Schedule a reconnection attempt with exponential backoff
      */
     scheduleReconnect() {
@@ -220,6 +505,7 @@ class RelayConnection {
     updateConnectionStatus(state, text) {
         const statusIndicator = document.getElementById('statusIndicator');
         const statusText = document.getElementById('statusText');
+        const disconnectBtn = document.getElementById('disconnectBtn');
 
         if (!statusIndicator || !statusText) {
             return;
@@ -228,10 +514,18 @@ class RelayConnection {
         // Update text
         statusText.textContent = text;
 
-        // Update indicator styling
-        statusIndicator.classList.remove('connected');
+        // Update indicator styling - remove all state classes first
+        statusIndicator.classList.remove('connected', 'connecting');
+
         if (state === 'connected') {
             statusIndicator.classList.add('connected');
+        } else if (state === 'connecting' || state === 'reconnecting') {
+            statusIndicator.classList.add('connecting');
+        }
+
+        // Show/hide disconnect button
+        if (disconnectBtn) {
+            disconnectBtn.style.display = (state === 'connected') ? 'flex' : 'none';
         }
 
         console.log('[RelayConnection] Status updated:', state, text);
@@ -239,9 +533,11 @@ class RelayConnection {
 
     /**
      * Disconnect from the relay
+     * @param {number} code - WebSocket close code (1000 = normal, 1001 = going away)
+     * @param {string} reason - Human-readable close reason
      */
-    disconnect() {
-        console.log('[RelayConnection] Disconnecting...');
+    disconnect(code = 1000, reason = 'Client disconnected') {
+        console.log('[RelayConnection] Disconnecting...', code, reason);
         this.shouldReconnect = false;
 
         if (this.reconnectTimeout) {
@@ -250,11 +546,21 @@ class RelayConnection {
         }
 
         if (this.ws) {
-            this.ws.close();
+            // Only close if WebSocket is in OPEN or CONNECTING state
+            if (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING) {
+                try {
+                    // Some browsers don't support reason parameter, so just use code
+                    this.ws.close(code);
+                } catch (e) {
+                    console.error('[RelayConnection] Error closing WebSocket:', e);
+                }
+            }
             this.ws = null;
         }
 
         this.isConnected = false;
+        this.sessionId = null;
+        this.currentAgentRole = null;
         this.updateConnectionStatus('disconnected', 'Disconnected');
     }
 }
@@ -268,6 +574,12 @@ class App {
         this.connectionCheckInterval = null;
         this.connectionCheckTimeout = null;
         this.isConnecting = false;
+
+        // Initialize modal managers
+        this.disconnectModal = new ModalManager('disconnectModal');
+        this.endSessionModal = new ModalManager('endSessionModal');
+        this.terminateAgentModal = new ModalManager('terminateAgentModal');
+
         this.init();
     }
 
@@ -283,7 +595,276 @@ class App {
             });
         }
 
+        // Setup Spawn Agent button handler
+        const spawnAgentBtn = document.getElementById('spawnAgentBtn');
+        if (spawnAgentBtn) {
+            spawnAgentBtn.addEventListener('click', () => {
+                console.log('[App] Spawn Agent button clicked');
+                this.handleSpawnAgent();
+            });
+        }
+
+        // Setup Send Message button handler
+        const sendMessageBtn = document.getElementById('sendMessageBtn');
+        if (sendMessageBtn) {
+            sendMessageBtn.addEventListener('click', () => {
+                console.log('[App] Send Message button clicked');
+                this.handleSendMessage();
+            });
+        }
+
+        // Setup Enter key in message input
+        const messageInput = document.getElementById('messageInput');
+        if (messageInput) {
+            messageInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    this.handleSendMessage();
+                }
+            });
+        }
+
+        // Setup Disconnect button handler (in header)
+        const disconnectBtn = document.getElementById('disconnectBtn');
+        if (disconnectBtn) {
+            disconnectBtn.addEventListener('click', () => {
+                console.log('[App] Disconnect button clicked');
+                this.disconnectModal.show({
+                    onConfirm: () => {
+                        console.log('[App] Disconnect confirmed');
+                        this.handleDisconnect();
+                    },
+                    onCancel: () => {
+                        console.log('[App] Disconnect cancelled');
+                    }
+                });
+            });
+        }
+
+        // Setup End Session button handler (in session card)
+        const endSessionBtn = document.getElementById('endSessionBtn');
+        if (endSessionBtn) {
+            endSessionBtn.addEventListener('click', () => {
+                console.log('[App] End Session button clicked');
+                this.endSessionModal.show({
+                    onConfirm: () => {
+                        console.log('[App] End Session confirmed');
+                        this.handleEndSession();
+                    },
+                    onCancel: () => {
+                        console.log('[App] End Session cancelled');
+                    }
+                });
+            });
+        }
+
+        // Setup Terminate Agent button handler (in agent card)
+        const terminateAgentBtn = document.getElementById('terminateAgentBtn');
+        if (terminateAgentBtn) {
+            terminateAgentBtn.addEventListener('click', () => {
+                console.log('[App] Terminate Agent button clicked');
+                this.terminateAgentModal.show({
+                    onConfirm: () => {
+                        console.log('[App] Terminate Agent confirmed');
+                        this.handleTerminateAgent();
+                    },
+                    onCancel: () => {
+                        console.log('[App] Terminate Agent cancelled');
+                    },
+                    updateContent: (modal) => {
+                        // Update role display in modal
+                        const roleDisplay = modal.querySelector('#terminateAgentRole');
+                        if (roleDisplay) {
+                            roleDisplay.textContent = this.connection.currentAgentRole || '-';
+                        }
+                    }
+                });
+            });
+        }
+
         console.log('[App] Initialization complete');
+    }
+
+    handleDisconnect() {
+        console.log('[App] Disconnecting from relay...');
+
+        // Disable disconnect button to prevent double-clicks
+        const disconnectBtn = document.getElementById('disconnectBtn');
+        if (disconnectBtn) {
+            disconnectBtn.disabled = true;
+        }
+
+        // Disconnect WebSocket with code 1000 (normal closure)
+        // Note: Server will still cleanup session/agents on disconnect
+        this.connection.disconnect(1000, 'User disconnected');
+
+        console.log('[App] Disconnect complete');
+
+        // Re-enable after a delay (button will be hidden anyway once disconnected)
+        setTimeout(() => {
+            if (disconnectBtn) {
+                disconnectBtn.disabled = false;
+            }
+        }, 1000);
+    }
+
+    handleEndSession() {
+        console.log('[App] Ending session and resetting...');
+
+        // Disable end session button to prevent double-clicks
+        const endSessionBtn = document.getElementById('endSessionBtn');
+        if (endSessionBtn) {
+            endSessionBtn.disabled = true;
+        }
+
+        // Try to send session:end message (Phase 3 feature)
+        // If server doesn't support it yet, will get error but we still disconnect
+        if (this.connection.endSession()) {
+            console.log('[App] session:end message sent');
+        } else {
+            console.log('[App] Could not send session:end (may not be connected)');
+        }
+
+        // Give server a moment to process, then disconnect
+        setTimeout(() => {
+            // Disconnect from relay with code 1001 (going away)
+            this.connection.disconnect(1001, 'Session ended by user');
+
+            // Reset all UI state
+            this.resetUI();
+
+            console.log('[App] End session complete');
+        }, 100);
+    }
+
+    handleTerminateAgent() {
+        console.log('[App] Terminating agent...');
+
+        const role = this.connection.currentAgentRole;
+        if (!role) {
+            console.error('[App] No agent to terminate');
+            return;
+        }
+
+        // Disable terminate button to prevent double-clicks
+        const terminateAgentBtn = document.getElementById('terminateAgentBtn');
+        if (terminateAgentBtn) {
+            terminateAgentBtn.disabled = true;
+        }
+
+        // Try to send agent:terminate message (Phase 3 feature)
+        // If server doesn't support it yet, will get error but we still update UI
+        if (this.connection.terminateAgent(role)) {
+            console.log('[App] agent:terminate message sent for role:', role);
+        } else {
+            console.log('[App] Could not send agent:terminate (may not be connected)');
+        }
+
+        // Update UI to hide agent card and show spawn section
+        setTimeout(() => {
+            const agentCard = document.getElementById('agentCard');
+            if (agentCard) {
+                agentCard.style.display = 'none';
+            }
+
+            const agentSpawnSection = document.getElementById('agentSpawnSection');
+            if (agentSpawnSection) {
+                agentSpawnSection.style.display = 'block';
+            }
+
+            // Clear message history
+            const messageHistory = document.getElementById('messageHistory');
+            if (messageHistory) {
+                messageHistory.innerHTML = '';
+            }
+
+            // Clear message input
+            const messageInput = document.getElementById('messageInput');
+            if (messageInput) {
+                messageInput.value = '';
+            }
+
+            // Reset spawn button
+            const spawnAgentBtn = document.getElementById('spawnAgentBtn');
+            if (spawnAgentBtn) {
+                spawnAgentBtn.disabled = false;
+                spawnAgentBtn.innerHTML = '<span class="btn-icon">🤖</span> Spawn Agent';
+            }
+
+            // Re-enable terminate button (will be hidden anyway)
+            if (terminateAgentBtn) {
+                terminateAgentBtn.disabled = false;
+            }
+
+            // Clear current agent role
+            this.connection.currentAgentRole = null;
+
+            console.log('[App] Agent terminated and UI updated');
+        }, 100);
+    }
+
+    resetUI() {
+        // Show welcome card
+        const welcomeCard = document.getElementById('welcomeCard');
+        if (welcomeCard) {
+            welcomeCard.style.display = 'block';
+        }
+
+        // Hide session card
+        const sessionInfo = document.getElementById('sessionInfo');
+        if (sessionInfo) {
+            sessionInfo.style.display = 'none';
+        }
+
+        // Hide agent card
+        const agentCard = document.getElementById('agentCard');
+        if (agentCard) {
+            agentCard.style.display = 'none';
+        }
+
+        // Show spawn section (for next session)
+        const agentSpawnSection = document.getElementById('agentSpawnSection');
+        if (agentSpawnSection) {
+            agentSpawnSection.style.display = 'block';
+        }
+
+        // Clear message history
+        const messageHistory = document.getElementById('messageHistory');
+        if (messageHistory) {
+            messageHistory.innerHTML = '';
+        }
+
+        // Clear message input
+        const messageInput = document.getElementById('messageInput');
+        if (messageInput) {
+            messageInput.value = '';
+        }
+
+        // Reset button states
+        const newProjectBtn = document.getElementById('newProjectBtn');
+        if (newProjectBtn) {
+            newProjectBtn.disabled = false;
+            newProjectBtn.innerHTML = '<span class="btn-icon">+</span> New Project';
+        }
+
+        const spawnAgentBtn = document.getElementById('spawnAgentBtn');
+        if (spawnAgentBtn) {
+            spawnAgentBtn.disabled = false;
+            spawnAgentBtn.innerHTML = '<span class="btn-icon">🤖</span> Spawn Agent';
+        }
+
+        // Reset connection state
+        this.isConnecting = false;
+        if (this.connectionCheckInterval) {
+            clearInterval(this.connectionCheckInterval);
+            this.connectionCheckInterval = null;
+        }
+        if (this.connectionCheckTimeout) {
+            clearTimeout(this.connectionCheckTimeout);
+            this.connectionCheckTimeout = null;
+        }
+
+        console.log('[App] UI reset complete');
     }
 
     handleNewProject() {
@@ -338,6 +919,76 @@ class App {
         } else {
             console.log('[App] Already connected, creating session...');
             this.connection.createSession();
+        }
+    }
+
+    handleSpawnAgent() {
+        const roleInput = document.getElementById('agentRole');
+        const workspaceInput = document.getElementById('agentWorkspace');
+        const btn = document.getElementById('spawnAgentBtn');
+
+        if (!roleInput || !workspaceInput) {
+            console.error('[App] Agent spawn inputs not found');
+            return;
+        }
+
+        const role = roleInput.value.trim();
+        const workspace = workspaceInput.value.trim();
+
+        if (!role || !workspace) {
+            alert('Please provide both agent role and workspace');
+            return;
+        }
+
+        btn.disabled = true;
+        btn.textContent = 'Spawning...';
+
+        if (this.connection.spawnAgent(role, workspace)) {
+            console.log('[App] Agent spawn initiated');
+            // Button will be re-enabled when agent:ready is received
+        } else {
+            console.error('[App] Failed to spawn agent');
+            btn.disabled = false;
+            btn.innerHTML = '<span class="btn-icon">🤖</span> Spawn Agent';
+        }
+    }
+
+    handleSendMessage() {
+        const messageInput = document.getElementById('messageInput');
+        const btn = document.getElementById('sendMessageBtn');
+
+        if (!messageInput) {
+            console.error('[App] Message input not found');
+            return;
+        }
+
+        const content = messageInput.value.trim();
+        if (!content) {
+            return;
+        }
+
+        const role = this.connection.currentAgentRole;
+        if (!role) {
+            console.error('[App] No active agent');
+            return;
+        }
+
+        btn.disabled = true;
+        messageInput.disabled = true;
+
+        if (this.connection.sendAgentMessage(role, content)) {
+            console.log('[App] Message sent');
+            messageInput.value = '';
+            // Re-enable after a short delay
+            setTimeout(() => {
+                btn.disabled = false;
+                messageInput.disabled = false;
+                messageInput.focus();
+            }, 500);
+        } else {
+            console.error('[App] Failed to send message');
+            btn.disabled = false;
+            messageInput.disabled = false;
         }
     }
 }
