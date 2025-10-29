@@ -96,8 +96,8 @@ class RelayConnection {
                     break;
 
                 case 'session:created':
-                    console.log('[RelayConnection] Session created:', message.session_id);
-                    this.sessionId = message.session_id;
+                    console.log('[RelayConnection] Session created:', message.sessionId);
+                    this.sessionId = message.sessionId;
                     this.handleSessionCreated(message);
                     break;
 
@@ -128,7 +128,7 @@ class RelayConnection {
         }
 
         sessionInfoCard.style.display = 'block';
-        sessionIdEl.textContent = message.session_id;
+        sessionIdEl.textContent = message.sessionId;
         sessionStatusEl.textContent = 'Active';
 
         console.log('[RelayConnection] Session UI updated');

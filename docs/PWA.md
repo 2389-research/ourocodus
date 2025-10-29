@@ -105,6 +105,9 @@ All messages are JSON with required `version` and `type` fields.
 }
 ```
 
+**Fields:**
+- `timestamp`: ISO 8601 format (RFC3339) in UTC timezone
+
 #### 2. session:create
 
 **Direction:** PWA → Relay
@@ -140,6 +143,10 @@ All messages are JSON with required `version` and `type` fields.
 }
 ```
 
+**Fields:**
+- `sessionId`: UUID v4 format session identifier
+- `timestamp`: ISO 8601 format (RFC3339) in UTC timezone
+
 #### 4. error
 
 **Direction:** Relay → PWA
@@ -170,13 +177,54 @@ All messages are JSON with required `version` and `type` fields.
 - `AGENT_MESSAGE_FAILED`: Temporary failure sending to agent
 - `INTERNAL_ERROR`: Unexpected server error
 
+### Client Error Handling Guidance
+
+**For Non-Recoverable Errors:**
+- `VERSION_MISMATCH`: Display error message, do not attempt reconnection. User must upgrade/downgrade client.
+- `SESSION_NOT_FOUND`: Session was terminated or never existed. Close WebSocket and reset UI to initial state. Allow user to create new session.
+- `AGENT_NOT_FOUND`: Agent role doesn't exist in session. Display error, allow user to spawn agent first.
+
+**For Recoverable Errors:**
+- `INVALID_MESSAGE`: Log error details for debugging. Do not retry automatically (message is fundamentally malformed).
+- `SESSION_CREATE_FAILED`: Display error, enable "retry" button. Use exponential backoff if user retries multiple times.
+- `AGENT_SPAWN_FAILED`: Display error, enable "retry" button for spawning that specific agent role.
+- `AGENT_NOT_READY`: Wait briefly (e.g., 2s) and retry automatically up to 3 times. Agent may still be initializing.
+- `AGENT_MESSAGE_FAILED`: Retry once automatically after 1s. If fails again, display error and require user action.
+- `INTERNAL_ERROR`: Display generic error message. Log full error details. Allow manual retry but do not auto-retry.
+
+**General Guidelines:**
+- Always update UI to reflect error state (disable buttons, show error message)
+- Log all errors to console with full context for debugging
+- Never silently swallow errors
+- Provide actionable error messages to users ("Session creation failed. Please try again.")
+
 ### Protocol Rules
 
 1. **Version field is required** on all client → relay messages
+   - Omitting version will result in INVALID_MESSAGE error
+   - Version mismatch will result in VERSION_MISMATCH error
+
 2. **Message type is required** on all messages
-3. **First message** from client should be after receiving connection:established
-4. **Session must be created** before spawning agents (future)
-5. **Errors may occur** at any time; client must handle gracefully
+   - Omitting type will result in INVALID_MESSAGE error
+
+3. **Message sequence must be followed**
+   - Client should wait for `connection:established` before sending first message
+   - If client sends messages before handshake, relay may close connection
+   - Recommended: Set a flag after receiving connection:established
+
+4. **Session must be created before spawning agents** (future)
+   - Attempting to spawn agent without session will result in SESSION_NOT_FOUND error
+   - Attempting to send message to non-existent agent will result in AGENT_NOT_FOUND error
+
+5. **Errors may occur at any time**
+   - Client must handle errors gracefully
+   - Non-recoverable errors require connection reset or user intervention
+   - Recoverable errors may be retried with appropriate backoff
+   - See "Client Error Handling Guidance" section for specific responses
+
+6. **All timestamps use ISO 8601 (RFC3339) format in UTC**
+   - Example: `2025-10-29T15:00:00Z`
+   - Always include timezone (Z for UTC)
 
 ## Connection Management
 
