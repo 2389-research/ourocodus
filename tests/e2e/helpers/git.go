@@ -42,7 +42,7 @@ func GetWorktreeCommits(ctx context.Context, worktreePath string, since time.Tim
 
 	// Get commit count since the specified time
 	sinceStr := since.Format(time.RFC3339)
-	// #nosec G204 -- worktreePath is validated to be under project root, not user input
+	// #nosec G204 -- worktreePath is constructed via filepath.Join from test-controlled values (projectRoot + "agent" + role)
 	cmd := exec.CommandContext(ctx, "git", "-C", worktreePath, "rev-list", "--count", fmt.Sprintf("--since=%s", sinceStr), "HEAD")
 
 	output, err := cmd.CombinedOutput()
@@ -70,6 +70,7 @@ func GetLatestCommitMessage(ctx context.Context, worktreePath string) (string, e
 	}
 
 	// Get latest commit message
+	// #nosec G204 -- worktreePath is constructed via filepath.Join from test-controlled values (projectRoot + "agent" + role)
 	cmd := exec.CommandContext(ctx, "git", "-C", worktreePath, "log", "-1", "--pretty=%B")
 
 	output, err := cmd.CombinedOutput()
@@ -105,32 +106,52 @@ func GetWorktreeInfo(ctx context.Context, worktreePath string, since time.Time) 
 // WaitForWorktreeCommits polls a worktree until it has commits or times out
 func WaitForWorktreeCommits(ctx context.Context, worktreePath string, since time.Time, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
+	var lastErr error
 
 	for time.Now().Before(deadline) {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("context cancelled while waiting for commits in worktree %s: %w", worktreePath, ctx.Err())
+		default:
+		}
+
 		commits, err := GetWorktreeCommits(ctx, worktreePath, since)
-		if err == nil && commits > 0 {
+		if err != nil {
+			lastErr = err
+		} else if commits > 0 {
 			return nil
 		}
 
 		// Wait before retrying
-		time.Sleep(1 * time.Second)
+		select {
+		case <-time.After(1 * time.Second):
+		case <-ctx.Done():
+			return fmt.Errorf("context cancelled while waiting for commits in worktree %s: %w", worktreePath, ctx.Err())
+		}
 	}
 
+	if lastErr != nil {
+		return fmt.Errorf("timeout waiting for commits in worktree %s (last error: %w)", worktreePath, lastErr)
+	}
 	return fmt.Errorf("timeout waiting for commits in worktree: %s", worktreePath)
 }
 
 // VerifyAllWorktreesHaveCommits checks that all specified worktrees have commits since the test started
 func VerifyAllWorktreesHaveCommits(ctx context.Context, worktreeBasePath string, agentNames []string, since time.Time, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
+	// Give each agent a fair share of the timeout
+	perAgentTimeout := timeout
+	if len(agentNames) > 1 {
+		perAgentTimeout = timeout / time.Duration(len(agentNames))
+		// Ensure minimum timeout of 5 seconds per agent
+		if perAgentTimeout < 5*time.Second {
+			perAgentTimeout = 5 * time.Second
+		}
+	}
 
 	for _, agentName := range agentNames {
 		worktreePath := filepath.Join(worktreeBasePath, agentName)
-		remaining := time.Until(deadline)
-		if remaining < 0 {
-			remaining = 0
-		}
 
-		if err := WaitForWorktreeCommits(ctx, worktreePath, since, remaining); err != nil {
+		if err := WaitForWorktreeCommits(ctx, worktreePath, since, perAgentTimeout); err != nil {
 			return fmt.Errorf("agent %s worktree verification failed: %w", agentName, err)
 		}
 	}
