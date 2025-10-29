@@ -96,10 +96,18 @@ func (c *WSClient) ReceiveWithFilter(filter func(map[string]interface{}) bool, t
 
 // Close closes the WebSocket connection
 func (c *WSClient) Close() error {
+	var closeMsgErr error
 	if err := c.conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, "")); err != nil {
-		return fmt.Errorf("failed to send close message: %w", err)
+		closeMsgErr = fmt.Errorf("failed to send close message: %w", err)
 	}
-	return c.conn.Close()
+	connCloseErr := c.conn.Close()
+	if closeMsgErr != nil && connCloseErr != nil {
+		return fmt.Errorf("%v; additionally, failed to close connection: %w", closeMsgErr, connCloseErr)
+	}
+	if closeMsgErr != nil {
+		return closeMsgErr
+	}
+	return connCloseErr
 }
 
 // SendMessage is a convenience function to send a message with type and data
