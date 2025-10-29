@@ -111,6 +111,10 @@ make build
 make test
 # → Runs: go test ./...
 
+# Run E2E integration tests
+make test-e2e
+# → Runs: ./scripts/run-e2e.sh (validates full PWA → Relay → ACP flow)
+
 # Format code
 make fmt
 # → Runs: gofumpt -l -w .
@@ -176,6 +180,27 @@ The project runs two GitHub Actions workflows on all PRs and pushes to main:
 - Session management smoke tests (8 test scenarios)
 - WebSocket relay integration tests (handshake, echo, session lifecycle, error handling)
 - Fuzz testing available via `--fuzz N` flag (disabled by default for CI stability)
+
+**End-to-End Testing**
+
+The E2E test suite validates the complete system flow with real Claude Code agents:
+
+```bash
+# Run E2E tests (requires ANTHROPIC_API_KEY)
+make test-e2e
+
+# Or directly with the script
+./scripts/run-e2e.sh
+```
+
+What it tests:
+- Relay server startup and health
+- WebSocket connection and session creation
+- Spawning multiple agents (auth, db, tests)
+- Bidirectional agent communication
+- Git worktree commits from agents
+
+See [tests/e2e/README.md](tests/e2e/README.md) for detailed documentation.
 
 Note: Local dev uses gofumpt for stricter formatting than gofmt
 

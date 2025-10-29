@@ -1,4 +1,4 @@
-.PHONY: all build test smoke-relay smoke-session smoke-all demo interactive run stop clean lint fmt check pre-commit
+.PHONY: all build test smoke-relay smoke-session smoke-all test-e2e demo interactive run stop clean lint fmt check pre-commit
 
 # Default target: build and test
 all: build test
@@ -31,6 +31,16 @@ smoke-session:
 smoke-all:
 	@echo "Running all smoke tests..."
 	./scripts/smoke-test.sh all --verbose
+
+# Run end-to-end integration tests
+test-e2e:
+	@echo "Running E2E integration tests..."
+	@if [ -z "$$ANTHROPIC_API_KEY" ]; then \
+		echo "Error: ANTHROPIC_API_KEY environment variable is not set"; \
+		echo "Please set your API key: export ANTHROPIC_API_KEY='your-key'"; \
+		exit 1; \
+	fi
+	@cd tests/e2e && go test -v -timeout 10m .
 
 # Run interactive demo showcasing PR #27 features
 demo:
