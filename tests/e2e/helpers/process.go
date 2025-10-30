@@ -42,7 +42,10 @@ func StartRelay(ctx context.Context, binaryPath string, port string) (*RelayServ
 	cmd := exec.CommandContext(serverCtx, binaryPath)
 	cmd.Env = append(os.Environ(),
 		fmt.Sprintf("PORT=%s", port),
-		"WORKSPACE_BASE_DIR=./agent", // Configure relay to use ./agent instead of ./workspaces
+		// Base directory for agent workspaces, relative to relay's CWD (project root)
+		// Agent workspace paths (e.g., "agent/role") must be under this directory
+		// See workspaceBase constant in e2e_test.go
+		"WORKSPACE_BASE_DIR=./agent",
 	)
 
 	// Set working directory to project root so relay can find ./web and ./agent
