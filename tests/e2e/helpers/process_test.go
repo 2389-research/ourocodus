@@ -61,7 +61,7 @@ func TestValidateScriptPath(t *testing.T) {
 				return
 			}
 			if err != nil && tt.errMsg != "" {
-				if len(err.Error()) < len(tt.errMsg) || err.Error()[:len(tt.errMsg)] != tt.errMsg {
+				if !strings.HasPrefix(err.Error(), tt.errMsg) {
 					t.Errorf("validateScriptPath() error message = %v, want to start with %v", err.Error(), tt.errMsg)
 				}
 			}
@@ -123,7 +123,7 @@ func TestValidateScriptPath_Symlink(t *testing.T) {
 	if err == nil {
 		t.Error("validateScriptPath() should reject symlink path")
 	}
-	if err != nil && len(err.Error()) >= 33 && err.Error()[:33] != "script path must not be a symlink" {
+	if err != nil && !strings.HasPrefix(err.Error(), "script path must not be a symlink") {
 		t.Errorf("validateScriptPath() error = %v, want to start with 'script path must not be a symlink'", err)
 	}
 }
