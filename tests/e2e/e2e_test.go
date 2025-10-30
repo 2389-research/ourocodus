@@ -19,6 +19,11 @@ const (
 	wsURL           = "ws://localhost:8080/ws"
 	protocolVersion = "1.0"
 
+	// Workspace configuration
+	// Must match WORKSPACE_BASE_DIR in tests/e2e/helpers/process.go
+	// Paths are relative to project root where relay server runs
+	workspaceBase = "agent"
+
 	// Timeouts
 	setupTimeout    = 60 * time.Second
 	messageTimeout  = 30 * time.Second
@@ -188,14 +193,15 @@ func spawnAgents(t *testing.T, client *helpers.WSClient, sessionID string, roles
 		t.Logf("Spawning %s agent...", role)
 
 		// Send agent spawn message
-		// Note: Workspace path is relative to CWD and must be under base directory
-		// The path validation checks that workspace is under baseWorkspaceDir (./agent)
+		// Workspace path is relative to the relay server's CWD (project root)
+		// With WORKSPACE_BASE_DIR=./agent, this creates ./agent/<role>
+		// The relay validates that workspace path is under baseWorkspaceDir
 		spawnMsg := map[string]interface{}{
 			"version":   protocolVersion,
 			"type":      "agent:spawn",
 			"sessionId": sessionID,
 			"role":      role,
-			"workspace": fmt.Sprintf("agent/%s", role),
+			"workspace": filepath.Join(workspaceBase, role),
 		}
 		err := client.Send(spawnMsg)
 		require.NoError(t, err, "Failed to send agent:spawn message for %s", role)
