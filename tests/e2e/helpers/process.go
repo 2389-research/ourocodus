@@ -2,6 +2,7 @@ package helpers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -123,8 +124,14 @@ func (s *RelayServer) Stop() error {
 			return fmt.Errorf("relay process killed after timeout")
 		case err := <-done:
 			// Process exited
-			if err != nil && err.Error() != "signal: killed" {
-				return fmt.Errorf("relay process exited with error: %w", err)
+			if err != nil {
+				// Check if process was killed by signal (expected when we call Kill())
+				var exitErr *exec.ExitError
+				if !errors.As(err, &exitErr) || exitErr.ExitCode() != -1 {
+					// Not an exit error, or exited with non-zero code (not killed by signal)
+					return fmt.Errorf("relay process exited with error: %w", err)
+				}
+				// Exit code is -1, which means killed by signal - this is expected
 			}
 			return nil
 		}
