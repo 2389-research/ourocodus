@@ -96,6 +96,100 @@ go install honnef.co/go/tools/cmd/staticcheck@latest
 go install mvdan.cc/gofumpt@latest
 ```
 
+## Local Services with Docker
+
+Ourocodus uses Docker Compose to run local development services including NATS for message streaming.
+
+### Prerequisites
+
+**Docker**: You need Docker installed and running. On macOS, we recommend [Colima](https://github.com/abiosoft/colima):
+
+```bash
+# Install Colima (macOS)
+brew install colima
+
+# Start Colima
+colima start
+```
+
+For other platforms, install [Docker Desktop](https://www.docker.com/products/docker-desktop/) or your preferred Docker runtime.
+
+### Starting Services
+
+Start all services (currently: NATS with JetStream):
+
+```bash
+docker-compose up -d
+```
+
+This will:
+1. Start NATS server with JetStream enabled
+2. Create required JetStream streams (SESSION_EVENTS, WORK_RESULTS)
+3. Expose NATS on ports:
+   - 4222: Client connections
+   - 8222: HTTP monitoring
+
+### Verify Services
+
+Check that services are running:
+
+```bash
+# Check container status
+docker-compose ps
+
+# View NATS logs
+docker-compose logs nats
+
+# View init script output
+docker-compose logs nats-init
+```
+
+Access NATS monitoring endpoints:
+
+```bash
+# Health check
+curl http://localhost:8222/healthz
+
+# Server stats (includes JetStream info)
+curl http://localhost:8222/varz | jq
+
+# JetStream-specific stats
+curl http://localhost:8222/jsz | jq
+```
+
+### NATS CLI Commands
+
+If you have the [NATS CLI](https://github.com/nats-io/natscli) installed, you can interact with NATS directly:
+
+```bash
+# List JetStream streams
+nats stream list
+
+# View stream details
+nats stream info SESSION_EVENTS
+nats stream info WORK_RESULTS
+
+# Publish a test message
+nats pub "sessions.test-123.events" "test message"
+
+# Subscribe to messages
+nats sub "sessions.*.events"
+```
+
+### Stopping Services
+
+Stop all services:
+
+```bash
+docker-compose down
+```
+
+To also remove volumes (clears all JetStream data):
+
+```bash
+docker-compose down -v
+```
+
 ## Code Quality Tools
 
 ### Linting
