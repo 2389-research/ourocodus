@@ -914,7 +914,7 @@ nats sub ">"
 
 # Monitor specific subject patterns
 nats sub "sessions.*.events"
-nats sub "sessions.>.*"
+nats sub "sessions.>"
 ```
 
 ### JetStream Consumer Testing
