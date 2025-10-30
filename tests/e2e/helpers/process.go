@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -186,8 +187,88 @@ func BuildRelay(ctx context.Context, outputPath string) error {
 	return nil
 }
 
+// validateScriptPath validates that a script path is safe to execute
+// It ensures the path:
+// 1. Is within the project's scripts directory
+// 2. Does not contain path traversal sequences
+// 3. Is an absolute path (for security)
+func validateScriptPath(scriptPath string) error {
+	// Ensure path is absolute
+	if !filepath.IsAbs(scriptPath) {
+		return fmt.Errorf("script path must be absolute: %s", scriptPath)
+	}
+
+	// Clean the path to resolve any . or .. sequences
+	cleanPath := filepath.Clean(scriptPath)
+
+	// Find project root
+	projectRoot, err := FindProjectRoot()
+	if err != nil {
+		return fmt.Errorf("failed to find project root: %w", err)
+	}
+
+	// Construct the allowed scripts directory
+	allowedDir := filepath.Join(projectRoot, "scripts")
+
+	// Check if the cleaned path is within the allowed directory
+	// Use filepath.Rel to ensure no path traversal escapes the allowed directory
+	relPath, err := filepath.Rel(allowedDir, cleanPath)
+	if err != nil {
+		return fmt.Errorf("failed to compute relative path: %w", err)
+	}
+
+	// If the relative path starts with ".." (as a complete component), it's trying to escape the allowed directory
+	// Use robust check with strings.HasPrefix to handle all cases: "..", "../", "..\\"
+	if relPath == ".." || strings.HasPrefix(relPath, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("script path must be within project scripts directory: %s", scriptPath)
+	}
+
+	// Verify the file exists (using Lstat to detect symlinks)
+	info, err := os.Lstat(cleanPath)
+	if err != nil {
+		return fmt.Errorf("script file does not exist: %w", err)
+	}
+
+	// Reject symlinks explicitly (check before IsRegular since symlinks fail IsRegular)
+	if info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("script path must not be a symlink: %s", scriptPath)
+	}
+
+	// Verify it's a regular file (not a directory)
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("script path must be a regular file: %s", scriptPath)
+	}
+
+	// Resolve symlinks in the entire path (including directory components)
+	// This prevents bypassing validation via symlinked directories in the path
+	// For example: scripts/symlinked-dir/run.sh where symlinked-dir points outside scripts/
+	resolvedPath, err := filepath.EvalSymlinks(cleanPath)
+	if err != nil {
+		return fmt.Errorf("failed to resolve symlinks in path: %w", err)
+	}
+
+	// Verify the resolved path is still within the allowed directory
+	resolvedRelPath, err := filepath.Rel(allowedDir, resolvedPath)
+	if err != nil {
+		return fmt.Errorf("failed to compute relative path for resolved path: %w", err)
+	}
+
+	// Check if resolved path tries to escape the allowed directory
+	if resolvedRelPath == ".." || strings.HasPrefix(resolvedRelPath, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("resolved script path escapes project scripts directory: %s resolves to %s", scriptPath, resolvedPath)
+	}
+
+	return nil
+}
+
 // RunWorktreeSetup runs the worktree setup script
+// The script path is validated to ensure it's within the project's scripts directory
 func RunWorktreeSetup(ctx context.Context, scriptPath string) error {
+	// Validate the script path for security
+	if err := validateScriptPath(scriptPath); err != nil {
+		return fmt.Errorf("invalid script path: %w", err)
+	}
+
 	cmd := exec.CommandContext(ctx, scriptPath)
 
 	output, err := cmd.CombinedOutput()
