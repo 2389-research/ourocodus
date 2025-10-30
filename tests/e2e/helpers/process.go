@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -216,8 +217,9 @@ func validateScriptPath(scriptPath string) error {
 		return fmt.Errorf("failed to compute relative path: %w", err)
 	}
 
-	// If the relative path starts with "..", it's trying to escape the allowed directory
-	if len(relPath) >= 2 && relPath[0:2] == ".." {
+	// If the relative path starts with ".." (as a complete component), it's trying to escape the allowed directory
+	// Use robust check with strings.HasPrefix to handle all cases: "..", "../", "..\\"
+	if relPath == ".." || strings.HasPrefix(relPath, ".."+string(filepath.Separator)) {
 		return fmt.Errorf("script path must be within project scripts directory: %s", scriptPath)
 	}
 
@@ -235,6 +237,25 @@ func validateScriptPath(scriptPath string) error {
 	// Verify it's a regular file (not a directory)
 	if !info.Mode().IsRegular() {
 		return fmt.Errorf("script path must be a regular file: %s", scriptPath)
+	}
+
+	// Resolve symlinks in the entire path (including directory components)
+	// This prevents bypassing validation via symlinked directories in the path
+	// For example: scripts/symlinked-dir/run.sh where symlinked-dir points outside scripts/
+	resolvedPath, err := filepath.EvalSymlinks(cleanPath)
+	if err != nil {
+		return fmt.Errorf("failed to resolve symlinks in path: %w", err)
+	}
+
+	// Verify the resolved path is still within the allowed directory
+	resolvedRelPath, err := filepath.Rel(allowedDir, resolvedPath)
+	if err != nil {
+		return fmt.Errorf("failed to compute relative path for resolved path: %w", err)
+	}
+
+	// Check if resolved path tries to escape the allowed directory
+	if resolvedRelPath == ".." || strings.HasPrefix(resolvedRelPath, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("resolved script path escapes project scripts directory: %s resolves to %s", scriptPath, resolvedPath)
 	}
 
 	return nil

@@ -3,6 +3,7 @@ package helpers
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -82,8 +83,9 @@ func TestValidateScriptPath_Directory(t *testing.T) {
 	if err == nil {
 		t.Error("validateScriptPath() should reject directory path")
 	}
-	if err != nil && err.Error()[:35] != "script path must be a regular file:" {
-		t.Errorf("validateScriptPath() error = %v, want 'script path must be a regular file:'", err)
+	expectedPrefix := "script path must be a regular file:"
+	if err != nil && !strings.HasPrefix(err.Error(), expectedPrefix) {
+		t.Errorf("validateScriptPath() error = %v, want prefix '%s'", err, expectedPrefix)
 	}
 }
 
