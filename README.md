@@ -239,6 +239,67 @@ golangci-lint run
 golangci-lint run --fix
 ```text
 
+## Local Services
+
+### NATS Message Bus
+
+The project uses NATS with JetStream for persistent message streaming between services.
+
+**Prerequisites:**
+- Docker or [Colima](https://github.com/abiosoft/colima) for containerization
+- (Optional) [NATS CLI](https://github.com/nats-io/natscli) for debugging
+
+**Quick Start:**
+
+```bash
+# Start NATS server with JetStream
+make nats-start
+
+# Verify it's running
+make nats-health
+
+# View logs
+make nats-logs
+
+# Stop NATS server
+make nats-stop
+```
+
+**Endpoints:**
+
+- **NATS Client**: `nats://localhost:4222`
+- **HTTP Monitoring**: `http://localhost:8222` (health, connections, stats)
+- **Prometheus Metrics**: `http://localhost:7777/metrics` (via prometheus-nats-exporter)
+
+The Prometheus metrics endpoint is provided by a sidecar exporter that scrapes NATS monitoring endpoints and converts them to Prometheus format. It includes metrics for:
+- Server status and connection counts (varz)
+- JetStream streams and consumers (jsz)
+- Active connections (connz)
+- Routes and subscriptions (routez, subz)
+
+**JetStream Streams:**
+
+The system automatically creates two streams:
+
+1. **SESSION_EVENTS** - Session lifecycle events
+   - Subjects: `sessions.*.events`
+   - Retention: 7 days, 100K messages max
+
+2. **WORK_RESULTS** - Agent work results
+   - Subjects: `sessions.*.results.*`
+   - Retention: 7 days, 100K messages max
+
+**Topic Naming Convention:**
+
+- Session events: `sessions.<session-id>.events`
+- Work distribution: `sessions.<session-id>.work.<role>`
+- Work results: `sessions.<session-id>.results.<role>`
+- Agent heartbeats: `agents.<session-id>.<role>.heartbeat`
+
+**For detailed NATS usage**, including CLI commands, publishing, subscribing, and troubleshooting, see [docs/NATS.md](docs/NATS.md).
+
+**For Docker/Colima setup**, see [CONTRIBUTING.md](CONTRIBUTING.md#local-services-with-docker).
+
 ## Demo
 
 Two interactive demos are available to showcase the relay system features. Both run a local relay server with an echo agent and work without requiring an ANTHROPIC_API_KEY.

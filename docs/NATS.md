@@ -829,8 +829,12 @@ nats stream info SESSION_EVENTS
 # View WORK_RESULTS stream details
 nats stream info WORK_RESULTS
 
-# Monitor stream activity in real-time
-nats stream events
+# Monitor stream activity in real-time with visual graph
+nats stream graph SESSION_EVENTS
+nats stream graph WORK_RESULTS
+
+# Alternative: Monitor JetStream advisories (stored events)
+nats event --js-advisory
 ```
 
 ### Publishing Test Messages
@@ -855,7 +859,13 @@ nats pub "sessions.test-123.results.coder" '{
   "status": "completed",
   "output": "// Generated code here"
 }'
+
+# Tip: For complex JSON payloads, save to a file and use @ syntax
+echo '{"session_id": "test-123", "data": {...}}' > payload.json
+nats pub "sessions.test-123.events" @payload.json
 ```
+
+**Tip:** For complex JSON payloads, save them to a file and use the `@filename.json` syntax. This is more maintainable than multi-line shell strings, especially for large or frequently-used payloads.
 
 ### Subscribing to Messages
 
@@ -923,9 +933,9 @@ nats sub "sessions.>"
 # Create a consumer for SESSION_EVENTS stream
 nats consumer add SESSION_EVENTS test-consumer \
   --filter="sessions.*.events" \
-  --deliver=all \
-  --ack=explicit \
-  --max-deliver=3
+  --deliver all \
+  --ack explicit \
+  --max-deliver 3
 
 # Pull messages from consumer
 nats consumer next SESSION_EVENTS test-consumer --count=10
