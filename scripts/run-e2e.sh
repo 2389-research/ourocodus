@@ -134,7 +134,7 @@ fi
 # Using | cat forces line-buffered output instead of block-buffered
 cd "$PROJECT_ROOT"
 # shellcheck disable=SC2086
-if go test $TEST_FLAGS -timeout 10m ./tests/e2e/... 2>&1 | cat; then
+if go test $TEST_FLAGS -timeout ${E2E_TEST_TIMEOUT:-10m} ./tests/e2e/... 2>&1 | cat; then
     echo ""
     log_success "E2E tests passed!"
     exit 0

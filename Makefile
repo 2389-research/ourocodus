@@ -40,7 +40,7 @@ test-e2e:
 		echo "Please set your API key: export ANTHROPIC_API_KEY='your-key'"; \
 		exit 1; \
 	fi
-	@cd tests/e2e && go test -v -timeout 10m .
+	@cd tests/e2e && go test -v -timeout $${E2E_TEST_TIMEOUT:-10m} .
 
 # Run interactive demo showcasing PR #27 features
 demo:
