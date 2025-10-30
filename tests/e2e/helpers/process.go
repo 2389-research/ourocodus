@@ -125,13 +125,21 @@ func (s *RelayServer) Stop() error {
 		case err := <-done:
 			// Process exited
 			if err != nil {
-				// Check if process was killed by signal (expected when we call Kill())
+				// Check if process exited with an expected exit code
+				// Exit code 0: graceful shutdown (via context cancellation)
+				// Exit code -1: killed by signal (SIGKILL)
 				var exitErr *exec.ExitError
-				if !errors.As(err, &exitErr) || exitErr.ExitCode() != -1 {
-					// Not an exit error, or exited with non-zero code (not killed by signal)
+				if errors.As(err, &exitErr) {
+					code := exitErr.ExitCode()
+					if code != 0 && code != -1 {
+						// Exited with non-zero, non-signal code - this is an error
+						return fmt.Errorf("relay process exited with error code %d: %w", code, err)
+					}
+					// Exit code is 0 (graceful) or -1 (killed by signal) - both are expected
+				} else {
+					// Not an ExitError - treat as unexpected error
 					return fmt.Errorf("relay process exited with error: %w", err)
 				}
-				// Exit code is -1, which means killed by signal - this is expected
 			}
 			return nil
 		}
