@@ -1,10 +1,8 @@
 package packnplay
 
 import (
-	"context"
 	"testing"
 
-	"github.com/2389-research/ourocodus/pkg/agent"
 	"github.com/obra/packnplay/pkg/config"
 )
 
@@ -247,16 +245,10 @@ func TestPipeCloser(t *testing.T) {
 
 func TestWorktreeNameGeneration(t *testing.T) {
 	// Test that agent IDs are properly formatted for worktree names
-	ctx := context.Background()
-	_ = ctx
-
-	cfg := &agent.SpawnConfig{
-		Role:  "test",
-		Image: "ubuntu:22.04",
-	}
-
 	// Verify worktree name format would be: agent-{ULID}
 	// This is implicit in the Spawn implementation
-	_ = cfg
 	// Actual testing happens in integration tests where we spawn real containers
+	
+	// This is a placeholder test - the actual verification happens in integration tests
+	// where we can inspect real worktree names created by Packnplay
 }
