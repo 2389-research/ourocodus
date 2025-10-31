@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"sync"
@@ -301,6 +302,14 @@ func (l *PacknplayLauncher) Stop(ctx context.Context, handle agent.AgentHandle) 
 		return fmt.Errorf("failed to stop container: %w", err)
 	}
 
+	// Clean up worktree and branch
+	if err := l.removeWorktree(h.worktreeName, h.workspace); err != nil {
+		// Log but don't fail the stop operation
+		if l.verbose {
+			fmt.Fprintf(os.Stderr, "[Packnplay] Warning: worktree cleanup failed: %v\n", err)
+		}
+	}
+
 	// Remove from tracking
 	l.mu.Lock()
 	delete(l.handles, h.id)
@@ -313,6 +322,32 @@ func (l *PacknplayLauncher) Stop(ctx context.Context, handle agent.AgentHandle) 
 
 	if l.verbose {
 		fmt.Fprintf(os.Stderr, "[Packnplay] Agent %s stopped\n", h.id)
+	}
+
+	return nil
+}
+
+// removeWorktree removes a git worktree and its associated branch.
+// Tolerates errors if worktree/branch already removed.
+func (l *PacknplayLauncher) removeWorktree(worktreeName, workspacePath string) error {
+	// Remove worktree (force to handle locks)
+	cmd := exec.Command("git", "worktree", "remove", "-f", workspacePath)
+	cmd.Dir = l.projectPath
+	if err := cmd.Run(); err != nil {
+		// Log but don't fail - worktree may already be gone
+		if l.verbose {
+			fmt.Fprintf(os.Stderr, "[Packnplay] Warning: failed to remove worktree %s: %v\n", workspacePath, err)
+		}
+	}
+
+	// Delete branch (force to handle unmerged)
+	cmd = exec.Command("git", "branch", "-D", worktreeName)
+	cmd.Dir = l.projectPath
+	if err := cmd.Run(); err != nil {
+		// Log but don't fail - branch may already be gone
+		if l.verbose {
+			fmt.Fprintf(os.Stderr, "[Packnplay] Warning: failed to delete branch %s: %v\n", worktreeName, err)
+		}
 	}
 
 	return nil
