@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -52,9 +53,16 @@ func main() {
 	}
 
 	// Create PackNplay launcher
-	projectPath, err := filepath.Abs(".")
+	// Use isolated demo repository instead of current project
+	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		fatal("Failed to get project path: %v", err)
+		fatal("Failed to get home directory: %v", err)
+	}
+	projectPath := filepath.Join(homeDir, ".local", "share", "packnplay", "demo-repo")
+
+	// Ensure demo repo exists and is initialized
+	if err := ensureDemoRepo(projectPath); err != nil {
+		fatal("Failed to initialize demo repository: %v", err)
 	}
 
 	launcher, err := packnplay.NewLauncher(
@@ -344,4 +352,50 @@ func detectColimaSocket() string {
 func fatal(format string, args ...interface{}) {
 	fmt.Fprintf(os.Stderr, colorRed+"❌ "+format+colorReset+"\n", args...)
 	os.Exit(1)
+}
+
+func ensureDemoRepo(repoPath string) error {
+	// Check if directory exists
+	if _, err := os.Stat(repoPath); os.IsNotExist(err) {
+		// Create directory
+		if err := os.MkdirAll(repoPath, 0755); err != nil {
+			return fmt.Errorf("failed to create demo repo directory: %w", err)
+		}
+
+		// Initialize git repo
+		cmd := exec.Command("git", "init")
+		cmd.Dir = repoPath
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("failed to initialize git repo: %w", err)
+		}
+
+		// Create README
+		readme := filepath.Join(repoPath, "README.md")
+		content := "# PackNplay Demo Repository\n\nThis is a test repository used by PackNplay demos.\nWorktrees created here are isolated from the main ourocodus repo.\n"
+		if err := os.WriteFile(readme, []byte(content), 0644); err != nil {
+			return fmt.Errorf("failed to create README: %w", err)
+		}
+
+		// Initial commit
+		cmd = exec.Command("git", "add", "README.md")
+		cmd.Dir = repoPath
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("failed to add README: %w", err)
+		}
+
+		cmd = exec.Command("git", "commit", "-m", "Initial commit for demo repository")
+		cmd.Dir = repoPath
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("failed to create initial commit: %w", err)
+		}
+	}
+
+	// Verify it's a git repo
+	cmd := exec.Command("git", "rev-parse", "--git-dir")
+	cmd.Dir = repoPath
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("directory exists but is not a git repository: %w", err)
+	}
+
+	return nil
 }
