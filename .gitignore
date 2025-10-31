@@ -47,8 +47,8 @@ logs/
 .env.local
 .envrc
 
-# Agent worktrees
-agent/
+# Agent worktrees (root level only)
+/agent/
 
 # Development worktrees
 .worktrees/
