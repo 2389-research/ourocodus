@@ -178,6 +178,62 @@ make build
 make test
 ```
 
+### 2.5. Integration Tests
+
+Some packages have integration tests that require external dependencies (e.g., Docker). These tests are gated behind build tags and do not run by default.
+
+#### Packnplay Integration Tests
+
+The `pkg/agent/packnplay` package includes integration tests that spawn real Docker containers to verify the full agent lifecycle.
+
+**Requirements:**
+- Docker daemon running and accessible
+- Git repository (tests run in current repo)
+- Network access to pull container images (busybox, etc.)
+
+**Running integration tests:**
+
+```bash
+# Run all integration tests
+go test -tags=integration ./pkg/agent/packnplay/... -v
+
+# Run specific integration test
+go test -tags=integration ./pkg/agent/packnplay/... -run TestIntegration_SpawnAndStop -v
+
+# Run with timeout (recommended for CI)
+go test -tags=integration ./pkg/agent/packnplay/... -v -timeout=5m
+```
+
+**What integration tests verify:**
+- Container spawning and lifecycle (Spawn/Stop)
+- Live I/O streaming (stdin/stdout/stderr)
+- Attach to existing containers
+- Agent discovery via Docker labels
+- Cleanup and error scenarios
+- Wait for container exit
+
+**Cleanup:**
+
+Integration tests automatically clean up containers on success. If tests fail or are interrupted, orphaned containers may remain. Clean them up with:
+
+```bash
+# List Packnplay-managed containers
+docker ps -a --filter "label=managed-by=packnplay"
+
+# Remove all Packnplay containers
+docker ps -a --filter "label=managed-by=packnplay" -q | xargs docker rm -f
+
+# Remove associated worktrees (if needed)
+rm -rf ~/.local/share/packnplay/worktrees
+```
+
+**CI/CD Considerations:**
+
+Integration tests are not run in CI by default due to Docker requirements. To enable them:
+1. Ensure runner has Docker access
+2. Add `-tags=integration` to test command
+3. Consider using Docker-in-Docker or privileged runner
+
 ### 3. Before Committing
 
 Run all quality checks:

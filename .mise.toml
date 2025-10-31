@@ -9,6 +9,7 @@ go = "1.23.0"
 "go:github.com/golangci/golangci-lint/cmd/golangci-lint" = "latest"
 "go:honnef.co/go/tools/cmd/staticcheck" = "latest"
 "go:mvdan.cc/gofumpt" = "latest"
+"go:golang.org/x/tools/gopls" = "latest"
 
 [env]
 # Set Go environment variables
