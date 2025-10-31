@@ -145,7 +145,10 @@ func main() {
 	wg.Wait()
 
 	// Display race in progress
-	fmt.Println(colorBold + "📊 RACE IN PROGRESS..." + colorReset)
+	fmt.Println()
+	fmt.Println(colorBold + "🏁 RACE IN PROGRESS" + colorReset)
+	fmt.Println("═══════════════════════════════════════════════════════════")
+	fmt.Println("Each container is working independently in parallel...")
 	fmt.Println()
 
 	// Wait for all racers to finish
