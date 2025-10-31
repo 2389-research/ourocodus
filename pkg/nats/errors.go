@@ -14,6 +14,10 @@ var (
 
 	// ErrInvalidConfig is returned when the configuration is invalid.
 	ErrInvalidConfig = errors.New("invalid configuration")
+
+	// ErrNotImplemented is returned when a feature is not yet implemented.
+	// This is used for JetStream operations that are planned for Phase 2.
+	ErrNotImplemented = errors.New("operation not implemented in this phase")
 )
 
 // TransientError represents an error that may succeed if retried.

@@ -3,6 +3,7 @@ package nats
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -19,7 +20,7 @@ type Client interface {
 	Request(ctx context.Context, subject string, data []byte, opts ...ReqOption) (*Message, error)
 
 	// JetStream access
-	JS() JSClient
+	JS() (JSClient, error)
 
 	// Health & lifecycle
 	Health() HealthStatus
@@ -50,6 +51,7 @@ type client struct {
 	health  *healthTracker
 
 	js     JSClient
+	jsErr  error // Stores JetStream initialization error
 	jsMu   sync.Mutex
 	jsOnce sync.Once
 
@@ -82,8 +84,9 @@ func NewClient(opts ...Option) (Client, error) {
 	// Build NATS connection options
 	natsOpts := c.buildNatsOptions()
 
-	// Connect to NATS
-	conn, err := nats.Connect(cfg.URLs[0], natsOpts...)
+	// Connect to NATS with all configured URLs (comma-separated for failover)
+	urls := strings.Join(cfg.URLs, ",")
+	conn, err := nats.Connect(urls, natsOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("connect to NATS: %w", err)
 	}
@@ -129,7 +132,14 @@ func (c *client) buildNatsOptions() []nats.Option {
 
 // handleReconnected is called when the connection is re-established.
 func (c *client) handleReconnected(nc *nats.Conn) {
-	c.metrics.reconnects.Inc()
+	// Update metrics if enabled
+	if c.metrics != nil && c.metrics.reconnects != nil {
+		c.metrics.reconnects.Inc()
+	}
+	if c.metrics != nil && c.metrics.connectionUp != nil {
+		c.metrics.connectionUp.Set(1)
+	}
+
 	c.health.setConnected()
 
 	if c.config.ReconnectedCB != nil {
@@ -139,6 +149,11 @@ func (c *client) handleReconnected(nc *nats.Conn) {
 
 // handleDisconnected is called when the connection is lost.
 func (c *client) handleDisconnected(nc *nats.Conn, err error) {
+	// Update metrics if enabled
+	if c.metrics != nil && c.metrics.connectionUp != nil {
+		c.metrics.connectionUp.Set(0)
+	}
+
 	c.health.setDisconnected(err)
 
 	if c.config.DisconnectedCB != nil {
@@ -174,6 +189,7 @@ func (c *client) Publish(ctx context.Context, subject string, data []byte, opts 
 
 	// Create message with headers
 	msg := nats.NewMsg(subject)
+	msg.Header = nats.Header{} // Initialize header map to prevent nil panic
 	msg.Data = data
 
 	// Add correlation ID
@@ -264,10 +280,15 @@ func (c *client) Request(ctx context.Context, subject string, data []byte, opts 
 	}
 	if deadline, ok := ctx.Deadline(); ok {
 		timeout = time.Until(deadline)
+		// Return immediately if context deadline has already passed
+		if timeout <= 0 {
+			return nil, context.DeadlineExceeded
+		}
 	}
 
 	// Create request message with headers
 	msg := nats.NewMsg(subject)
+	msg.Header = nats.Header{} // Initialize header map to prevent nil panic
 	msg.Data = data
 
 	// Add correlation ID
@@ -292,7 +313,7 @@ func (c *client) Request(ctx context.Context, subject string, data []byte, opts 
 }
 
 // JS returns the JetStream client interface.
-func (c *client) JS() JSClient {
+func (c *client) JS() (JSClient, error) {
 	c.jsOnce.Do(func() {
 		c.jsMu.Lock()
 		defer c.jsMu.Unlock()
@@ -300,15 +321,17 @@ func (c *client) JS() JSClient {
 		// Create JetStream context
 		js, err := c.conn.JetStream()
 		if err != nil {
-			// Store error in health tracker
-			c.health.recordError(fmt.Errorf("create jetstream context: %w", err))
+			// Store error for subsequent calls
+			c.jsErr = fmt.Errorf("create jetstream context: %w", err)
+			// Also store in health tracker
+			c.health.recordError(c.jsErr)
 			return
 		}
 
 		c.js = newJSClient(c, js)
 	})
 
-	return c.js
+	return c.js, c.jsErr
 }
 
 // Health returns the current health status of the client.
@@ -354,16 +377,30 @@ func (c *client) Drain(ctx context.Context) error {
 		done <- c.conn.Drain()
 	}()
 
-	select {
-	case err := <-done:
-		c.closed = true
-		return err
-	case <-time.After(timeout):
-		c.closed = true
-		return fmt.Errorf("drain timeout after %v", timeout)
-	case <-ctx.Done():
-		c.closed = true
-		return ctx.Err()
+	// Handle drain completion based on timeout configuration
+	if timeout <= 0 {
+		// No timeout - wait indefinitely for drain or context cancellation
+		select {
+		case err := <-done:
+			c.closed = true
+			return err
+		case <-ctx.Done():
+			c.closed = true
+			return ctx.Err()
+		}
+	} else {
+		// Use configured timeout
+		select {
+		case err := <-done:
+			c.closed = true
+			return err
+		case <-time.After(timeout):
+			c.closed = true
+			return fmt.Errorf("drain timeout after %v", timeout)
+		case <-ctx.Done():
+			c.closed = true
+			return ctx.Err()
+		}
 	}
 }
 

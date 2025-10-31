@@ -65,24 +65,24 @@ func newJSClient(c *client, js nats.JetStreamContext) JSClient {
 
 // EnsureStream ensures a stream exists with the given configuration.
 func (j *jsClient) EnsureStream(ctx context.Context, cfg StreamConfig) error {
-	// TODO: Implement stream management
-	return nil
+	// TODO: Implement stream management in Phase 2
+	return ErrNotImplemented
 }
 
 // EnsureConsumer ensures a consumer exists with the given configuration.
 func (j *jsClient) EnsureConsumer(ctx context.Context, stream string, cfg ConsumerConfig) error {
-	// TODO: Implement consumer management
-	return nil
+	// TODO: Implement consumer management in Phase 2
+	return ErrNotImplemented
 }
 
 // PullConsume starts a pull-based consumer.
 func (j *jsClient) PullConsume(ctx context.Context, cfg PullConsumerConfig, handler MsgHandler) (*Consumer, error) {
-	// TODO: Implement pull consumption
-	return nil, nil
+	// TODO: Implement pull consumption in Phase 2
+	return nil, ErrNotImplemented
 }
 
 // PublishAsync publishes a message to JetStream and returns the ack.
 func (j *jsClient) PublishAsync(ctx context.Context, subject string, data []byte, opts ...PubOption) (*PubAck, error) {
-	// TODO: Implement JetStream publishing
-	return nil, nil
+	// TODO: Implement JetStream publishing in Phase 2
+	return nil, ErrNotImplemented
 }

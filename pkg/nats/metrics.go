@@ -8,6 +8,12 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
+// Global singleton for metrics to prevent duplicate registration
+var (
+	globalMetrics     *metricsCollector
+	globalMetricsOnce sync.Once
+)
+
 // metricsCollector collects Prometheus metrics for the NATS client.
 type metricsCollector struct {
 	config *ClientConfig
@@ -30,144 +36,145 @@ type metricsCollector struct {
 	requests        *prometheus.CounterVec
 	requestErrors   *prometheus.CounterVec
 	requestDuration *prometheus.HistogramVec
-
-	once sync.Once
 }
 
 // newMetricsCollector creates a new metrics collector.
+// Uses singleton pattern to prevent duplicate Prometheus registration.
 func newMetricsCollector(config *ClientConfig) *metricsCollector {
 	if !config.MetricsEnabled {
 		return &metricsCollector{config: config}
 	}
 
-	m := &metricsCollector{
-		config: config,
-	}
+	// Use global singleton to prevent duplicate registration with Prometheus
+	globalMetricsOnce.Do(func() {
+		globalMetrics = &metricsCollector{
+			config: config,
+		}
+		globalMetrics.registerMetrics()
+	})
 
-	m.registerMetrics()
-	return m
+	return globalMetrics
 }
 
 // registerMetrics registers all Prometheus metrics.
+// This should only be called once via the global singleton pattern.
 func (m *metricsCollector) registerMetrics() {
-	m.once.Do(func() {
-		namespace := m.config.MetricsNamespace
-		subsystem := m.config.MetricsSubsystem
+	namespace := m.config.MetricsNamespace
+	subsystem := m.config.MetricsSubsystem
 
-		// Connection metrics
-		m.connectionUp = promauto.NewGauge(prometheus.GaugeOpts{
-			Namespace: namespace,
-			Subsystem: subsystem,
-			Name:      "connection_up",
-			Help:      "Whether the connection to NATS is up (1) or down (0)",
-		})
-
-		m.reconnects = promauto.NewCounter(prometheus.CounterOpts{
-			Namespace: namespace,
-			Subsystem: subsystem,
-			Name:      "reconnects_total",
-			Help:      "Total number of reconnection attempts",
-		})
-
-		// Publish metrics
-		m.messagesPublished = promauto.NewCounterVec(
-			prometheus.CounterOpts{
-				Namespace: namespace,
-				Subsystem: subsystem,
-				Name:      "messages_published_total",
-				Help:      "Total number of messages published",
-			},
-			[]string{"subject", "status"},
-		)
-
-		m.publishErrors = promauto.NewCounterVec(
-			prometheus.CounterOpts{
-				Namespace: namespace,
-				Subsystem: subsystem,
-				Name:      "publish_errors_total",
-				Help:      "Total number of publish errors",
-			},
-			[]string{"subject", "error_type"},
-		)
-
-		m.publishLatency = promauto.NewHistogramVec(
-			prometheus.HistogramOpts{
-				Namespace: namespace,
-				Subsystem: subsystem,
-				Name:      "publish_latency_seconds",
-				Help:      "Publish operation latency in seconds",
-				Buckets:   prometheus.DefBuckets,
-			},
-			[]string{"subject"},
-		)
-
-		// Subscribe metrics
-		m.messagesReceived = promauto.NewCounterVec(
-			prometheus.CounterOpts{
-				Namespace: namespace,
-				Subsystem: subsystem,
-				Name:      "messages_received_total",
-				Help:      "Total number of messages received",
-			},
-			[]string{"subject"},
-		)
-
-		m.handlerErrors = promauto.NewCounterVec(
-			prometheus.CounterOpts{
-				Namespace: namespace,
-				Subsystem: subsystem,
-				Name:      "handler_errors_total",
-				Help:      "Total number of handler errors",
-			},
-			[]string{"subject", "error_type"},
-		)
-
-		m.handlerDuration = promauto.NewHistogramVec(
-			prometheus.HistogramOpts{
-				Namespace: namespace,
-				Subsystem: subsystem,
-				Name:      "handler_duration_seconds",
-				Help:      "Handler execution duration in seconds",
-				Buckets:   prometheus.DefBuckets,
-			},
-			[]string{"subject"},
-		)
-
-		// Request metrics
-		m.requests = promauto.NewCounterVec(
-			prometheus.CounterOpts{
-				Namespace: namespace,
-				Subsystem: subsystem,
-				Name:      "requests_total",
-				Help:      "Total number of requests sent",
-			},
-			[]string{"subject", "status"},
-		)
-
-		m.requestErrors = promauto.NewCounterVec(
-			prometheus.CounterOpts{
-				Namespace: namespace,
-				Subsystem: subsystem,
-				Name:      "request_errors_total",
-				Help:      "Total number of request errors",
-			},
-			[]string{"subject", "error_type"},
-		)
-
-		m.requestDuration = promauto.NewHistogramVec(
-			prometheus.HistogramOpts{
-				Namespace: namespace,
-				Subsystem: subsystem,
-				Name:      "request_duration_seconds",
-				Help:      "Request operation duration in seconds",
-				Buckets:   prometheus.DefBuckets,
-			},
-			[]string{"subject"},
-		)
-
-		// Initialize connection as up
-		m.connectionUp.Set(1)
+	// Connection metrics
+	m.connectionUp = promauto.NewGauge(prometheus.GaugeOpts{
+		Namespace: namespace,
+		Subsystem: subsystem,
+		Name:      "connection_up",
+		Help:      "Whether the connection to NATS is up (1) or down (0)",
 	})
+
+	m.reconnects = promauto.NewCounter(prometheus.CounterOpts{
+		Namespace: namespace,
+		Subsystem: subsystem,
+		Name:      "reconnects_total",
+		Help:      "Total number of reconnection attempts",
+	})
+
+	// Publish metrics
+	m.messagesPublished = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: namespace,
+			Subsystem: subsystem,
+			Name:      "messages_published_total",
+			Help:      "Total number of messages published",
+		},
+		[]string{"subject", "status"},
+	)
+
+	m.publishErrors = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: namespace,
+			Subsystem: subsystem,
+			Name:      "publish_errors_total",
+			Help:      "Total number of publish errors",
+		},
+		[]string{"subject", "error_type"},
+	)
+
+	m.publishLatency = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: namespace,
+			Subsystem: subsystem,
+			Name:      "publish_latency_seconds",
+			Help:      "Publish operation latency in seconds",
+			Buckets:   prometheus.DefBuckets,
+		},
+		[]string{"subject"},
+	)
+
+	// Subscribe metrics
+	m.messagesReceived = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: namespace,
+			Subsystem: subsystem,
+			Name:      "messages_received_total",
+			Help:      "Total number of messages received",
+		},
+		[]string{"subject"},
+	)
+
+	m.handlerErrors = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: namespace,
+			Subsystem: subsystem,
+			Name:      "handler_errors_total",
+			Help:      "Total number of handler errors",
+		},
+		[]string{"subject", "error_type"},
+	)
+
+	m.handlerDuration = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: namespace,
+			Subsystem: subsystem,
+			Name:      "handler_duration_seconds",
+			Help:      "Handler execution duration in seconds",
+			Buckets:   prometheus.DefBuckets,
+		},
+		[]string{"subject"},
+	)
+
+	// Request metrics
+	m.requests = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: namespace,
+			Subsystem: subsystem,
+			Name:      "requests_total",
+			Help:      "Total number of requests sent",
+		},
+		[]string{"subject", "status"},
+	)
+
+	m.requestErrors = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: namespace,
+			Subsystem: subsystem,
+			Name:      "request_errors_total",
+			Help:      "Total number of request errors",
+		},
+		[]string{"subject", "error_type"},
+	)
+
+	m.requestDuration = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: namespace,
+			Subsystem: subsystem,
+			Name:      "request_duration_seconds",
+			Help:      "Request operation duration in seconds",
+			Buckets:   prometheus.DefBuckets,
+		},
+		[]string{"subject"},
+	)
+
+	// Initialize connection as up
+	m.connectionUp.Set(1)
 }
 
 // recordPublish records a publish operation.
