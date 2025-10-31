@@ -98,7 +98,7 @@ func (h *PacknplayHandle) Close() error {
 	defer h.mu.Unlock()
 
 	if h.closed {
-		return fmt.Errorf("handle already closed")
+		return nil // Idempotent - safe to close multiple times
 	}
 
 	h.closed = true

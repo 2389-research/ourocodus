@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"time"
 
@@ -189,8 +190,9 @@ func (l *PacknplayLauncher) Spawn(ctx context.Context, cfg *agent.SpawnConfig) (
 	}
 
 	// Create cancellable context for runner goroutine
-	_, cancelFunc := context.WithCancel(context.Background())
+	runnerCtx, cancelFunc := context.WithCancel(ctx)
 	handle.cancelFunc = cancelFunc
+	_ = runnerCtx // Reserved for future use when runner.Run supports context
 
 	// Launch runner in goroutine
 	go func() {
@@ -326,7 +328,7 @@ func (l *PacknplayLauncher) discoverContainer(ctx context.Context, worktreeName 
 
 	// List containers with retry (container might not be ready immediately after spawn)
 	var containers []container.Summary
-	maxRetries := 30 // 30 * 100ms = 3 seconds max wait
+	maxRetries := 600 // 600 * 100ms = 60 seconds max wait (accounts for cold starts with image pulls)
 	for i := 0; i < maxRetries; i++ {
 		containers, err = l.dockerClient.ContainerList(ctx, container.ListOptions{
 			Filters: filterArgs,
@@ -466,6 +468,19 @@ func mapToEnvSlice(m map[string]string) []string {
 }
 
 // mapSpawnConfigCredentials maps SpawnConfig.Credentials to Packnplay config.Credentials.
+// credentialEnabled interprets a credential configuration value.
+// Returns false for empty strings, honors explicit boolean strings ("true"/"false"),
+// and treats any other non-empty value as a path/config that enables the credential.
+func credentialEnabled(value string) bool {
+	if value == "" {
+		return false
+	}
+	if parsed, err := strconv.ParseBool(value); err == nil {
+		return parsed
+	}
+	return true // Non-empty non-boolean values (e.g., paths) enable the credential
+}
+
 func mapSpawnConfigCredentials(creds map[string]string) config.Credentials {
 	if len(creds) == 0 {
 		// Default: enable common credentials
@@ -479,11 +494,12 @@ func mapSpawnConfigCredentials(creds map[string]string) config.Credentials {
 	}
 
 	// Map from SpawnConfig credential keys
+	// Use credentialEnabled to support both boolean strings and path/config values
 	return config.Credentials{
-		Git: creds["git"] == "true",
-		SSH: creds["ssh"] == "true",
-		GH:  creds["gh"] == "true" || creds["github"] == "true",
-		GPG: creds["gpg"] == "true",
-		NPM: creds["npm"] == "true",
+		Git: credentialEnabled(creds["git"]),
+		SSH: credentialEnabled(creds["ssh"]),
+		GH:  credentialEnabled(creds["gh"]) || credentialEnabled(creds["github"]),
+		GPG: credentialEnabled(creds["gpg"]),
+		NPM: credentialEnabled(creds["npm"]),
 	}
 }

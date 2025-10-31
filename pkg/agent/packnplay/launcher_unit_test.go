@@ -178,10 +178,10 @@ func TestPacknplayHandle_Methods(t *testing.T) {
 			t.Errorf("Close() error = %v", err)
 		}
 
-		// Second close should error
+		// Second close should be idempotent (return nil)
 		err = handle.Close()
-		if err == nil {
-			t.Error("expected error on second Close(), got nil")
+		if err != nil {
+			t.Errorf("second Close() should be idempotent, got error: %v", err)
 		}
 	})
 }
