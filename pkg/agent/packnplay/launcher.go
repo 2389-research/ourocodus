@@ -26,6 +26,7 @@ import (
 // PacknplayLauncher implements the AgentLauncher interface using Packnplay.
 type PacknplayLauncher struct {
 	mu           sync.RWMutex
+	spawnMu      sync.Mutex // Serializes spawn operations to avoid TTY conflicts
 	dockerClient *client.Client
 	handles      map[string]*PacknplayHandle
 	projectPath  string
@@ -195,6 +196,12 @@ func (l *PacknplayLauncher) Spawn(ctx context.Context, cfg *agent.SpawnConfig) (
 	handle.cancelFunc = cancelFunc
 	_ = runnerCtx // Reserved for future use when runner.Run supports context
 
+	// Serialize spawn operations to prevent TTY conflicts
+	// When multiple spawns happen in parallel, the underlying docker client
+	// (which uses exec.Command) inherits the parent's stdin, causing
+	// "the input device is not a TTY" errors
+	l.spawnMu.Lock()
+
 	// Launch runner in goroutine
 	go func() {
 		if l.verbose {
@@ -209,6 +216,7 @@ func (l *PacknplayLauncher) Spawn(ctx context.Context, cfg *agent.SpawnConfig) (
 	// We'll poll for the container using Packnplay's label scheme
 	containerID, workspacePath, err := l.discoverContainer(ctx, worktreeName)
 	if err != nil {
+		l.spawnMu.Unlock()
 		cancelFunc()
 		return nil, fmt.Errorf("failed to discover spawned container: %w", err)
 	}
@@ -218,10 +226,14 @@ func (l *PacknplayLauncher) Spawn(ctx context.Context, cfg *agent.SpawnConfig) (
 
 	// Attach I/O streams via Docker Engine API
 	if err := l.attachStreams(ctx, handle); err != nil {
+		l.spawnMu.Unlock()
 		cancelFunc()
 		_ = l.stopContainer(ctx, containerID)
 		return nil, fmt.Errorf("failed to attach I/O streams: %w", err)
 	}
+
+	// Release spawn lock - container is now fully attached and ready
+	l.spawnMu.Unlock()
 
 	// Store handle
 	l.mu.Lock()

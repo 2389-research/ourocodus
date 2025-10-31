@@ -67,7 +67,7 @@ func main() {
 
 	launcher, err := packnplay.NewLauncher(
 		packnplay.WithProjectPath(projectPath),
-		packnplay.WithVerbose(false),
+		packnplay.WithVerbose(true),
 	)
 	if err != nil {
 		fatal("Failed to create launcher: %v", err)
@@ -82,57 +82,16 @@ func main() {
 	fmt.Println("Each container gets its own isolated git worktree...")
 	fmt.Println()
 
-	// Spawn all racers in parallel
-	var wg sync.WaitGroup
-	startGate := make(chan struct{})
-
+	// Spawn all racers (serially to avoid TTY conflicts)
+	// Note: Containers still run in parallel after spawning
 	for i, name := range racerNames {
 		racers[i] = &racer{
 			name:  name,
 			color: racerColors[i%len(racerColors)],
 		}
-
-		wg.Add(1)
-		go func(r *racer, idx int) {
-			defer wg.Done()
-
-			// Create unique racing task for each container
-			// Each racer counts to a random number (simulating work)
-			countTo := 15 + (idx * 3) // Stagger finish times for drama
-			script := fmt.Sprintf(`
-				echo "🏎️  %s starting engine..."
-				for i in $(seq 1 %d); do
-					echo "🏁 Lap $i/%d"
-					sleep 0.$(( RANDOM %% 3 + 1 ))
-				done
-				echo "🏆 %s crossed the finish line!"
-			`, r.name, countTo, countTo, r.name)
-
-			cfg := &agent.SpawnConfig{
-				Role:    fmt.Sprintf("racer-%d", idx),
-				Image:   "busybox:latest",
-				Command: []string{"sh", "-c", script},
-			}
-
-			<-startGate // Wait for starting gun
-			r.startTime = time.Now()
-
-			handle, err := launcher.Spawn(ctx, cfg)
-			if err != nil {
-				fmt.Printf("%s❌ %s failed to spawn: %v%s\n", r.color, r.name, err, colorReset)
-				return
-			}
-			r.handle = handle
-			r.containerID = fmt.Sprintf("racer-%d-%s", idx, handle.Workspace()[len(handle.Workspace())-6:]) // NEW: extract short ID
-
-			// Stream output with colors
-			go streamOutput(r)
-
-		}(racers[i], i)
 	}
 
 	// Show pre-race info
-	time.Sleep(1 * time.Second)
 	fmt.Println(colorBold + "🏁 STARTING POSITIONS:" + colorReset)
 	for i, r := range racers {
 		fmt.Printf("  Lane %d: %s%s%s\n", i+1, r.color, r.name, colorReset)
@@ -148,11 +107,41 @@ func main() {
 	fmt.Println(colorGreen + colorBold + "   GO! 🏁" + colorReset)
 	fmt.Println()
 
-	// Open starting gate
-	close(startGate)
+	// Spawn containers serially
+	for i, r := range racers {
+		// Create unique racing task for each container
+		// Each racer counts to a random number (simulating work)
+		countTo := 15 + (i * 3) // Stagger finish times for drama
+		script := fmt.Sprintf(`
+			echo "🏎️  %s starting engine..."
+			for i in $(seq 1 %d); do
+				echo "🏁 Lap $i/%d"
+				sleep 0.$(( RANDOM %% 3 + 1 ))
+			done
+			echo "🏆 %s crossed the finish line!"
+		`, r.name, countTo, countTo, r.name)
 
-	// Wait for all spawns to complete
-	wg.Wait()
+		cfg := &agent.SpawnConfig{
+			Role:    fmt.Sprintf("racer-%d", i),
+			Image:   "busybox:latest",
+			Command: []string{"sh", "-c", script},
+		}
+
+		r.startTime = time.Now()
+
+		handle, err := launcher.Spawn(ctx, cfg)
+		if err != nil {
+			fmt.Printf("%s❌ %s failed to spawn: %v%s\n", r.color, r.name, err, colorReset)
+			continue
+		}
+		r.handle = handle
+		r.containerID = fmt.Sprintf("racer-%d-%s", i, handle.Workspace()[len(handle.Workspace())-6:])
+
+		// Stream output with colors
+		go streamOutput(r)
+
+		fmt.Printf("%s✓ %s spawned and ready%s\n", r.color, r.name, colorReset)
+	}
 
 	// Display race in progress
 	fmt.Println()

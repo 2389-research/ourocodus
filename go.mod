@@ -85,3 +85,10 @@ require (
 	github.com/stretchr/testify v1.11.1
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
+
+// Use our fork with comprehensive stdin detach fixes
+//   - pkg/docker/client.go: Docker CLI wrapper
+//   - pkg/runner/runner.go: Remove -it flags from detached containers
+//   - pkg/userdetect/detect.go: User detection docker commands
+//   - pkg/git/worktree.go: Git worktree commands
+replace github.com/obra/packnplay => github.com/2389-research/packnplay v1.0.3-0.20251031201910-406e910bc750
