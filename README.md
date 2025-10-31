@@ -54,6 +54,18 @@ PWA (Browser) ←WebSocket→ Relay (Go) ←stdio→ N× Claude Code ACP process
 
 The system supports multiple concurrent agents (no hard limit).
 
+## Dependencies
+
+### Core Dependencies
+
+- **[Packnplay](https://github.com/obra/packnplay) v1.0.2** - Docker containerization and git worktree management
+  - Used for: Containerized agent runtime, automatic worktree management, credential mounting
+  - License: MIT
+  - Version pinning: Explicitly pinned to stable releases for reliability
+  - Updating: `go get github.com/obra/packnplay@vX.Y.Z && go mod tidy`
+
+See [NOTICE](NOTICE) for complete third-party license information.
+
 ## Documentation
 
 - **[PRD.md](PRD.md)** - Product vision and requirements
