@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -278,9 +277,4 @@ func colorOrange() string {
 func fatal(format string, args ...interface{}) {
 	fmt.Fprintf(os.Stderr, colorRed+"❌ "+format+colorReset+"\n", args...)
 	os.Exit(1)
-}
-
-// streamStderr reads stderr in background (for debugging)
-func streamStderr(r *racer) {
-	_, _ = io.Copy(io.Discard, r.handle.Stderr())
 }

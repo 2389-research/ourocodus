@@ -248,7 +248,7 @@ func TestWorktreeNameGeneration(t *testing.T) {
 	// Verify worktree name format would be: agent-{ULID}
 	// This is implicit in the Spawn implementation
 	// Actual testing happens in integration tests where we spawn real containers
-	
+
 	// This is a placeholder test - the actual verification happens in integration tests
 	// where we can inspect real worktree names created by Packnplay
 }
