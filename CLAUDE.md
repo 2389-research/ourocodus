@@ -191,6 +191,35 @@ The `pkg/agent/packnplay` package includes integration tests that spawn real Doc
 - Git repository (tests run in current repo)
 - Network access to pull container images (busybox, etc.)
 
+**Docker Setup:**
+
+For **Colima** users (macOS/Linux):
+```bash
+# Start Colima
+colima start
+
+# Set Docker socket environment variable
+export DOCKER_HOST="unix://${HOME}/.colima/default/docker.sock"
+
+# Verify connection
+docker ps
+```
+
+For **Docker Desktop**:
+```bash
+# Docker Desktop uses the default socket
+# No additional setup required
+docker ps
+```
+
+The PacknplayLauncher respects the `DOCKER_HOST` environment variable. Alternatively, use `WithDockerHost()` option:
+```go
+launcher, err := packnplay.NewLauncher(
+    packnplay.WithProjectPath("."),
+    packnplay.WithDockerHost("unix://${HOME}/.colima/default/docker.sock"),
+)
+```
+
 **Running integration tests:**
 
 ```bash

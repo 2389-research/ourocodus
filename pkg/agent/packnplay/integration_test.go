@@ -3,7 +3,6 @@
 package packnplay
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"io"

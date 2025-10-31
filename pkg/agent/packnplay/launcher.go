@@ -9,7 +9,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/client"
@@ -75,6 +74,26 @@ func WithVerbose(verbose bool) LauncherOption {
 // WithDockerClient injects a Docker client (useful for testing).
 func WithDockerClient(dockerClient *client.Client) LauncherOption {
 	return func(l *PacknplayLauncher) error {
+		l.dockerClient = dockerClient
+		return nil
+	}
+}
+
+// WithDockerHost sets a custom Docker host (e.g., for Colima).
+// Example: "unix://$HOME/.colima/default/docker.sock"
+// If not set, uses DOCKER_HOST environment variable or default socket.
+func WithDockerHost(host string) LauncherOption {
+	return func(l *PacknplayLauncher) error {
+		if l.dockerClient != nil {
+			return fmt.Errorf("cannot set Docker host when Docker client is already set")
+		}
+		dockerClient, err := client.NewClientWithOpts(
+			client.WithHost(host),
+			client.WithAPIVersionNegotiation(),
+		)
+		if err != nil {
+			return fmt.Errorf("failed to create Docker client with host %s: %w", host, err)
+		}
 		l.dockerClient = dockerClient
 		return nil
 	}
@@ -306,7 +325,7 @@ func (l *PacknplayLauncher) discoverContainer(ctx context.Context, worktreeName 
 	filterArgs.Add("status", "running")
 
 	// List containers with retry (container might not be ready immediately after spawn)
-	var containers []types.Container
+	var containers []container.Summary
 	maxRetries := 30 // 30 * 100ms = 3 seconds max wait
 	for i := 0; i < maxRetries; i++ {
 		containers, err = l.dockerClient.ContainerList(ctx, container.ListOptions{

@@ -22,6 +22,8 @@
 //	launcher, err := packnplay.NewLauncher(
 //		packnplay.WithProjectPath("/path/to/repo"),
 //		packnplay.WithDefaultImage("ubuntu:22.04"),
+//		// Optional: Custom Docker host for Colima
+//		// packnplay.WithDockerHost("unix://${HOME}/.colima/default/docker.sock"),
 //	)
 //	if err != nil {
 //		log.Fatal(err)

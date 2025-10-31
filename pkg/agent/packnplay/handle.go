@@ -40,6 +40,11 @@ func (h *PacknplayHandle) Workspace() string {
 	return h.workspace
 }
 
+// Role returns the agent's role identifier.
+func (h *PacknplayHandle) Role() string {
+	return h.role
+}
+
 // ContainerID returns the container ID.
 func (h *PacknplayHandle) ContainerID() string {
 	return h.containerID
