@@ -68,7 +68,9 @@ func main() {
 	racerNames := []string{"🔴 RedRocket", "🟢 GreenMachine", "🟡 YellowFlash", "🔵 BlueBlaze", "🟣 PurplePower"}
 	racers := make([]*racer, len(racerNames))
 
-	fmt.Println("📦 Spawning containers in parallel worktrees...")
+	fmt.Println(colorBold + "🏗️  SPAWNING CONTAINERS & WORKTREES" + colorReset)
+	fmt.Println("═══════════════════════════════════════════════════════════")
+	fmt.Println("Each container gets its own isolated git worktree...")
 	fmt.Println()
 
 	// Spawn all racers in parallel
