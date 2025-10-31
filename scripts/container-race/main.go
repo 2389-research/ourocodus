@@ -40,13 +40,15 @@ type racer struct {
 }
 
 func main() {
-	fmt.Println(colorBold + "🏁 OUROCODUS CONTAINER RACE 🏁" + colorReset)
-	fmt.Println("═══════════════════════════════════════════════════════════")
-	fmt.Println()
-	fmt.Println("🚀 Showcasing PackNplay: Containerized Agents + Git Worktrees")
-	fmt.Println()
+	displayIntro()
 
 	ctx := context.Background()
+
+	// Auto-detect and configure Colima on macOS
+	if dockerHost := detectColimaSocket(); dockerHost != "" {
+		fmt.Printf("🐳 Detected Colima at %s\n\n", dockerHost)
+		os.Setenv("DOCKER_HOST", dockerHost)
+	}
 
 	// Create PackNplay launcher
 	projectPath, err := filepath.Abs(".")
@@ -203,6 +205,27 @@ func main() {
 	fmt.Println("  ✓ Docker + PackNplay integration")
 }
 
+func displayIntro() {
+	fmt.Println(colorBold + "🏁 OUROCODUS CONTAINER RACE 🏁" + colorReset)
+	fmt.Println("═══════════════════════════════════════════════════════════")
+	fmt.Println()
+	fmt.Println(colorBold + "📦 What is PackNplay?" + colorReset)
+	fmt.Println("PackNplay spawns containerized agents with isolated git worktrees.")
+	fmt.Println("Each agent gets its own Docker container + its own git workspace.")
+	fmt.Println("Perfect for parallel execution without conflicts!")
+	fmt.Println()
+	fmt.Println(colorBold + "🎯 This Demo Shows:" + colorReset)
+	fmt.Println("  • Spawning 5 containers in parallel")
+	fmt.Println("  • Each with isolated git worktree")
+	fmt.Println("  • Real-time I/O streaming from all containers")
+	fmt.Println("  • Complete lifecycle: spawn → run → stop → cleanup")
+	fmt.Println()
+	fmt.Println(colorBold + "🏎️  The Race:" + colorReset)
+	fmt.Println("Each container counts through \"laps\" at different speeds.")
+	fmt.Println("First to finish wins!")
+	fmt.Println()
+}
+
 func streamOutput(r *racer) {
 	scanner := bufio.NewScanner(r.handle.Stdout())
 	for scanner.Scan() {
@@ -272,6 +295,26 @@ func displayPodium(finishOrder []*racer) {
 
 func colorOrange() string {
 	return "\033[38;5;208m" // 256-color orange
+}
+
+func detectColimaSocket() string {
+	// Check if DOCKER_HOST is already set
+	if host := os.Getenv("DOCKER_HOST"); host != "" {
+		return host
+	}
+
+	// Check for Colima default socket on macOS
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+
+	colimaSocket := filepath.Join(homeDir, ".colima", "default", "docker.sock")
+	if _, err := os.Stat(colimaSocket); err == nil {
+		return "unix://" + colimaSocket
+	}
+
+	return ""
 }
 
 func fatal(format string, args ...interface{}) {
