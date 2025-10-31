@@ -781,6 +781,201 @@ for _, cfg := range configs {
 
 ---
 
+## Local Development with NATS
+
+### Quick Start
+
+Start the local NATS server with JetStream:
+
+```bash
+# Start services
+docker-compose up -d
+
+# Verify NATS is healthy
+curl http://localhost:8222/healthz
+# Expected: {"status":"ok"}
+
+# Check JetStream streams were created
+docker-compose logs nats-init
+# Expected: ✓ SESSION_EVENTS stream created
+#           ✓ WORK_RESULTS stream created
+```
+
+### NATS CLI Installation
+
+Install the [NATS CLI](https://github.com/nats-io/natscli) for interactive testing:
+
+```bash
+# macOS
+brew install nats-io/nats-tools/nats
+
+# Linux
+curl -sf https://binaries.nats.dev/nats-io/natscli/nats@latest | sh
+
+# Windows
+scoop bucket add nats https://github.com/nats-io/scoop.git
+scoop install nats
+```
+
+### Inspecting JetStream Streams
+
+```bash
+# List all streams
+nats stream list
+
+# View SESSION_EVENTS stream details
+nats stream info SESSION_EVENTS
+
+# View WORK_RESULTS stream details
+nats stream info WORK_RESULTS
+
+# Monitor stream activity in real-time with visual graph
+nats stream graph SESSION_EVENTS
+nats stream graph WORK_RESULTS
+
+# Alternative: Monitor JetStream advisories (stored events)
+nats event --js-advisory
+```
+
+### Publishing Test Messages
+
+```bash
+# Publish a session created event
+nats pub "sessions.test-123.events" '{
+  "type": "session.created",
+  "session_id": "test-123",
+  "timestamp": "2025-10-30T20:00:00Z"
+}'
+
+# Publish multiple test events
+for i in {1..10}; do
+  nats pub "sessions.test-$i.events" "{\"session_id\": \"test-$i\"}"
+done
+
+# Publish a work result
+nats pub "sessions.test-123.results.coder" '{
+  "session_id": "test-123",
+  "role": "coder",
+  "status": "completed",
+  "output": "// Generated code here"
+}'
+
+# Tip: For complex JSON payloads, save to a file and use @ syntax
+echo '{"session_id": "test-123", "data": {...}}' > payload.json
+nats pub "sessions.test-123.events" @payload.json
+```
+
+**Tip:** For complex JSON payloads, save them to a file and use the `@filename.json` syntax. This is more maintainable than multi-line shell strings, especially for large or frequently-used payloads.
+
+### Subscribing to Messages
+
+```bash
+# Subscribe to all session events
+nats sub "sessions.*.events"
+
+# Subscribe to events for a specific session
+nats sub "sessions.test-123.events"
+
+# Subscribe to all work results
+nats sub "sessions.*.results.*"
+
+# Subscribe with queue group (load balancing)
+nats sub "sessions.*.events" --queue=processors
+
+# Multiple subscribers in same queue group will load-balance
+# Terminal 1:
+nats sub "sessions.*.events" --queue=workers
+# Terminal 2:
+nats sub "sessions.*.events" --queue=workers
+# Only one subscriber receives each message
+```
+
+### Request/Reply Testing
+
+```bash
+# Start a responder (simulates approval service)
+nats reply "approvals.request" "APPROVED"
+
+# Send a request and wait for reply
+nats request "approvals.request" '{
+  "session_id": "test-123",
+  "agent_role": "coder",
+  "action": "commit_code"
+}'
+
+# Request with timeout
+nats request "approvals.request" "test" --timeout=5s
+```
+
+### Monitoring and Debugging
+
+```bash
+# View server statistics
+curl http://localhost:8222/varz | jq
+
+# View JetStream statistics
+curl http://localhost:8222/jsz | jq
+
+# View connections
+curl http://localhost:8222/connz | jq
+
+# Monitor all messages (use with caution in production!)
+nats sub ">"
+
+# Monitor specific subject patterns
+nats sub "sessions.*.events"
+nats sub "sessions.>"
+```
+
+### JetStream Consumer Testing
+
+```bash
+# Create a consumer for SESSION_EVENTS stream
+nats consumer add SESSION_EVENTS test-consumer \
+  --filter="sessions.*.events" \
+  --deliver all \
+  --ack explicit \
+  --max-deliver 3
+
+# Pull messages from consumer
+nats consumer next SESSION_EVENTS test-consumer --count=10
+
+# View consumer information
+nats consumer info SESSION_EVENTS test-consumer
+
+# Delete consumer when done
+nats consumer rm SESSION_EVENTS test-consumer
+```
+
+### Cleaning Up
+
+```bash
+# Stop services
+docker-compose down
+
+# Remove all data (including JetStream streams)
+docker-compose down -v
+
+# Restart fresh
+docker-compose up -d
+```
+
+### Common Issues
+
+**Issue:** `nats` command not found
+**Solution:** Install NATS CLI using instructions above
+
+**Issue:** Connection refused on port 4222
+**Solution:** Ensure Docker services are running: `docker-compose ps`
+
+**Issue:** Streams not found
+**Solution:** Check init script ran successfully: `docker-compose logs nats-init`
+
+**Issue:** Messages not persisting after restart
+**Solution:** Ensure volume is mounted: `docker volume ls | grep nats-data`
+
+---
+
 ## References
 
 - [NATS Documentation](https://docs.nats.io/)

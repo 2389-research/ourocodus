@@ -1,0 +1,73 @@
+services:
+  nats:
+    image: nats:2.10-alpine
+    container_name: ourocodus-nats
+    command:
+      - "--jetstream"
+      - "--config=/etc/nats/nats-server.conf"
+    ports:
+      - "4222:4222"   # Client connections
+      - "8222:8222"   # HTTP monitoring endpoints (/varz, /connz, /healthz, /jsz, etc.)
+    volumes:
+      - ./configs/nats-server.conf:/etc/nats/nats-server.conf:ro
+      - nats-data:/data
+    networks:
+      - ourocodus-network
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8222/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  nats-init:
+    image: natsio/nats-box:latest
+    container_name: ourocodus-nats-init
+    depends_on:
+      nats:
+        condition: service_healthy
+    volumes:
+      - ./scripts/nats-init.sh:/scripts/nats-init.sh:ro
+    networks:
+      - ourocodus-network
+    command: ["/scripts/nats-init.sh"]
+    restart: "no"
+
+  nats-exporter:
+    image: natsio/prometheus-nats-exporter:latest
+    container_name: ourocodus-nats-exporter
+    depends_on:
+      nats:
+        condition: service_healthy
+    ports:
+      - "7777:7777"   # Prometheus metrics endpoint
+    command:
+      - "-varz"
+      - "-jsz=all"
+      - "-connz"
+      - "-routez"
+      - "-subz"
+      - "http://nats:8222"
+    networks:
+      - ourocodus-network
+    restart: unless-stopped
+
+  # Placeholder for relay service (to be added in future PR)
+  # relay:
+  #   build:
+  #     context: .
+  #     dockerfile: cmd/relay/Dockerfile
+  #   depends_on:
+  #     nats:
+  #       condition: service_healthy
+  #   networks:
+  #     - ourocodus-network
+
+volumes:
+  nats-data:
+    driver: local
+
+networks:
+  ourocodus-network:
+    driver: bridge

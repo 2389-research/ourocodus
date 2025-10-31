@@ -1,4 +1,4 @@
-.PHONY: all build test smoke-relay smoke-session smoke-all test-e2e demo interactive run stop clean lint fmt check pre-commit
+.PHONY: all build test smoke-relay smoke-session smoke-all test-e2e demo interactive run stop clean lint fmt check pre-commit nats-start nats-stop nats-logs nats-health
 
 # Default target: build and test
 all: build test
@@ -96,3 +96,46 @@ pre-commit: fmt
 	$(MAKE) build
 	$(MAKE) test
 	@echo "All checks passed!"
+
+# Start NATS server with JetStream
+nats-start:
+	@echo "Starting NATS server with JetStream..."
+	@docker-compose up -d nats
+	@echo "Waiting for NATS to be healthy..."
+	@timeout 30 sh -c 'until docker-compose ps nats | grep -q "healthy"; do sleep 1; done' || (echo "NATS failed to become healthy" && exit 1)
+	@echo "Running NATS initialization..."
+	@docker-compose up nats-init
+	@echo "Starting Prometheus exporter..."
+	@docker-compose up -d nats-exporter
+	@echo ""
+	@echo "✓ NATS server started successfully"
+	@echo ""
+	@echo "Endpoints:"
+	@echo "  - NATS client: nats://localhost:4222"
+	@echo "  - HTTP monitoring: http://localhost:8222"
+	@echo "  - Prometheus metrics: http://localhost:7777/metrics"
+	@echo ""
+	@echo "Verify with: make nats-health"
+
+# Stop NATS server
+nats-stop:
+	@echo "Stopping NATS server..."
+	@docker-compose stop nats nats-init nats-exporter
+	@echo "✓ NATS server stopped"
+
+# View NATS server logs
+nats-logs:
+	@docker-compose logs -f nats
+
+# Check NATS server health
+nats-health:
+	@echo "Checking NATS server health..."
+	@echo ""
+	@echo "=== Health Check ==="
+	@curl -sf http://localhost:8222/healthz && echo "✓ Health endpoint OK" || echo "✗ Health endpoint failed"
+	@echo ""
+	@echo "=== Server Info ==="
+	@curl -s http://localhost:8222/varz | jq -r '"Version: " + .version, "Uptime: " + .uptime, "Connections: " + (.connections | tostring), "JetStream: " + (if .jetstream.config.max_memory > 0 then "enabled" else "disabled" end)'
+	@echo ""
+	@echo "=== JetStream Streams ==="
+	@docker-compose exec -T nats nats stream list 2>/dev/null || echo "Note: Install nats CLI to list streams (see docs/NATS.md)"
