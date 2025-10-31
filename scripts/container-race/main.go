@@ -30,13 +30,14 @@ const (
 var racerColors = []string{colorRed, colorGreen, colorYellow, colorBlue, colorPurple, colorCyan}
 
 type racer struct {
-	name      string
-	color     string
-	handle    agent.AgentHandle
-	startTime time.Time
-	endTime   time.Time
-	output    []string
-	position  int
+	name        string
+	color       string
+	handle      agent.AgentHandle
+	containerID string // NEW: track container ID for cleanup display
+	startTime   time.Time
+	endTime     time.Time
+	output      []string
+	position    int
 }
 
 func main() {
@@ -114,6 +115,7 @@ func main() {
 				return
 			}
 			r.handle = handle
+			r.containerID = fmt.Sprintf("racer-%d-%s", idx, handle.Workspace()[len(handle.Workspace())-6:]) // NEW: extract short ID
 
 			// Stream output with colors
 			go streamOutput(r)
