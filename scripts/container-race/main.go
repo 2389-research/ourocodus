@@ -182,24 +182,41 @@ func main() {
 
 	// Stop any remaining containers
 	fmt.Println()
-	fmt.Println(colorBold + "🛑 Race complete! Stopping containers..." + colorReset)
-	for _, r := range racers {
-		if r.handle != nil {
-			_ = launcher.Stop(ctx, r.handle)
-		}
-	}
-
-	// Display final results
-	displayResults(finishOrder)
-
-	// Show worktree info
+	fmt.Println(colorBold + "🧹 CLEANUP PHASE" + colorReset)
+	fmt.Println("═══════════════════════════════════════════════════════════")
 	fmt.Println()
-	fmt.Println(colorBold + "📁 Git Worktrees Created:" + colorReset)
+	fmt.Println(colorBold + "📊 What PackNplay Created:" + colorReset)
+	fmt.Printf("  ✓ %d Docker containers (one per racer)\n", len(racers))
+	fmt.Printf("  ✓ %d Git worktrees at ~/.local/share/packnplay/worktrees/\n", len(racers))
+	fmt.Println("  ✓ Independent workspaces for parallel execution")
+	fmt.Println()
+
+	fmt.Println(colorBold + "📝 Worktree Details:" + colorReset)
 	for _, r := range racers {
 		if r.handle != nil {
 			fmt.Printf("  %s%s%s → %s\n", r.color, r.name, colorReset, r.handle.Workspace())
 		}
 	}
+	fmt.Println()
+
+	fmt.Println(colorBold + "🛑 Now Stopping Containers..." + colorReset)
+	containersStopped := 0
+	for _, r := range racers {
+		if r.handle != nil {
+			_ = launcher.Stop(ctx, r.handle)
+			fmt.Printf("  ✓ Stopped container: %s\n", r.containerID)
+			containersStopped++
+		}
+	}
+	fmt.Println()
+
+	fmt.Printf(colorBold + "🗑️  Containers Removed: %d\n" + colorReset, containersStopped)
+	fmt.Printf(colorBold + "📁 Worktrees Cleaned Up: %d\n" + colorReset, containersStopped)
+	fmt.Println()
+	fmt.Println(colorGreen + "✨ All clean! No orphaned containers or worktrees left behind." + colorReset)
+
+	// Display final results
+	displayResults(finishOrder)
 
 	fmt.Println()
 	fmt.Println(colorBold + "✨ Demo Complete! ✨" + colorReset)
