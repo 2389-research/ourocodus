@@ -57,3 +57,7 @@ run = "make demo"
 [tasks.interactive]
 description = "Run interactive REPL for manual testing"
 run = "make interactive"
+
+[tasks.container-race]
+description = "🏁 Run Container Race demo (PackNplay showcase)"
+run = "make container-race"

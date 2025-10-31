@@ -1,4 +1,4 @@
-.PHONY: all build test smoke-relay smoke-session smoke-all test-e2e demo interactive run stop clean lint fmt check pre-commit nats-start nats-stop nats-logs nats-health
+.PHONY: all build test smoke-relay smoke-session smoke-all test-e2e demo interactive container-race run stop clean lint fmt check pre-commit nats-start nats-stop nats-logs nats-health
 
 # Default target: build and test
 all: build test
@@ -51,6 +51,17 @@ demo:
 interactive:
 	@echo "Starting interactive REPL..."
 	go run scripts/interactive/main.go
+
+# Run container race demo showcasing PackNplay integration
+container-race:
+	@echo "🏁 Starting Container Race demo..."
+	@echo "Showcasing: Parallel containers + Git worktrees + Real-time I/O"
+	@if ! docker ps > /dev/null 2>&1; then \
+		echo "❌ Error: Docker is not running"; \
+		echo "Please start Docker (or Colima) and try again"; \
+		exit 1; \
+	fi
+	go run scripts/container-race/main.go
 
 # Start the system (placeholder for now)
 run:
