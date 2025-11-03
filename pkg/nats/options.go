@@ -3,6 +3,7 @@ package nats
 import (
 	"crypto/tls"
 	"fmt"
+	"math/rand/v2"
 	"os"
 	"strconv"
 	"time"
@@ -323,6 +324,18 @@ func WithRequestCorrelationID(id string) ReqOption {
 type BackoffStrategy interface {
 	Next(attempt int) time.Duration
 	Reset()
+}
+
+// RandomSource provides random number generation for jitter calculations.
+type RandomSource interface {
+	Float64() float64
+}
+
+// defaultRandomSource uses the global math/rand/v2 random source.
+type defaultRandomSource struct{}
+
+func (defaultRandomSource) Float64() float64 {
+	return rand.Float64()
 }
 
 // exponentialBackoff implements exponential backoff with jitter.
