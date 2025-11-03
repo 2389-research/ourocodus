@@ -636,7 +636,7 @@ func TestPublish_WithRetryAttempts(t *testing.T) {
 		WithURL(srv.ClientURL()),
 		WithName("test-retry-attempts"),
 		WithRetryAttempts(5),
-		WithRetryBackoff(newExponentialBackoff(10*time.Millisecond, 100*time.Millisecond)),
+		WithRetryBackoff(newExponentialBackoff(10*time.Millisecond, 100*time.Millisecond, nil)),
 	)
 	if err != nil {
 		t.Fatalf("NewClient() error = %v", err)
