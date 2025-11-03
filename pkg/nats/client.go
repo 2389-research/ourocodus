@@ -309,7 +309,7 @@ func (c *client) Request(ctx context.Context, subject string, data []byte, opts 
 
 	c.metrics.recordRequest(subject, duration, nil)
 
-	return wrapNatsMessage(resp), nil
+	return wrapNatsMessage(resp, c.config.CorrelationHeader), nil
 }
 
 // JS returns the JetStream client interface.
