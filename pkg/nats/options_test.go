@@ -285,3 +285,24 @@ func TestConfigValidation(t *testing.T) {
 		})
 	}
 }
+
+// TestExponentialBackoff_DeterministicJitter verifies deterministic jitter calculation.
+func TestExponentialBackoff_DeterministicJitter(t *testing.T) {
+	// Use fixed random source returning 0.5
+	backoff := newExponentialBackoff(100*time.Millisecond, 5*time.Second, fixedRandomSource{0.5})
+
+	// First attempt: base = 100ms, jitter = 100ms * 0.25 * (0.5 + 0.5*0.5) = 18.75ms
+	// Total = 100ms + 18.75ms = 118.75ms
+	duration := backoff.Next(1)
+	expected := 100*time.Millisecond + time.Duration(float64(100*time.Millisecond)*0.25*(0.5+0.5*0.5))
+	if duration != expected {
+		t.Errorf("jitter calculation with fixed random should be deterministic: got %v, want %v", duration, expected)
+	}
+
+	// Reset and verify consistency
+	backoff.Reset()
+	duration2 := backoff.Next(1)
+	if duration2 != expected {
+		t.Errorf("fixed random should produce same result: got %v, want %v", duration2, expected)
+	}
+}
