@@ -297,3 +297,17 @@ func TestDefaultSubOptions_PendingLimits(t *testing.T) {
 		t.Errorf("pendingLimitBytes = %d, want %d (NATS default)", opts.pendingLimitBytes, 64*1024*1024)
 	}
 }
+
+func TestWithPendingLimits(t *testing.T) {
+	opts := defaultSubOptions()
+
+	// Apply custom limits
+	WithPendingLimits(1000, 5*1024*1024)(opts)
+
+	if opts.pendingLimitMsgs != 1000 {
+		t.Errorf("pendingLimitMsgs = %d, want %d", opts.pendingLimitMsgs, 1000)
+	}
+	if opts.pendingLimitBytes != 5*1024*1024 {
+		t.Errorf("pendingLimitBytes = %d, want %d", opts.pendingLimitBytes, 5*1024*1024)
+	}
+}
