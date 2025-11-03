@@ -285,3 +285,15 @@ func TestConfigValidation(t *testing.T) {
 		})
 	}
 }
+
+func TestDefaultSubOptions_PendingLimits(t *testing.T) {
+	opts := defaultSubOptions()
+
+	// Verify NATS default values
+	if opts.pendingLimitMsgs != 512*1024 {
+		t.Errorf("pendingLimitMsgs = %d, want %d (NATS default)", opts.pendingLimitMsgs, 512*1024)
+	}
+	if opts.pendingLimitBytes != 64*1024*1024 {
+		t.Errorf("pendingLimitBytes = %d, want %d (NATS default)", opts.pendingLimitBytes, 64*1024*1024)
+	}
+}
