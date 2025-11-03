@@ -76,7 +76,7 @@ func (s *Subscription) messageHandler(msg *nats.Msg) {
 	start := time.Now()
 
 	// Wrap message
-	wrappedMsg := wrapNatsMessage(msg)
+	wrappedMsg := wrapNatsMessage(msg, s.client.config.CorrelationHeader)
 
 	// Create context for handler
 	ctx := context.Background()
