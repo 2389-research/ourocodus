@@ -94,3 +94,16 @@ func TestMessage_WrapNatsMessage(t *testing.T) {
 		t.Errorf("Headers[Custom-Header] = %q, want %q", wrapped.Headers["Custom-Header"], "custom-value")
 	}
 }
+
+// TestMessage_WrapNatsMessage_CustomCorrelationHeader verifies custom correlation header extraction.
+func TestMessage_WrapNatsMessage_CustomCorrelationHeader(t *testing.T) {
+	natsMsg := nats.NewMsg("test.subject")
+	natsMsg.Header = nats.Header{}
+	natsMsg.Header.Set("X-Custom-Correlation", "custom-id-456")
+
+	wrapped := wrapNatsMessage(natsMsg, "X-Custom-Correlation")
+
+	if wrapped.CorrelationID != "custom-id-456" {
+		t.Errorf("CorrelationID = %q, want %q", wrapped.CorrelationID, "custom-id-456")
+	}
+}
