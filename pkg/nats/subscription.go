@@ -55,8 +55,8 @@ func (s *Subscription) start(_ context.Context) error {
 		return fmt.Errorf("subscribe to %q: %w", s.subject, err)
 	}
 
-	// Set pending limits
-	if err := s.natsSub.SetPendingLimits(-1, -1); err != nil {
+	// Set pending limits from options (defaults: 512K msgs, 64MB bytes)
+	if err := s.natsSub.SetPendingLimits(s.opts.pendingLimitMsgs, s.opts.pendingLimitBytes); err != nil {
 		_ = s.natsSub.Unsubscribe()
 		return fmt.Errorf("set pending limits: %w", err)
 	}
