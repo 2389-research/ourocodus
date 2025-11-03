@@ -37,9 +37,11 @@ require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/erikgeiser/coninput v0.0.0-20211004153227-1c3628e74d0f // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
+	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/golang/protobuf v1.5.3 // indirect
+	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/klauspost/compress v1.17.0 // indirect
 	github.com/lucasb-eyer/go-colorful v1.2.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
@@ -63,6 +65,8 @@ require (
 	github.com/prometheus/common v0.44.0 // indirect
 	github.com/prometheus/procfs v0.11.1 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
+	github.com/spf13/cobra v1.10.1 // indirect
+	github.com/spf13/pflag v1.0.9 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	go.opentelemetry.io/auto/sdk v1.1.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.63.0 // indirect
@@ -87,8 +91,9 @@ require (
 )
 
 // Use our fork with comprehensive stdin detach fixes
-//   - pkg/docker/client.go: Docker CLI wrapper
+//   - pkg/docker/client.go: Use /dev/null + process group detachment (Setpgid)
 //   - pkg/runner/runner.go: Remove -it flags from detached containers
-//   - pkg/userdetect/detect.go: User detection docker commands
-//   - pkg/git/worktree.go: Git worktree commands
-replace github.com/obra/packnplay => github.com/2389-research/packnplay v1.0.3-0.20251031201910-406e910bc750
+//   - pkg/userdetect/detect.go: User detection docker commands (strings.NewReader)
+//   - pkg/git/worktree.go: Git worktree commands (strings.NewReader)
+// Fully detaches from controlling terminal to prevent TTY errors
+replace github.com/obra/packnplay => github.com/2389-research/packnplay v1.0.3-0.20251103164944-c29a7c42b706
