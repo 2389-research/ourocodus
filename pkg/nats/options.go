@@ -3,6 +3,7 @@ package nats
 import (
 	"crypto/tls"
 	"fmt"
+	"math/rand/v2"
 	"os"
 	"strconv"
 	"time"
@@ -73,7 +74,7 @@ func defaultClientConfig() *ClientConfig {
 		RequestTimeout:    getEnvDuration("NATS_REQUEST_TIMEOUT", 5*time.Second),
 		DrainTimeout:      30 * time.Second,
 		RetryAttempts:     3,
-		RetryBackoff:      newExponentialBackoff(200*time.Millisecond, 5*time.Second),
+		RetryBackoff:      newExponentialBackoff(200*time.Millisecond, 5*time.Second, nil),
 		CorrelationHeader: "Correlation-Id",
 		TraceparentHeader: "traceparent",
 		GenerateID:        defaultGenerateID,
@@ -325,17 +326,44 @@ type BackoffStrategy interface {
 	Reset()
 }
 
+// RandomSource provides random number generation for jitter calculations.
+type RandomSource interface {
+	Float64() float64
+}
+
+// defaultRandomSource uses the global math/rand/v2 random source.
+type defaultRandomSource struct{}
+
+func (defaultRandomSource) Float64() float64 {
+	//nolint:gosec // G404: Using math/rand for jitter, not cryptography
+	return rand.Float64()
+}
+
+// fixedRandomSource always returns the same value (for testing).
+type fixedRandomSource struct {
+	value float64
+}
+
+func (f fixedRandomSource) Float64() float64 {
+	return f.value
+}
+
 // exponentialBackoff implements exponential backoff with jitter.
 type exponentialBackoff struct {
 	initial time.Duration
 	max     time.Duration
+	rand    RandomSource // Injected random source
 }
 
 // newExponentialBackoff creates a new exponential backoff strategy.
-func newExponentialBackoff(initial, max time.Duration) BackoffStrategy {
+func newExponentialBackoff(initial, max time.Duration, rand RandomSource) BackoffStrategy {
+	if rand == nil {
+		rand = defaultRandomSource{}
+	}
 	return &exponentialBackoff{
 		initial: initial,
 		max:     max,
+		rand:    rand,
 	}
 }
 
@@ -357,7 +385,7 @@ func (e *exponentialBackoff) Next(attempt int) time.Duration {
 	}
 
 	// Add jitter: 0-25% of backoff
-	jitter := time.Duration(float64(backoff) * 0.25 * (0.5 + (0.5 * randomFloat())))
+	jitter := time.Duration(float64(backoff) * 0.25 * (0.5 + (0.5 * e.rand.Float64())))
 
 	return backoff + jitter
 }
@@ -390,10 +418,4 @@ func getEnvDuration(key string, defaultValue time.Duration) time.Duration {
 		}
 	}
 	return defaultValue
-}
-
-// randomFloat returns a random float64 in [0.0, 1.0).
-// This is a simple implementation; consider using math/rand for production.
-func randomFloat() float64 {
-	return 0.5 // Placeholder - implement proper random for production
 }
