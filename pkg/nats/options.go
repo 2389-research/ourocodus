@@ -279,7 +279,7 @@ type subOptions struct {
 func defaultSubOptions() *subOptions {
 	return &subOptions{
 		maxInflight:       1,
-		pendingLimitMsgs:  512 * 1024,      // 524,288 messages (NATS recommended)
+		pendingLimitMsgs:  512 * 1024,       // 524,288 messages (NATS recommended)
 		pendingLimitBytes: 64 * 1024 * 1024, // 67,108,864 bytes (64 MB)
 	}
 }
