@@ -327,12 +327,10 @@ func TestExponentialBackoff_JitterBounds(t *testing.T) {
 	tests := []struct {
 		name        string
 		randomValue float64
-		minJitter   float64
-		maxJitter   float64
 	}{
-		{"min random (0.0)", 0.0, 0.5, 0.5},   // 0.25 * (0.5 + 0.5*0.0) = 0.125 -> 12.5%
-		{"mid random (0.5)", 0.5, 0.75, 0.75}, // 0.25 * (0.5 + 0.5*0.5) = 0.1875 -> 18.75%
-		{"max random (1.0)", 1.0, 1.0, 1.0},   // 0.25 * (0.5 + 0.5*1.0) = 0.25 -> 25%
+		{"min random (0.0)", 0.0}, // 0.25 * (0.5 + 0.5*0.0) = 0.125 -> 12.5%
+		{"mid random (0.5)", 0.5}, // 0.25 * (0.5 + 0.5*0.5) = 0.1875 -> 18.75%
+		{"max random (1.0)", 1.0}, // 0.25 * (0.5 + 0.5*1.0) = 0.25 -> 25%
 	}
 
 	for _, tt := range tests {
