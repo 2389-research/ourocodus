@@ -325,3 +325,17 @@ func TestWithUnlimitedPending(t *testing.T) {
 		t.Errorf("pendingLimitBytes = %d, want -1 (unlimited)", opts.pendingLimitBytes)
 	}
 }
+
+func TestWithPendingLimits_NegativeValues(t *testing.T) {
+	opts := defaultSubOptions()
+
+	// Can explicitly set -1 via WithPendingLimits
+	WithPendingLimits(-1, -1)(opts)
+
+	if opts.pendingLimitMsgs != -1 {
+		t.Errorf("pendingLimitMsgs = %d, want -1", opts.pendingLimitMsgs)
+	}
+	if opts.pendingLimitBytes != -1 {
+		t.Errorf("pendingLimitBytes = %d, want -1", opts.pendingLimitBytes)
+	}
+}
