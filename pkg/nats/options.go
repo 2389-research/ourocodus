@@ -335,6 +335,7 @@ type RandomSource interface {
 type defaultRandomSource struct{}
 
 func (defaultRandomSource) Float64() float64 {
+	//nolint:gosec // G404: Using math/rand for jitter, not cryptography
 	return rand.Float64()
 }
 
