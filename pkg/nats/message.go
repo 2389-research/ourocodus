@@ -18,7 +18,7 @@ type Message struct {
 }
 
 // wrapNatsMessage creates a Message from a nats.Msg.
-func wrapNatsMessage(msg *nats.Msg) *Message {
+func wrapNatsMessage(msg *nats.Msg, correlationHeader string) *Message {
 	m := &Message{
 		Subject: msg.Subject,
 		Data:    msg.Data,
