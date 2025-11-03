@@ -74,7 +74,7 @@ func defaultClientConfig() *ClientConfig {
 		RequestTimeout:    getEnvDuration("NATS_REQUEST_TIMEOUT", 5*time.Second),
 		DrainTimeout:      30 * time.Second,
 		RetryAttempts:     3,
-		RetryBackoff:      newExponentialBackoff(200*time.Millisecond, 5*time.Second, nil),
+		RetryBackoff:      newExponentialBackoff(200*time.Millisecond, 5*time.Second),
 		CorrelationHeader: "Correlation-Id",
 		TraceparentHeader: "traceparent",
 		GenerateID:        defaultGenerateID,
@@ -388,15 +388,6 @@ func (defaultRandomSource) Float64() float64 {
 	return rand.Float64()
 }
 
-// fixedRandomSource always returns the same value (for testing).
-type fixedRandomSource struct {
-	value float64
-}
-
-func (f fixedRandomSource) Float64() float64 {
-	return f.value
-}
-
 // exponentialBackoff implements exponential backoff with jitter.
 type exponentialBackoff struct {
 	initial time.Duration
@@ -405,14 +396,11 @@ type exponentialBackoff struct {
 }
 
 // newExponentialBackoff creates a new exponential backoff strategy.
-func newExponentialBackoff(initial, max time.Duration, rand RandomSource) BackoffStrategy {
-	if rand == nil {
-		rand = defaultRandomSource{}
-	}
+func newExponentialBackoff(initial, max time.Duration) BackoffStrategy {
 	return &exponentialBackoff{
 		initial: initial,
 		max:     max,
-		rand:    rand,
+		rand:    defaultRandomSource{},
 	}
 }
 

@@ -68,7 +68,7 @@ func TestOptions(t *testing.T) {
 		},
 		{
 			name: "WithRetryBackoff",
-			opt:  WithRetryBackoff(newExponentialBackoff(100*time.Millisecond, time.Second, nil)),
+			opt:  WithRetryBackoff(newExponentialBackoff(100*time.Millisecond, time.Second)),
 			test: func(t *testing.T, cfg *ClientConfig) {
 				if cfg.RetryBackoff == nil {
 					t.Fatal("RetryBackoff = nil, want non-nil")
@@ -189,7 +189,7 @@ func TestReqOptions(t *testing.T) {
 
 // TestExponentialBackoff verifies backoff strategy.
 func TestExponentialBackoff(t *testing.T) {
-	backoff := newExponentialBackoff(100*time.Millisecond, time.Second, nil)
+	backoff := newExponentialBackoff(100*time.Millisecond, time.Second)
 
 	// First attempt should be close to initial
 	d1 := backoff.Next(1)
