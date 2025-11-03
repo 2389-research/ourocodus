@@ -298,6 +298,31 @@ func WithMaxInflight(max int) SubOption {
 	}
 }
 
+// WithPendingLimits sets custom pending message and byte limits for subscriptions.
+//
+// The pending limits control how many messages and bytes can be buffered by the
+// NATS client when the subscriber cannot keep up with the message rate. When either
+// limit is exceeded, the subscription will be considered a "slow consumer" and may
+// be dropped by the server.
+//
+// Use -1 for either parameter to disable that specific limit (not recommended).
+//
+// Default values (if not specified):
+//   - Messages: 524,288 (512 * 1024)
+//   - Bytes: 67,108,864 (64 MB)
+//
+// Example:
+//
+//	// High-throughput subscription with 1M message buffer and 128MB byte buffer
+//	sub, err := client.Subscribe(ctx, "orders", handler,
+//	    nats.WithPendingLimits(1_000_000, 128*1024*1024))
+func WithPendingLimits(msgs, bytes int) SubOption {
+	return func(opts *subOptions) {
+		opts.pendingLimitMsgs = msgs
+		opts.pendingLimitBytes = bytes
+	}
+}
+
 // ReqOption is a functional option for Request operations.
 type ReqOption func(*reqOptions)
 
