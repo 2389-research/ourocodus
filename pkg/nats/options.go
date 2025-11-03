@@ -384,7 +384,7 @@ func (e *exponentialBackoff) Next(attempt int) time.Duration {
 	}
 
 	// Add jitter: 0-25% of backoff
-	jitter := time.Duration(float64(backoff) * 0.25 * (0.5 + (0.5 * randomFloat())))
+	jitter := time.Duration(float64(backoff) * 0.25 * (0.5 + (0.5 * e.rand.Float64())))
 
 	return backoff + jitter
 }
