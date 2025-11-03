@@ -418,9 +418,3 @@ func getEnvDuration(key string, defaultValue time.Duration) time.Duration {
 	}
 	return defaultValue
 }
-
-// randomFloat returns a random float64 in [0.0, 1.0).
-// This is a simple implementation; consider using math/rand for production.
-func randomFloat() float64 {
-	return 0.5 // Placeholder - implement proper random for production
-}
