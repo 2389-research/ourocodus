@@ -321,3 +321,37 @@ func TestExponentialBackoff_RandomJitter(t *testing.T) {
 		t.Errorf("jitter should produce varied delays: got %d unique values, want >= 10", len(durations))
 	}
 }
+
+// TestExponentialBackoff_JitterBounds verifies jitter stays within 12.5-25% bounds.
+func TestExponentialBackoff_JitterBounds(t *testing.T) {
+	tests := []struct {
+		name        string
+		randomValue float64
+		minJitter   float64
+		maxJitter   float64
+	}{
+		{"min random (0.0)", 0.0, 0.5, 0.5},   // 0.25 * (0.5 + 0.5*0.0) = 0.125 -> 12.5%
+		{"mid random (0.5)", 0.5, 0.75, 0.75}, // 0.25 * (0.5 + 0.5*0.5) = 0.1875 -> 18.75%
+		{"max random (1.0)", 1.0, 1.0, 1.0},   // 0.25 * (0.5 + 0.5*1.0) = 0.25 -> 25%
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			backoff := newExponentialBackoff(100*time.Millisecond, 5*time.Second, fixedRandomSource{tt.randomValue})
+
+			duration := backoff.Next(1)
+			baseBackoff := 100 * time.Millisecond
+
+			// Calculate expected jitter percentage
+			jitterPercent := float64(duration-baseBackoff) / float64(baseBackoff)
+			expectedPercent := 0.25 * (0.5 + 0.5*tt.randomValue)
+
+			// Allow small floating point tolerance (0.1%)
+			tolerance := 0.001
+			if jitterPercent < expectedPercent-tolerance || jitterPercent > expectedPercent+tolerance {
+				t.Errorf("jitter should be within bounds for random=%f: got %.4f%%, want %.4f%%",
+					tt.randomValue, jitterPercent*100, expectedPercent*100)
+			}
+		})
+	}
+}
