@@ -306,3 +306,18 @@ func TestExponentialBackoff_DeterministicJitter(t *testing.T) {
 		t.Errorf("fixed random should produce same result: got %v, want %v", duration2, expected)
 	}
 }
+
+// TestExponentialBackoff_RandomJitter verifies jitter varies across multiple attempts.
+func TestExponentialBackoff_RandomJitter(t *testing.T) {
+	backoff := newExponentialBackoff(100*time.Millisecond, 5*time.Second, nil)
+
+	durations := make(map[time.Duration]bool)
+	for i := 0; i < 100; i++ {
+		backoff.Reset()
+		durations[backoff.Next(1)] = true
+	}
+
+	if len(durations) < 10 {
+		t.Errorf("jitter should produce varied delays: got %d unique values, want >= 10", len(durations))
+	}
+}
