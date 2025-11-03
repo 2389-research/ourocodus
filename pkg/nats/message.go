@@ -31,8 +31,8 @@ func wrapNatsMessage(msg *nats.Msg, correlationHeader string) *Message {
 		m.Headers[key] = msg.Header.Get(key)
 	}
 
-	// Extract correlation ID
-	m.CorrelationID = msg.Header.Get("Correlation-Id")
+	// Extract correlation ID using configured header name
+	m.CorrelationID = msg.Header.Get(correlationHeader)
 
 	return m
 }
