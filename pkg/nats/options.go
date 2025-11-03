@@ -351,6 +351,7 @@ func (f fixedRandomSource) Float64() float64 {
 type exponentialBackoff struct {
 	initial time.Duration
 	max     time.Duration
+	rand    RandomSource // Injected random source
 }
 
 // newExponentialBackoff creates a new exponential backoff strategy.
