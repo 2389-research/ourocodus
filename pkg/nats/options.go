@@ -338,6 +338,15 @@ func (defaultRandomSource) Float64() float64 {
 	return rand.Float64()
 }
 
+// fixedRandomSource always returns the same value (for testing).
+type fixedRandomSource struct {
+	value float64
+}
+
+func (f fixedRandomSource) Float64() float64 {
+	return f.value
+}
+
 // exponentialBackoff implements exponential backoff with jitter.
 type exponentialBackoff struct {
 	initial time.Duration
