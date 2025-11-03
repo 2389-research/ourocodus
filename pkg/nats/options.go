@@ -323,6 +323,26 @@ func WithPendingLimits(msgs, bytes int) SubOption {
 	}
 }
 
+// WithUnlimitedPending disables all pending limits for the subscription.
+//
+// WARNING: This allows unbounded memory growth if the subscriber cannot keep up
+// with the message rate. Only use this if you have external backpressure mechanisms
+// in place (e.g., bounded channels, rate limiting, or guaranteed fast processing).
+//
+// This is equivalent to calling WithPendingLimits(-1, -1).
+//
+// Example:
+//
+//	// Only use when you control message rate externally
+//	sub, err := client.Subscribe(ctx, "logs", handler,
+//	    nats.WithUnlimitedPending())
+func WithUnlimitedPending() SubOption {
+	return func(opts *subOptions) {
+		opts.pendingLimitMsgs = -1
+		opts.pendingLimitBytes = -1
+	}
+}
+
 // ReqOption is a functional option for Request operations.
 type ReqOption func(*reqOptions)
 
