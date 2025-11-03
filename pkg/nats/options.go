@@ -269,8 +269,10 @@ func WithCorrelationID(id string) PubOption {
 type SubOption func(*subOptions)
 
 type subOptions struct {
-	queueGroup  string
-	maxInflight int
+	queueGroup        string
+	maxInflight       int
+	pendingLimitMsgs  int // NATS default: 512*1024
+	pendingLimitBytes int // NATS default: 64*1024*1024
 }
 
 func defaultSubOptions() *subOptions {
