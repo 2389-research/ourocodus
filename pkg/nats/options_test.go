@@ -311,3 +311,17 @@ func TestWithPendingLimits(t *testing.T) {
 		t.Errorf("pendingLimitBytes = %d, want %d", opts.pendingLimitBytes, 5*1024*1024)
 	}
 }
+
+func TestWithUnlimitedPending(t *testing.T) {
+	opts := defaultSubOptions()
+
+	// Apply unlimited
+	WithUnlimitedPending()(opts)
+
+	if opts.pendingLimitMsgs != -1 {
+		t.Errorf("pendingLimitMsgs = %d, want -1 (unlimited)", opts.pendingLimitMsgs)
+	}
+	if opts.pendingLimitBytes != -1 {
+		t.Errorf("pendingLimitBytes = %d, want -1 (unlimited)", opts.pendingLimitBytes)
+	}
+}
