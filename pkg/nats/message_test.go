@@ -76,7 +76,7 @@ func TestMessage_WrapNatsMessage(t *testing.T) {
 	natsMsg.Header.Set("Correlation-Id", "test-123")
 	natsMsg.Header.Set("Custom-Header", "custom-value")
 
-	wrapped := wrapNatsMessage(natsMsg)
+	wrapped := wrapNatsMessage(natsMsg, "Correlation-Id")
 
 	if wrapped.Subject != "test.subject" {
 		t.Errorf("Subject = %q, want %q", wrapped.Subject, "test.subject")
