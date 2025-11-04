@@ -87,10 +87,10 @@ The SessionManager accepts an optional `EventPublisher` interface and calls it a
 ```go
 // EventPublisher publishes lifecycle events to external systems.
 type EventPublisher interface {
-    PublishSessionCreated(ctx context.Context, sessionID string) error
-    PublishSessionTerminated(ctx context.Context, sessionID string) error
-    PublishAgentSpawned(ctx context.Context, sessionID, role, workspace string) error
-    PublishAgentTerminated(ctx context.Context, sessionID, role string, exitCode int) error
+    PublishSessionCreated(ctx context.Context, userSessionID string) error
+    PublishSessionTerminated(ctx context.Context, userSessionID string) error
+    PublishAgentSpawned(ctx context.Context, userSessionID, agentID, workspace string) error
+    PublishAgentTerminated(ctx context.Context, userSessionID, agentID string, exitCode int) error
     Close() error
 }
 ```
@@ -102,7 +102,7 @@ Null object pattern - does nothing. Used when NATS disabled or connection fails.
 ```go
 type NoOpPublisher struct{}
 
-func (n *NoOpPublisher) PublishSessionCreated(ctx context.Context, sessionID string) error {
+func (n *NoOpPublisher) PublishSessionCreated(ctx context.Context, userSessionID string) error {
     return nil
 }
 // ... other methods
@@ -131,19 +131,19 @@ type NATSEventPublisher struct {
 Centralized subject construction to prevent typos and enforce consistency.
 
 ```go
-func SessionCreated(sessionID string) string {
+func SessionCreated(userSessionID string) string {
     return fmt.Sprintf("sessions.%s.session.created", sanitizeID(sessionID))
 }
 
-func SessionTerminated(sessionID string) string {
+func SessionTerminated(userSessionID string) string {
     return fmt.Sprintf("sessions.%s.session.terminated", sanitizeID(sessionID))
 }
 
-func AgentSpawned(sessionID string) string {
+func AgentSpawned(userSessionID string) string {
     return fmt.Sprintf("sessions.%s.agent.spawned", sanitizeID(sessionID))
 }
 
-func AgentTerminated(sessionID string) string {
+func AgentTerminated(userSessionID string) string {
     return fmt.Sprintf("sessions.%s.agent.terminated", sanitizeID(sessionID))
 }
 
@@ -187,7 +187,7 @@ All events follow a consistent versioned schema:
   "publishedAt": "2025-11-04T10:30:00.456Z",
   "type": "session.created",
   "payload": {
-    "sessionId": "sess_xyz789",
+    "userSessionId": "sess_xyz789",
     "createdAt": "2025-11-04T10:30:00.123Z"
   }
 }
@@ -209,7 +209,7 @@ All events follow a consistent versioned schema:
 #### session.created
 ```json
 {
-  "sessionId": "sess_abc123",
+  "userSessionId": "sess_abc123",
   "createdAt": "2025-11-04T10:30:00.123Z"
 }
 ```
@@ -217,7 +217,7 @@ All events follow a consistent versioned schema:
 #### session.terminated
 ```json
 {
-  "sessionId": "sess_abc123",
+  "userSessionId": "sess_abc123",
   "terminatedAt": "2025-11-04T10:35:00.123Z",
   "reason": "user_requested"
 }
@@ -226,8 +226,8 @@ All events follow a consistent versioned schema:
 #### agent.spawned
 ```json
 {
-  "sessionId": "sess_abc123",
-  "role": "coder",
+  "userSessionId": "sess_abc123",
+  "agentId": "coder",
   "workspace": "/workspaces/sess_abc123/coder",
   "spawnedAt": "2025-11-04T10:30:05.123Z"
 }
@@ -236,8 +236,8 @@ All events follow a consistent versioned schema:
 #### agent.terminated
 ```json
 {
-  "sessionId": "sess_abc123",
-  "role": "coder",
+  "userSessionId": "sess_abc123",
+  "agentId": "coder",
   "terminatedAt": "2025-11-04T10:35:00.123Z",
   "exitCode": 0
 }
@@ -290,7 +290,7 @@ agent := &Agent{...}
 session.agents[role] = agent
 
 if m.publisher != nil {
-    go m.publisher.PublishAgentSpawned(context.Background(), sessionID, role, workspace)
+    go m.publisher.PublishAgentSpawned(context.Background(), sessionID, agentID, workspace)
 }
 ```
 
@@ -299,7 +299,7 @@ if m.publisher != nil {
 delete(session.agents, role)
 
 if m.publisher != nil {
-    go m.publisher.PublishAgentTerminated(context.Background(), sessionID, role, exitCode)
+    go m.publisher.PublishAgentTerminated(context.Background(), sessionID, agentID, exitCode)
 }
 ```
 
