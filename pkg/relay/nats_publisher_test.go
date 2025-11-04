@@ -362,3 +362,76 @@ func TestNATSEventPublisher_Concurrent(t *testing.T) {
 		assert.True(t, indices[i], "Index %d should be present", i)
 	}
 }
+
+func TestNATSEventPublisher_CleanupSession(t *testing.T) {
+	mockClient := &mockNATSClient{}
+	idGen := &mockIDGenerator{id: "test-id"}
+	clock := &mockClock{now: "2025-11-04T10:00:00Z"}
+	logger := &mockLogger{}
+
+	publisher := relay.NewNATSEventPublisher(mockClient, idGen, clock, logger)
+
+	// Publish events to build up eventIndex counter
+	publisher.PublishSessionCreated(context.Background(), "session-1")
+	publisher.PublishAgentSpawned(context.Background(), "session-1", "agent", "/ws")
+
+	// Verify eventIndex increments
+	publishes := mockClient.getPublishes()
+	var event1 map[string]interface{}
+	json.Unmarshal(publishes[0].data, &event1)
+	assert.Equal(t, float64(0), event1["eventIndex"])
+
+	var event2 map[string]interface{}
+	json.Unmarshal(publishes[1].data, &event2)
+	assert.Equal(t, float64(1), event2["eventIndex"])
+
+	// Clean up the session
+	publisher.CleanupSession("session-1")
+
+	// Publish new event for same session - should restart at 0
+	publisher.PublishSessionCreated(context.Background(), "session-1")
+
+	publishes = mockClient.getPublishes()
+	var event3 map[string]interface{}
+	json.Unmarshal(publishes[2].data, &event3)
+	assert.Equal(t, float64(0), event3["eventIndex"], "Event index should restart at 0 after cleanup")
+}
+
+func TestNATSEventPublisher_SessionTerminatedCleansUp(t *testing.T) {
+	mockClient := &mockNATSClient{}
+	idGen := &mockIDGenerator{id: "test-id"}
+	clock := &mockClock{now: "2025-11-04T10:00:00Z"}
+	logger := &mockLogger{}
+
+	publisher := relay.NewNATSEventPublisher(mockClient, idGen, clock, logger)
+
+	// Publish events to build up eventIndex counter
+	publisher.PublishSessionCreated(context.Background(), "session-1")
+	publisher.PublishAgentSpawned(context.Background(), "session-1", "agent", "/ws")
+
+	// Verify eventIndex increments
+	publishes := mockClient.getPublishes()
+	var event1 map[string]interface{}
+	json.Unmarshal(publishes[0].data, &event1)
+	assert.Equal(t, float64(0), event1["eventIndex"])
+
+	var event2 map[string]interface{}
+	json.Unmarshal(publishes[1].data, &event2)
+	assert.Equal(t, float64(1), event2["eventIndex"])
+
+	// Publish session.terminated - should auto-cleanup
+	publisher.PublishSessionTerminated(context.Background(), "session-1")
+
+	publishes = mockClient.getPublishes()
+	var event3 map[string]interface{}
+	json.Unmarshal(publishes[2].data, &event3)
+	assert.Equal(t, float64(2), event3["eventIndex"], "Session terminated should have correct index")
+
+	// Publish new event for same session - should restart at 0
+	publisher.PublishSessionCreated(context.Background(), "session-1")
+
+	publishes = mockClient.getPublishes()
+	var event4 map[string]interface{}
+	json.Unmarshal(publishes[3].data, &event4)
+	assert.Equal(t, float64(0), event4["eventIndex"], "Event index should restart at 0 after session.terminated auto-cleanup")
+}

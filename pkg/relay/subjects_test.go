@@ -33,7 +33,8 @@ func TestSessionCreated(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := relay.SessionCreated(tt.sessionID)
+			got, err := relay.SessionCreated(tt.sessionID)
+			assert.NoError(t, err)
 			assert.Equal(t, tt.want, got)
 		})
 	}
@@ -59,19 +60,22 @@ func TestSessionTerminated(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := relay.SessionTerminated(tt.sessionID)
+			got, err := relay.SessionTerminated(tt.sessionID)
+			assert.NoError(t, err)
 			assert.Equal(t, tt.want, got)
 		})
 	}
 }
 
 func TestAgentSpawned(t *testing.T) {
-	got := relay.AgentSpawned("test-session")
+	got, err := relay.AgentSpawned("test-session")
+	assert.NoError(t, err)
 	assert.Equal(t, "sessions.test-session.agent.spawned", got)
 }
 
 func TestAgentTerminated(t *testing.T) {
-	got := relay.AgentTerminated("test-session")
+	got, err := relay.AgentTerminated("test-session")
+	assert.NoError(t, err)
 	assert.Equal(t, "sessions.test-session.agent.terminated", got)
 }
 
@@ -79,9 +83,9 @@ func TestSanitizeID_TooLong(t *testing.T) {
 	// Create a session ID longer than 200 chars
 	longID := strings.Repeat("a", 201)
 
-	assert.Panics(t, func() {
-		relay.SessionCreated(longID)
-	}, "Expected panic for session ID longer than 200 characters")
+	_, err := relay.SessionCreated(longID)
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, relay.ErrSessionIDTooLong)
 }
 
 func TestSanitizeID_EdgeCases(t *testing.T) {
@@ -109,7 +113,8 @@ func TestSanitizeID_EdgeCases(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := relay.SessionCreated(tt.sessionID)
+			got, err := relay.SessionCreated(tt.sessionID)
+			assert.NoError(t, err)
 			assert.Equal(t, tt.want, got)
 		})
 	}

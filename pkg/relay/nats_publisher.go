@@ -43,26 +43,48 @@ func NewNATSEventPublisher(client nats.Client, idGen IDGenerator, clock Clock, l
 
 // PublishSessionCreated publishes a session.created event.
 func (p *NATSEventPublisher) PublishSessionCreated(ctx context.Context, sessionID string) error {
+	subject, err := SessionCreated(sessionID)
+	if err != nil {
+		return fmt.Errorf("invalid session ID for NATS subject: %w", err)
+	}
+
 	payload := map[string]interface{}{
 		"sessionId": sessionID,
 		"createdAt": p.clock.Now(),
 	}
 
-	return p.publish(ctx, SessionCreated(sessionID), "session.created", sessionID, payload)
+	return p.publish(ctx, subject, "session.created", sessionID, payload)
 }
 
 // PublishSessionTerminated publishes a session.terminated event.
+// Automatically cleans up the event index counter for the session to prevent memory leaks.
 func (p *NATSEventPublisher) PublishSessionTerminated(ctx context.Context, sessionID string) error {
+	subject, err := SessionTerminated(sessionID)
+	if err != nil {
+		return fmt.Errorf("invalid session ID for NATS subject: %w", err)
+	}
+
 	payload := map[string]interface{}{
 		"sessionId":    sessionID,
 		"terminatedAt": p.clock.Now(),
 	}
 
-	return p.publish(ctx, SessionTerminated(sessionID), "session.terminated", sessionID, payload)
+	err = p.publish(ctx, subject, "session.terminated", sessionID, payload)
+
+	// Clean up event index counter after publishing (even if publish failed)
+	// This prevents memory leaks in long-running services
+	p.CleanupSession(sessionID)
+
+	return err
 }
 
 // PublishAgentSpawned publishes an agent.spawned event.
 func (p *NATSEventPublisher) PublishAgentSpawned(ctx context.Context, sessionID, role, workspace string) error {
+	subject, err := AgentSpawned(sessionID)
+	if err != nil {
+		return fmt.Errorf("invalid session ID for NATS subject: %w", err)
+	}
+
 	payload := map[string]interface{}{
 		"sessionId": sessionID,
 		"role":      role,
@@ -70,11 +92,16 @@ func (p *NATSEventPublisher) PublishAgentSpawned(ctx context.Context, sessionID,
 		"spawnedAt": p.clock.Now(),
 	}
 
-	return p.publish(ctx, AgentSpawned(sessionID), "agent.spawned", sessionID, payload)
+	return p.publish(ctx, subject, "agent.spawned", sessionID, payload)
 }
 
 // PublishAgentTerminated publishes an agent.terminated event.
 func (p *NATSEventPublisher) PublishAgentTerminated(ctx context.Context, sessionID, role string, exitCode int) error {
+	subject, err := AgentTerminated(sessionID)
+	if err != nil {
+		return fmt.Errorf("invalid session ID for NATS subject: %w", err)
+	}
+
 	payload := map[string]interface{}{
 		"sessionId":    sessionID,
 		"role":         role,
@@ -82,7 +109,7 @@ func (p *NATSEventPublisher) PublishAgentTerminated(ctx context.Context, session
 		"exitCode":     exitCode,
 	}
 
-	return p.publish(ctx, AgentTerminated(sessionID), "agent.terminated", sessionID, payload)
+	return p.publish(ctx, subject, "agent.terminated", sessionID, payload)
 }
 
 // publish publishes an event to NATS.
@@ -128,6 +155,13 @@ func (p *NATSEventPublisher) nextEventIndex(sessionID string) int64 {
 
 	// Increment and return (0-based)
 	return counter.Add(1) - 1
+}
+
+// CleanupSession removes the event index counter for a terminated session.
+// This should be called when a session is terminated to prevent memory leaks.
+// It is safe to call this method even if no counter exists for the session.
+func (p *NATSEventPublisher) CleanupSession(sessionID string) {
+	p.eventIndex.Delete(sessionID)
 }
 
 // Compile-time verification that NATSEventPublisher implements session.EventPublisher
