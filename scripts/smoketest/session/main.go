@@ -47,7 +47,7 @@ func runSessionSmokeTest(verbose bool) error {
 		return &fakeACPClient{workspace: workspace}, nil
 	})
 
-	manager := session.NewManager(store, idGen, clock, cleaner, logger, clientFactory, "")
+	manager := session.NewManager(store, idGen, clock, cleaner, logger, clientFactory, "", nil) // nil publisher for smoketest
 
 	announce("🧪", "Test 1: Create UserSession")
 	if err := testCreateUserSession(ctx, manager, verbose); err != nil {
@@ -87,6 +87,11 @@ func runSessionSmokeTest(verbose bool) error {
 	announce("🧪", "Test 8: List and Filter Sessions")
 	if err := testListAndFilter(ctx, verbose); err != nil {
 		return fmt.Errorf("list and filter: %w", err)
+	}
+
+	announce("🧪", "Test 9: Event Publishing")
+	if err := testEventPublishing(ctx, verbose); err != nil {
+		return fmt.Errorf("event publishing: %w", err)
 	}
 
 	return nil
@@ -209,7 +214,7 @@ func testAgentSpawnFailureIsolation(ctx context.Context, verbose bool) error {
 		return &fakeACPClient{workspace: workspace}, nil
 	})
 
-	manager := session.NewManager(store, idGen, clock, cleaner, logger, failingFactory, "")
+	manager := session.NewManager(store, idGen, clock, cleaner, logger, failingFactory, "", nil) // nil publisher for smoketest
 
 	ws := &fakeWebSocket{}
 	userSession, err := manager.CreateUserSession(ctx, ws)
@@ -395,7 +400,7 @@ func testListAndFilter(ctx context.Context, verbose bool) error {
 		return &fakeACPClient{workspace: workspace}, nil
 	})
 
-	freshManager := session.NewManager(store, idGen, clock, cleaner, logger, clientFactory, "")
+	freshManager := session.NewManager(store, idGen, clock, cleaner, logger, clientFactory, "", nil) // nil publisher for smoketest
 
 	// Verify initial state has 0 sessions
 	if initialCount := freshManager.Count(); initialCount != 0 {
@@ -510,6 +515,104 @@ func (c *fakeACPClient) SendMessage(content string) (interface{}, error) {
 
 func (c *fakeACPClient) Close() error {
 	c.closed = true
+	return nil
+}
+
+// Mock event publisher for testing
+type mockEventPublisher struct {
+	sessionCreatedCount    int
+	sessionTerminatedCount int
+	agentSpawnedCount      int
+	agentTerminatedCount   int
+}
+
+func (m *mockEventPublisher) PublishSessionCreated(ctx context.Context, sessionID string) error {
+	m.sessionCreatedCount++
+	return nil
+}
+
+func (m *mockEventPublisher) PublishSessionTerminated(ctx context.Context, sessionID string) error {
+	m.sessionTerminatedCount++
+	return nil
+}
+
+func (m *mockEventPublisher) PublishAgentSpawned(ctx context.Context, sessionID, role, workspace string) error {
+	m.agentSpawnedCount++
+	return nil
+}
+
+func (m *mockEventPublisher) PublishAgentTerminated(ctx context.Context, sessionID, role string, exitCode int) error {
+	m.agentTerminatedCount++
+	return nil
+}
+
+func testEventPublishing(ctx context.Context, verbose bool) error {
+	debug(verbose, "Testing event publishing with mock publisher")
+
+	// Create a mock event publisher that tracks calls
+	mockPublisher := &mockEventPublisher{}
+
+	// Create manager with mock publisher
+	store := session.NewMemoryStore()
+	idGen := &testIDGenerator{nextID: "event-test-"}
+	clock := &testClock{now: time.Now()}
+	cleaner := session.NewNoOpCleaner()
+	logger := &testLogger{verbose: verbose}
+	clientFactory := session.NewFakeClientFactory(func(workspace string) (session.ACPClient, error) {
+		return &fakeACPClient{workspace: workspace}, nil
+	})
+
+	manager := session.NewManager(store, idGen, clock, cleaner, logger, clientFactory, "", mockPublisher)
+
+	// Test 1: Session created event
+	ws := &fakeWebSocket{}
+	userSession, err := manager.CreateUserSession(ctx, ws)
+	if err != nil {
+		return fmt.Errorf("failed to create session: %w", err)
+	}
+	if mockPublisher.sessionCreatedCount != 1 {
+		return fmt.Errorf("expected 1 session.created event, got %d", mockPublisher.sessionCreatedCount)
+	}
+	debug(verbose, "✓ session.created event published")
+
+	// Test 2: Agent spawned event
+	err = manager.SpawnAgent(ctx, userSession.GetID(), "tester", "./workspaces/tester")
+	if err != nil {
+		return fmt.Errorf("failed to spawn agent: %w", err)
+	}
+	if mockPublisher.agentSpawnedCount != 1 {
+		return fmt.Errorf("expected 1 agent.spawned event, got %d", mockPublisher.agentSpawnedCount)
+	}
+	debug(verbose, "✓ agent.spawned event published")
+
+	// Test 3: Agent terminated event
+	err = manager.TerminateAgent(ctx, userSession.GetID(), "tester")
+	if err != nil {
+		return fmt.Errorf("failed to terminate agent: %w", err)
+	}
+	if mockPublisher.agentTerminatedCount != 1 {
+		return fmt.Errorf("expected 1 agent.terminated event, got %d", mockPublisher.agentTerminatedCount)
+	}
+	debug(verbose, "✓ agent.terminated event published")
+
+	// Test 4: Session terminated event
+	err = manager.TerminateUserSession(ctx, userSession.GetID())
+	if err != nil {
+		return fmt.Errorf("failed to terminate session: %w", err)
+	}
+	if mockPublisher.sessionTerminatedCount != 1 {
+		return fmt.Errorf("expected 1 session.terminated event, got %d", mockPublisher.sessionTerminatedCount)
+	}
+	debug(verbose, "✓ session.terminated event published")
+
+	// Verify total event count
+	totalEvents := mockPublisher.sessionCreatedCount + mockPublisher.agentSpawnedCount +
+		mockPublisher.agentTerminatedCount + mockPublisher.sessionTerminatedCount
+	if totalEvents != 4 {
+		return fmt.Errorf("expected 4 total events, got %d", totalEvents)
+	}
+
+	debug(verbose, "✓ All events published correctly")
 	return nil
 }
 

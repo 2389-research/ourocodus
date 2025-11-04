@@ -44,7 +44,7 @@ func (p *NATSEventPublisher) PublishSessionCreated(ctx context.Context, sessionI
 // PublishSessionTerminated publishes a session.terminated event.
 func (p *NATSEventPublisher) PublishSessionTerminated(ctx context.Context, sessionID string) error {
 	payload := map[string]interface{}{
-		"sessionId":     sessionID,
+		"sessionId":    sessionID,
 		"terminatedAt": p.clock.Now(),
 	}
 
@@ -66,10 +66,10 @@ func (p *NATSEventPublisher) PublishAgentSpawned(ctx context.Context, sessionID,
 // PublishAgentTerminated publishes an agent.terminated event.
 func (p *NATSEventPublisher) PublishAgentTerminated(ctx context.Context, sessionID, role string, exitCode int) error {
 	payload := map[string]interface{}{
-		"sessionId":     sessionID,
-		"role":          role,
+		"sessionId":    sessionID,
+		"role":         role,
 		"terminatedAt": p.clock.Now(),
-		"exitCode":      exitCode,
+		"exitCode":     exitCode,
 	}
 
 	return p.publish(ctx, AgentTerminated(sessionID), "agent.terminated", sessionID, payload)
