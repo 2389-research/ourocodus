@@ -106,9 +106,9 @@ func (m *Manager) CreateUserSession(ctx context.Context, ws WebSocketConn) (*Use
 	}
 
 	// Generate unique ID and create session
-	sessionID := m.idGen.Generate()
+	userSessionID := m.idGen.Generate()
 	now := m.clock.Now()
-	session := NewUserSession(sessionID, ws, now)
+	userSession := NewUserSession(userSessionID, ws, now)
 
 	// Store session
 	if err := m.store.Create(session); err != nil {
@@ -117,12 +117,12 @@ func (m *Manager) CreateUserSession(ctx context.Context, ws WebSocketConn) (*Use
 
 	// Publish session.created event (synchronous, errors logged but non-fatal)
 	if m.publisher != nil {
-		if err := m.publisher.PublishSessionCreated(ctx, sessionID); err != nil {
+		if err := m.publisher.PublishSessionCreated(ctx, userSessionID); err != nil {
 			m.logger.Printf("WARN: Failed to publish session.created event: %v", err)
 		}
 	}
 
-	m.logger.Printf("User session created: id=%s state=ACTIVE agents=0", sessionID)
+	m.logger.Printf("User session created: id=%s state=ACTIVE agents=0", userSessionID)
 	return session, nil
 }
 
@@ -141,10 +141,10 @@ func (m *Manager) List(filter *SessionFilter) []*UserSession {
 // Returns error if spawn fails, but user session stays ACTIVE
 //
 //nolint:gocyclo // Complexity required for TOCTOU prevention and proper error handling
-func (m *Manager) SpawnAgent(ctx context.Context, sessionID, role, workspace string) error {
+func (m *Manager) SpawnAgent(ctx context.Context, userSessionID, agentID, workspace string) error {
 	// Validate inputs
-	if strings.TrimSpace(role) == "" {
-		return ErrEmptyRole
+	if strings.TrimSpace(agentID) == "" {
+		return ErrEmptyAgentID
 	}
 	if strings.TrimSpace(workspace) == "" {
 		return ErrEmptyWorkspace
@@ -174,24 +174,24 @@ func (m *Manager) SpawnAgent(ctx context.Context, sessionID, role, workspace str
 	}
 
 	// Get user session
-	session := m.store.Get(sessionID)
-	if session == nil {
-		return fmt.Errorf("%w: %s", ErrSessionNotFound, sessionID)
+	userSession := m.store.Get(userSessionID)
+	if userSession == nil {
+		return fmt.Errorf("%w: %s", ErrSessionNotFound, userSessionID)
 	}
 
 	// Initial validation with lock (check-lock-check pattern to prevent TOCTOU)
-	session.mu.Lock()
+	userSession.mu.Lock()
 	if session.state != StateActive {
-		session.mu.Unlock()
-		return fmt.Errorf("session %s is not active (state=%s)", sessionID, session.state)
+		userSession.mu.Unlock()
+		return fmt.Errorf("session %s is not active (state=%s)", userSessionID, session.state)
 	}
-	if session.agents[role] != nil {
-		session.mu.Unlock()
-		return fmt.Errorf("agent %s already exists in session %s", role, sessionID)
+	if session.agents[agentID] != nil {
+		userSession.mu.Unlock()
+		return fmt.Errorf("agent %s already exists in session %s", agentID, userSessionID)
 	}
-	session.mu.Unlock()
+	userSession.mu.Unlock()
 
-	m.logger.Printf("Spawning agent: session=%s role=%s workspace=%s", sessionID, role, absPath)
+	m.logger.Printf("Spawning agent: session=%s agentID=%s workspace=%s", userSessionID, agentID, absPath)
 
 	// Create workspace directory if needed (I/O - no lock held)
 	// Use 0o700 for strict workspace isolation (owner-only access)
@@ -202,27 +202,27 @@ func (m *Manager) SpawnAgent(ctx context.Context, sessionID, role, workspace str
 
 	// Create agent session in SPAWNING state
 	now := m.clock.Now()
-	agent := NewAgentSession(role, absPath, now)
+	agent := NewAgentSession(agentID, absPath, now)
 
 	// Re-check and add agent atomically (prevents TOCTOU race)
-	session.mu.Lock()
+	userSession.mu.Lock()
 
 	// Re-check state (session could have been terminated during I/O)
 	if session.state != StateActive {
-		session.mu.Unlock()
-		return fmt.Errorf("session %s is not active (state=%s)", sessionID, session.state)
+		userSession.mu.Unlock()
+		return fmt.Errorf("session %s is not active (state=%s)", userSessionID, session.state)
 	}
 
 	// Re-check agent doesn't exist (another goroutine could have added it)
-	if session.agents[role] != nil {
-		session.mu.Unlock()
-		return fmt.Errorf("agent %s already exists in session %s", role, sessionID)
+	if session.agents[agentID] != nil {
+		userSession.mu.Unlock()
+		return fmt.Errorf("agent %s already exists in session %s", agentID, userSessionID)
 	}
 
 	// Add agent to session in SPAWNING state
-	session.addAgent(agent)
-	session.setLastActive(now)
-	session.mu.Unlock()
+	userSession.addAgent(agent)
+	userSession.setLastActive(now)
+	userSession.mu.Unlock()
 
 	// Spawn ACP client (I/O - no lock held)
 	acpClient, err := m.clientFactory.NewClient(absPath)
@@ -233,7 +233,7 @@ func (m *Manager) SpawnAgent(ctx context.Context, sessionID, role, workspace str
 		agent.setError(err.Error())
 		agent.mu.Unlock()
 
-		m.logger.Printf("Agent spawn failed: session=%s role=%s error=%v", sessionID, role, err)
+		m.logger.Printf("Agent spawn failed: session=%s agentID=%s error=%v", userSessionID, agentID, err)
 		return fmt.Errorf("failed to spawn ACP client: %w", err)
 	}
 
@@ -246,43 +246,43 @@ func (m *Manager) SpawnAgent(ctx context.Context, sessionID, role, workspace str
 
 	// Publish agent.spawned event (synchronous, errors logged but non-fatal)
 	if m.publisher != nil {
-		if err := m.publisher.PublishAgentSpawned(ctx, sessionID, role, absPath); err != nil {
+		if err := m.publisher.PublishAgentSpawned(ctx, userSessionID, agentID, absPath); err != nil {
 			m.logger.Printf("WARN: Failed to publish agent.spawned event: %v", err)
 		}
 	}
 
-	m.logger.Printf("Agent spawned: session=%s role=%s state=ACTIVE", sessionID, role)
+	m.logger.Printf("Agent spawned: session=%s agentID=%s state=ACTIVE", userSessionID, agentID)
 	return nil
 }
 
-// GetAgent returns the agent session for a given role within a user session
-func (m *Manager) GetAgent(sessionID, role string) (*AgentSession, error) {
-	session := m.store.Get(sessionID)
-	if session == nil {
-		return nil, fmt.Errorf("%w: %s", ErrSessionNotFound, sessionID)
+// GetAgent returns the agent session for a given agentID within a user session
+func (m *Manager) GetAgent(userSessionID, agentID string) (*AgentSession, error) {
+	userSession := m.store.Get(userSessionID)
+	if userSession == nil {
+		return nil, fmt.Errorf("%w: %s", ErrSessionNotFound, userSessionID)
 	}
 
-	agent := session.GetAgent(role)
+	agent := session.GetAgent(agentID)
 	if agent == nil {
-		return nil, fmt.Errorf("%w: role=%s session=%s", ErrAgentNotFound, role, sessionID)
+		return nil, fmt.Errorf("%w: agentID=%s session=%s", ErrAgentNotFound, agentID, userSessionID)
 	}
 
 	return agent, nil
 }
 
 // ListAgents returns all agents in a user session
-func (m *Manager) ListAgents(sessionID string) (map[string]*AgentSession, error) {
-	session := m.store.Get(sessionID)
-	if session == nil {
-		return nil, fmt.Errorf("%w: %s", ErrSessionNotFound, sessionID)
+func (m *Manager) ListAgents(userSessionID string) (map[string]*AgentSession, error) {
+	userSession := m.store.Get(userSessionID)
+	if userSession == nil {
+		return nil, fmt.Errorf("%w: %s", ErrSessionNotFound, userSessionID)
 	}
 
 	return session.ListAgents(), nil
 }
 
 // GetAgentHistory returns the conversation history for a specific agent
-func (m *Manager) GetAgentHistory(sessionID, role string) ([]Message, error) {
-	agent, err := m.GetAgent(sessionID, role)
+func (m *Manager) GetAgentHistory(userSessionID, agentID string) ([]Message, error) {
+	agent, err := m.GetAgent(userSessionID, agentID)
 	if err != nil {
 		return nil, err
 	}
@@ -292,22 +292,22 @@ func (m *Manager) GetAgentHistory(sessionID, role string) ([]Message, error) {
 
 // TerminateAgent terminates ONE agent in a user session
 // User session stays ACTIVE, other agents unaffected
-func (m *Manager) TerminateAgent(ctx context.Context, sessionID, role string) error {
-	session := m.store.Get(sessionID)
-	if session == nil {
+func (m *Manager) TerminateAgent(ctx context.Context, userSessionID, agentID string) error {
+	userSession := m.store.Get(userSessionID)
+	if userSession == nil {
 		// Already cleaned up - idempotent
-		m.logger.Printf("Session not found during agent termination: %s (already cleaned?)", sessionID)
+		m.logger.Printf("Session not found during agent termination: %s (already cleaned?)", userSessionID)
 		return nil
 	}
 
-	agent := session.GetAgent(role)
+	agent := session.GetAgent(agentID)
 	if agent == nil {
 		// Already removed - idempotent
-		m.logger.Printf("Agent not found during termination: session=%s role=%s (already terminated?)", sessionID, role)
+		m.logger.Printf("Agent not found during termination: session=%s agentID=%s (already terminated?)", userSessionID, agentID)
 		return nil
 	}
 
-	m.logger.Printf("Terminating agent: session=%s role=%s", sessionID, role)
+	m.logger.Printf("Terminating agent: session=%s agentID=%s", userSessionID, agentID)
 
 	// Close ACP client if present (with double-close protection)
 	agent.mu.Lock()
@@ -321,51 +321,51 @@ func (m *Manager) TerminateAgent(ctx context.Context, sessionID, role string) er
 	// Close outside the lock
 	if acpClient != nil {
 		if err := acpClient.Close(); err != nil {
-			m.logger.Printf("Error closing ACP client: session=%s role=%s error=%v", sessionID, role, err)
+			m.logger.Printf("Error closing ACP client: session=%s agentID=%s error=%v", userSessionID, agentID, err)
 			// Continue with cleanup even if close fails
 		}
 	}
 
-	session.mu.Lock()
-	session.removeAgent(role)
-	session.setLastActive(m.clock.Now())
-	session.mu.Unlock()
+	userSession.mu.Lock()
+	userSession.removeAgent(agentID)
+	userSession.setLastActive(m.clock.Now())
+	userSession.mu.Unlock()
 
 	// Publish agent.terminated event (synchronous, errors logged but non-fatal)
 	// TODO: Capture actual exit code when available from ACP client
 	if m.publisher != nil {
-		if err := m.publisher.PublishAgentTerminated(ctx, sessionID, role, 0); err != nil {
+		if err := m.publisher.PublishAgentTerminated(ctx, userSessionID, agentID, 0); err != nil {
 			m.logger.Printf("WARN: Failed to publish agent.terminated event: %v", err)
 		}
 	}
 
-	m.logger.Printf("Agent terminated: session=%s role=%s", sessionID, role)
+	m.logger.Printf("Agent terminated: session=%s agentID=%s", userSessionID, agentID)
 	return nil
 }
 
 // TerminateUserSession terminates ALL agents in parallel, then terminates the session
 // Idempotent - safe to call multiple times
-func (m *Manager) TerminateUserSession(ctx context.Context, sessionID string) error {
-	session := m.store.Get(sessionID)
-	if session == nil {
+func (m *Manager) TerminateUserSession(ctx context.Context, userSessionID string) error {
+	userSession := m.store.Get(userSessionID)
+	if userSession == nil {
 		// Already cleaned up - idempotent
-		m.logger.Printf("Session not found during termination: %s (already cleaned?)", sessionID)
+		m.logger.Printf("Session not found during termination: %s (already cleaned?)", userSessionID)
 		return nil
 	}
 
 	// Set state to TERMINATED immediately to prevent new agent spawns during termination
-	session.mu.Lock()
-	session.setState(StateTerminated)
-	session.mu.Unlock()
+	userSession.mu.Lock()
+	userSession.setState(StateTerminated)
+	userSession.mu.Unlock()
 
-	m.logger.Printf("Terminating user session: id=%s", sessionID)
+	m.logger.Printf("Terminating user session: id=%s", userSessionID)
 
 	// Get all agents
 	agents := session.ListAgents()
 
 	// Terminate all agents in parallel with timeout
 	if len(agents) > 0 {
-		m.logger.Printf("Terminating %d agents in parallel: session=%s", len(agents), sessionID)
+		m.logger.Printf("Terminating %d agents in parallel: session=%s", len(agents), userSessionID)
 
 		var wg sync.WaitGroup
 		agentTimeout := DefaultAgentTerminationTimeout
@@ -398,10 +398,10 @@ func (m *Manager) TerminateUserSession(ctx context.Context, sessionID string) er
 					select {
 					case err := <-done:
 						if err != nil {
-							m.logger.Printf("Error closing agent: session=%s role=%s error=%v", sessionID, r, err)
+							m.logger.Printf("Error closing agent: session=%s role=%s error=%v", userSessionID, r, err)
 						}
 					case <-agentCtx.Done():
-						m.logger.Printf("Agent close timeout: session=%s role=%s", sessionID, r)
+						m.logger.Printf("Agent close timeout: session=%s role=%s", userSessionID, r)
 					}
 				}
 			}(role, agent)
@@ -416,15 +416,15 @@ func (m *Manager) TerminateUserSession(ctx context.Context, sessionID string) er
 
 		select {
 		case <-done:
-			m.logger.Printf("All agents terminated: session=%s", sessionID)
+			m.logger.Printf("All agents terminated: session=%s", userSessionID)
 		case <-ctx.Done():
-			m.logger.Printf("Session termination timeout: session=%s", sessionID)
+			m.logger.Printf("Session termination timeout: session=%s", userSessionID)
 		}
 	}
 
 	// Run cleanup hook
 	if err := m.cleaner.Cleanup(ctx, session); err != nil {
-		m.logger.Printf("Cleanup error for session %s: %v", sessionID, err)
+		m.logger.Printf("Cleanup error for session %s: %v", userSessionID, err)
 		// Continue with termination even if hook fails
 	}
 
@@ -432,29 +432,29 @@ func (m *Manager) TerminateUserSession(ctx context.Context, sessionID string) er
 	// Server is responsible for closing the connection, not the session manager
 
 	// Remove from store (state already set to TERMINATED above)
-	m.store.Delete(sessionID)
+	m.store.Delete(userSessionID)
 
 	// Publish session.terminated event (synchronous, errors logged but non-fatal)
 	if m.publisher != nil {
-		if err := m.publisher.PublishSessionTerminated(ctx, sessionID); err != nil {
+		if err := m.publisher.PublishSessionTerminated(ctx, userSessionID); err != nil {
 			m.logger.Printf("WARN: Failed to publish session.terminated event: %v", err)
 		}
 	}
 
-	m.logger.Printf("User session terminated: id=%s", sessionID)
+	m.logger.Printf("User session terminated: id=%s", userSessionID)
 	return nil
 }
 
 // RecordHeartbeat updates the last activity timestamp for a user session
-func (m *Manager) RecordHeartbeat(ctx context.Context, sessionID string) error {
-	session := m.store.Get(sessionID)
-	if session == nil {
-		return fmt.Errorf("%w: %s", ErrSessionNotFound, sessionID)
+func (m *Manager) RecordHeartbeat(ctx context.Context, userSessionID string) error {
+	userSession := m.store.Get(userSessionID)
+	if userSession == nil {
+		return fmt.Errorf("%w: %s", ErrSessionNotFound, userSessionID)
 	}
 
-	session.mu.Lock()
-	session.setLastActive(m.clock.Now())
-	session.mu.Unlock()
+	userSession.mu.Lock()
+	userSession.setLastActive(m.clock.Now())
+	userSession.mu.Unlock()
 
 	return nil
 }
