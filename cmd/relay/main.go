@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/2389-research/ourocodus/pkg/nats"
 	"github.com/2389-research/ourocodus/pkg/relay"
 )
 
@@ -24,8 +25,27 @@ func main() {
 	clock := &relay.SystemClock{}
 	idGen := &relay.UUIDGenerator{}
 
-	// Create session manager
-	sessionManager, err := relay.NewSessionManager(logger, clock, idGen)
+	// Initialize NATS client if NATS_URL is set
+	var natsClient nats.Client
+	natsURL := os.Getenv("NATS_URL")
+	if natsURL != "" {
+		log.Printf("Connecting to NATS at %s...", natsURL)
+
+		var err error
+		natsClient, err = nats.NewClient(
+			nats.WithURL(natsURL),
+			nats.WithName("ourocodus-relay"),
+		)
+		if err != nil {
+			log.Fatalf("Failed to connect to NATS: %v", err)
+		}
+		log.Printf("Connected to NATS successfully")
+	} else {
+		log.Printf("NATS_URL not set, event publishing disabled")
+	}
+
+	// Create session manager (with optional NATS client)
+	sessionManager, err := relay.NewSessionManager(logger, clock, idGen, natsClient)
 	if err != nil {
 		log.Fatalf("Failed to create session manager: %v", err)
 	}
@@ -77,10 +97,20 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
 
-	// Attempt graceful shutdown
+	// Attempt graceful HTTP server shutdown
 	if err := httpServer.Shutdown(ctx); err != nil {
 		log.Printf("Server shutdown error: %v", err)
 		os.Exit(1)
+	}
+
+	// Drain NATS connection if available
+	if natsClient != nil {
+		log.Println("Draining NATS connection...")
+		if err := natsClient.Drain(ctx); err != nil {
+			log.Printf("NATS drain error: %v", err)
+		} else {
+			log.Println("NATS connection drained successfully")
+		}
 	}
 
 	log.Println("Server stopped")
