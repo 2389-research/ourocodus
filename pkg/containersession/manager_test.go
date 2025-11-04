@@ -186,7 +186,7 @@ func TestCreateSession(t *testing.T) {
 
 	t.Run("fails when container creation fails", func(t *testing.T) {
 		docker := &mockDockerClient{
-			createFn: func(ctx context.Context, config *container.Config, hostConfig *container.HostConfig, networkingConfig *network.NetworkingConfig, containerName string) (container.CreateResponse, error) {
+			createFn: func(ctx context.Context, config *container.Config, hostConfig *container.HostConfig, networkingConfig *network.NetworkingConfig, platform *ocispec.Platform, containerName string) (container.CreateResponse, error) {
 				return container.CreateResponse{}, errors.New("docker error")
 			},
 		}
