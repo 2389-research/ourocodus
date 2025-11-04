@@ -74,7 +74,7 @@ func defaultClientConfig() *ClientConfig {
 		RequestTimeout:    getEnvDuration("NATS_REQUEST_TIMEOUT", 5*time.Second),
 		DrainTimeout:      30 * time.Second,
 		RetryAttempts:     3,
-		RetryBackoff:      newExponentialBackoff(200*time.Millisecond, 5*time.Second, nil),
+		RetryBackoff:      newExponentialBackoff(200*time.Millisecond, 5*time.Second),
 		CorrelationHeader: "Correlation-Id",
 		TraceparentHeader: "traceparent",
 		GenerateID:        defaultGenerateID,
@@ -270,13 +270,17 @@ func WithCorrelationID(id string) PubOption {
 type SubOption func(*subOptions)
 
 type subOptions struct {
-	queueGroup  string
-	maxInflight int
+	queueGroup        string
+	maxInflight       int
+	pendingLimitMsgs  int // NATS default: 512*1024
+	pendingLimitBytes int // NATS default: 64*1024*1024
 }
 
 func defaultSubOptions() *subOptions {
 	return &subOptions{
-		maxInflight: 1,
+		maxInflight:       1,
+		pendingLimitMsgs:  512 * 1024,       // 524,288 messages (NATS recommended)
+		pendingLimitBytes: 64 * 1024 * 1024, // 67,108,864 bytes (64 MB)
 	}
 }
 
@@ -291,6 +295,51 @@ func WithQueueGroup(group string) SubOption {
 func WithMaxInflight(max int) SubOption {
 	return func(opts *subOptions) {
 		opts.maxInflight = max
+	}
+}
+
+// WithPendingLimits sets custom pending message and byte limits for subscriptions.
+//
+// The pending limits control how many messages and bytes can be buffered by the
+// NATS client when the subscriber cannot keep up with the message rate. When either
+// limit is exceeded, the subscription will be considered a "slow consumer" and may
+// be dropped by the server.
+//
+// Use -1 for either parameter to disable that specific limit (not recommended).
+//
+// Default values (if not specified):
+//   - Messages: 524,288 (512 * 1024)
+//   - Bytes: 67,108,864 (64 MB)
+//
+// Example:
+//
+//	// High-throughput subscription with 1M message buffer and 128MB byte buffer
+//	sub, err := client.Subscribe(ctx, "orders", handler,
+//	    nats.WithPendingLimits(1_000_000, 128*1024*1024))
+func WithPendingLimits(msgs, bytes int) SubOption {
+	return func(opts *subOptions) {
+		opts.pendingLimitMsgs = msgs
+		opts.pendingLimitBytes = bytes
+	}
+}
+
+// WithUnlimitedPending disables all pending limits for the subscription.
+//
+// WARNING: This allows unbounded memory growth if the subscriber cannot keep up
+// with the message rate. Only use this if you have external backpressure mechanisms
+// in place (e.g., bounded channels, rate limiting, or guaranteed fast processing).
+//
+// This is equivalent to calling WithPendingLimits(-1, -1).
+//
+// Example:
+//
+//	// Only use when you control message rate externally
+//	sub, err := client.Subscribe(ctx, "logs", handler,
+//	    nats.WithUnlimitedPending())
+func WithUnlimitedPending() SubOption {
+	return func(opts *subOptions) {
+		opts.pendingLimitMsgs = -1
+		opts.pendingLimitBytes = -1
 	}
 }
 
@@ -339,15 +388,6 @@ func (defaultRandomSource) Float64() float64 {
 	return rand.Float64()
 }
 
-// fixedRandomSource always returns the same value (for testing).
-type fixedRandomSource struct {
-	value float64
-}
-
-func (f fixedRandomSource) Float64() float64 {
-	return f.value
-}
-
 // exponentialBackoff implements exponential backoff with jitter.
 type exponentialBackoff struct {
 	initial time.Duration
@@ -356,14 +396,11 @@ type exponentialBackoff struct {
 }
 
 // newExponentialBackoff creates a new exponential backoff strategy.
-func newExponentialBackoff(initial, max time.Duration, rand RandomSource) BackoffStrategy {
-	if rand == nil {
-		rand = defaultRandomSource{}
-	}
+func newExponentialBackoff(initial, max time.Duration) BackoffStrategy {
 	return &exponentialBackoff{
 		initial: initial,
 		max:     max,
-		rand:    rand,
+		rand:    defaultRandomSource{},
 	}
 }
 
