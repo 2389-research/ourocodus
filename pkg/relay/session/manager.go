@@ -115,7 +115,7 @@ func (m *Manager) CreateUserSession(ctx context.Context, ws WebSocketConn) (*Use
 		return nil, fmt.Errorf("failed to store session: %w", err)
 	}
 
-	// Publish session.created event (fire-and-forget, errors logged)
+	// Publish session.created event (synchronous, errors logged but non-fatal)
 	if m.publisher != nil {
 		if err := m.publisher.PublishSessionCreated(ctx, sessionID); err != nil {
 			m.logger.Printf("WARN: Failed to publish session.created event: %v", err)
@@ -244,7 +244,7 @@ func (m *Manager) SpawnAgent(ctx context.Context, sessionID, role, workspace str
 	agent.setAgentLastActive(m.clock.Now())
 	agent.mu.Unlock()
 
-	// Publish agent.spawned event (fire-and-forget, errors logged)
+	// Publish agent.spawned event (synchronous, errors logged but non-fatal)
 	if m.publisher != nil {
 		if err := m.publisher.PublishAgentSpawned(ctx, sessionID, role, absPath); err != nil {
 			m.logger.Printf("WARN: Failed to publish agent.spawned event: %v", err)
@@ -331,7 +331,7 @@ func (m *Manager) TerminateAgent(ctx context.Context, sessionID, role string) er
 	session.setLastActive(m.clock.Now())
 	session.mu.Unlock()
 
-	// Publish agent.terminated event (fire-and-forget, errors logged)
+	// Publish agent.terminated event (synchronous, errors logged but non-fatal)
 	// TODO: Capture actual exit code when available from ACP client
 	if m.publisher != nil {
 		if err := m.publisher.PublishAgentTerminated(ctx, sessionID, role, 0); err != nil {
@@ -434,7 +434,7 @@ func (m *Manager) TerminateUserSession(ctx context.Context, sessionID string) er
 	// Remove from store (state already set to TERMINATED above)
 	m.store.Delete(sessionID)
 
-	// Publish session.terminated event (fire-and-forget, errors logged)
+	// Publish session.terminated event (synchronous, errors logged but non-fatal)
 	if m.publisher != nil {
 		if err := m.publisher.PublishSessionTerminated(ctx, sessionID); err != nil {
 			m.logger.Printf("WARN: Failed to publish session.terminated event: %v", err)
