@@ -12,7 +12,7 @@
 - UserSession can have 0 to N agents
 - Agents can be spawned/terminated independently
 - Agent failure doesn't terminate the UserSession
-- Roles are dynamic (user-specified, not hardcoded)
+- Agent identifiers are user-chosen and dynamic (no predefined types)
 
 **State Storage:** In-memory only (no persistence across relay restarts)
 
@@ -26,8 +26,8 @@ UserSession (ID: uuid)
 ├── WebSocket Connection (to PWA)
 ├── Created At: time.Time
 ├── Last Active: time.Time
-└── Agents: map[role]AgentSession
-    ├── AgentSession (role: "auth")
+└── Agents: map[agentID]AgentSession
+    ├── AgentSession (agentID: "coder-1")
     │   ├── State: SPAWNING | ACTIVE | FAILED | TERMINATED
     │   ├── Workspace: string (git worktree path)
     │   ├── ACPClient: *acp.Client
@@ -36,10 +36,10 @@ UserSession (ID: uuid)
     │   ├── Error: string (if FAILED)
     │   └── History: []Message (conversation turns)
     │
-    ├── AgentSession (role: "db")
+    ├── AgentSession (agentID: "analyzer")
     │   └── ...
     │
-    └── AgentSession (role: "tests")
+    └── AgentSession (agentID: "task-bot")
         └── ...
 ```text
 
@@ -171,15 +171,15 @@ manager.CreateUserSession(ctx, websocketConn)
 ### 1. Spawn Agent Request
 
 ```go
-manager.SpawnAgent(ctx, sessionID, role, workspace)
+manager.SpawnAgent(ctx, sessionID, agentID, workspace)
 ```text
 
 **Validation:**
 
 - Session must exist
 - Session must be ACTIVE
-- Role must not already exist
-- Role and workspace must be non-empty
+- Agent ID must not already exist
+- Agent ID and workspace must be non-empty
 
 ### 2. Agent Creation (SPAWNING)
 
@@ -197,8 +197,8 @@ manager.SpawnAgent(ctx, sessionID, role, workspace)
 {
   "type": "agent:ready",
   "sessionId": "550e8400-e29b-41d4-a716-446655440000",
-  "role": "auth",
-  "workspace": "/path/to/agent/auth"
+  "agentId": "coder-1",
+  "workspace": "/path/to/agent/coder-1"
 }
 ```text
 
@@ -223,7 +223,7 @@ manager.SpawnAgent(ctx, sessionID, role, workspace)
 {
   "type": "agent:message",
   "sessionId": "550e8400-e29b-41d4-a716-446655440000",
-  "role": "auth",
+  "agentId": "coder-1",
   "content": "Create a user authentication module"
 }
 ```text
@@ -231,7 +231,7 @@ manager.SpawnAgent(ctx, sessionID, role, workspace)
 **Validation:**
 
 - Session must exist and be ACTIVE
-- Agent must exist for given role
+- Agent must exist for given agent ID
 - Agent must be in ACTIVE state
 
 **Response:**
@@ -241,7 +241,7 @@ manager.SpawnAgent(ctx, sessionID, role, workspace)
 {
   "type": "agent:response",
   "sessionId": "550e8400-e29b-41d4-a716-446655440000",
-  "role": "auth",
+  "agentId": "coder-1",
   "content": "I've created auth.go with JWT implementation...",
   "timestamp": "2025-10-24T12:34:57Z"
 }
@@ -258,10 +258,10 @@ Returns all agents for the session with their current states.
 ### Get Specific Agent
 
 ```go
-agent, err := manager.GetAgent(sessionID, role)
+agent, err := manager.GetAgent(sessionID, agentID)
 ```text
 
-Returns single agent by role.
+Returns single agent by ID.
 
 ### Get Conversation History
 
@@ -270,7 +270,7 @@ Retrieve stored conversation between user and agent.
 **Manager API:**
 
 ```go
-history, err := manager.GetAgentHistory(sessionID, role)
+history, err := manager.GetAgentHistory(sessionID, agentID)
 // Returns []Message with conversation turns
 ```text
 
@@ -287,7 +287,7 @@ type Message struct {
 **Example:**
 
 ```go
-history, err := manager.GetAgentHistory("session-123", "auth")
+history, err := manager.GetAgentHistory("session-123", "coder-1")
 if err != nil {
     // Handle session/agent not found
     log.Printf("Failed to get history: %v", err)
@@ -312,7 +312,7 @@ for _, msg := range history {
 **Error Handling:**
 
 - Returns `session.ErrSessionNotFound` if session doesn't exist
-- Returns `session.ErrAgentNotFound` if agent role not found
+- Returns `session.ErrAgentNotFound` if agent ID not found
 
 ---
 
@@ -321,12 +321,12 @@ for _, msg := range history {
 ### 1. Terminate Agent Request
 
 ```go
-manager.TerminateAgent(ctx, sessionID, role)
+manager.TerminateAgent(ctx, sessionID, agentID)
 ```text
 
 **What happens:**
 
-1. Find agent by role
+1. Find agent by ID
 2. Close ACP client connection
 3. Set agent state to TERMINATED
 4. Remove agent from session
@@ -340,7 +340,7 @@ manager.TerminateAgent(ctx, sessionID, role)
 {
   "type": "agent:terminated",
   "sessionId": "550e8400-e29b-41d4-a716-446655440000",
-  "role": "auth",
+  "agentId": "coder-1",
   "reason": "user requested"
 }
 ```text
@@ -349,7 +349,7 @@ manager.TerminateAgent(ctx, sessionID, role)
 
 **Independent lifecycles:**
 
-- Terminating "auth" doesn't affect "db" agent
+- Terminating one agent doesn't affect other agents
 - Session continues with remaining agents
 - Can spawn new agents after termination
 
@@ -561,7 +561,7 @@ type AgentSession struct {
 
 ### Edge Cases
 
-- [ ] Spawn duplicate role → Error returned
+- [ ] Spawn duplicate agent ID → Error returned
 - [ ] Send message to non-existent agent → Error
 - [ ] Terminate already-terminated agent → Idempotent
 - [ ] Create session after session terminated → New session
@@ -574,7 +574,7 @@ type AgentSession struct {
 
 - UserSession (container) → 0-N AgentSessions
 - Independent agent lifecycles
-- Dynamic roles (not hardcoded)
+- Dynamic agent identifiers (user-chosen, no predefined types)
 
 **States:**
 

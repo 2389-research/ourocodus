@@ -8,9 +8,9 @@
 flowchart TD
     Client["WebSocket Client<br/>(PWA planned, currently demos)<br/>scripts/demo/, scripts/interactive/"]
     Relay["Relay (Go)<br/>- UserSession (container)<br/>- Routes messages<br/>- Spawns agent processes<br/>- In-memory state"]
-    AgentA["Agent (role A)<br/>Claude Code ACP<br/>(process)"]
-    AgentB["Agent (role B)<br/>Claude Code ACP<br/>(process)"]
-    AgentC["Agent (role C)<br/>Claude Code ACP<br/>(process)"]
+    AgentA["Agent: agent-1<br/>Claude Code ACP<br/>(process)"]
+    AgentB["Agent: agent-2<br/>Claude Code ACP<br/>(process)"]
+    AgentC["Agent: agent-N<br/>Claude Code ACP<br/>(process)"]
 
     Client -->|"WebSocket"| Relay
     Relay -->|"stdio"| AgentA
@@ -18,11 +18,12 @@ flowchart TD
     Relay -->|"stdio (0-N)"| AgentC
 ```
 
-**Example:** role A="auth", role B="db", role C="test"
-_(System supports any user-specified roles dynamically)_
+**Example:** User spawns agents with identifiers: "coder-1", "analyzer", "task-bot"
+_(Users can spawn 1-N agents with any identifiers they choose)_
 
 **Note:**
-- Roles are dynamic, not hardcoded
+- Agent identifiers are user-chosen and dynamic (not limited to predefined types)
+- Users can spawn any number of agents (1, 3, 50, etc.) as needed
 - Agent failure doesn't terminate session
 - Agents can be spawned/terminated independently
 
@@ -31,7 +32,7 @@ _(System supports any user-specified roles dynamically)_
 - **Workspace Paths**: Each agent requires its own workspace directory path
   - Paths must be under the configured base workspace directory
   - Paths are constrained for security (no directory traversal attacks)
-  - Example: `workspaces/session-123/auth`, `workspaces/session-123/db`
+  - Example: `workspaces/session-123/coder-1`, `workspaces/session-123/analyzer`
 
 - **API Key**: `ANTHROPIC_API_KEY` environment variable must be set
   - Required for spawning Claude Code ACP processes
@@ -45,7 +46,7 @@ _(System supports any user-specified roles dynamically)_
 - Processes not containers
 - In-memory session state
 - Variable agent count (0-N agents per session)
-- Dynamic roles (user-specified, not hardcoded)
+- Dynamic agent identifiers (user-chosen, no predefined types)
 - Independent agent lifecycles (agents can fail without affecting session)
 
 **Limitations:**

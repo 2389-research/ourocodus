@@ -110,15 +110,17 @@ which claude-code-acp  # Should return path
 
 ---
 
-### 5. Agent Roles
+### 5. Agent Identifiers
 
-**Assumption:** Agent roles (auth, db, tests) are meaningful for user context
+**Assumption:** User-chosen agent identifiers provide meaningful context
 
 **Status:** ✅ **ACCEPTABLE FOR PHASE 1**
 
-**Reality:** Roles are just labels. Agents can do any work regardless of role name.
+**Reality:** Agent identifiers are arbitrary user-chosen strings (e.g., "coder-1", "analyzer", "task-bot"). Agents can do any work regardless of their identifier. Users can spawn 1-N agents dynamically with any identifiers they choose.
 
-**Future:** Make agent count and roles configurable via UI
+**No Constraints:** System does not limit agent names to predefined types. The identifier is purely for user organization and reference.
+
+**Future:** Add UI features for managing multiple agents (grouping, tagging, filtering)
 
 ---
 
@@ -195,7 +197,7 @@ Before starting Issue #3, validate these assumptions:
 | A5 | Empty worktree OK | ⚠️ Decision needed | Low | Start empty, adjust later |
 | A6 | WebSocket sufficient | ✅ Acceptable | Low | Document limitations |
 | A7 | Ephemeral sessions OK | ✅ Acceptable | Low | Phase 1 only |
-| A8 | Agent roles meaningful | ✅ Acceptable | Low | Make configurable later |
+| A8 | Agent identifiers meaningful | ✅ Acceptable | Low | Add agent management UI later |
 | A9 | JSON-RPC 2.0 format | ✅ Verified | Low | None |
 
 ---
