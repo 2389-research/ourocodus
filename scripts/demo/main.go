@@ -95,15 +95,15 @@ func demoSessionLifecycle(conn *websocket.Conn) error {
 
 	// Create session
 	fmt.Println("→ Creating session...")
-	sessionID, err := createSession(conn)
+	userSessionID, err := createSession(conn)
 	if err != nil {
 		return err
 	}
-	fmt.Printf("✅ Session created: %s\n", sessionID)
+	fmt.Printf("✅ Session created: %s\n", userSessionID)
 
 	// Spawn agent
 	fmt.Println("→ Spawning agent...")
-	if err := spawnAgent(conn, sessionID, "demo-agent", "./workspaces/demo"); err != nil {
+	if err := spawnAgent(conn, userSessionID, "demo-agent", "./workspaces/demo"); err != nil {
 		return err
 	}
 	fmt.Println("✅ Agent spawned and ready (state: ACTIVE)")
@@ -118,7 +118,7 @@ func demoSessionLifecycle(conn *websocket.Conn) error {
 	fmt.Println("\n→ Testing bidirectional communication...")
 	for i, msg := range messages {
 		fmt.Printf("   User: %s\n", msg)
-		response, err := sendAgentMessage(conn, sessionID, "demo-agent", msg)
+		response, err := sendAgentMessage(conn, userSessionID, "demo-agent", msg)
 		if err != nil {
 			return err
 		}
@@ -143,8 +143,8 @@ func demoErrorSemantics(conn *websocket.Conn) error {
 	msg := map[string]interface{}{
 		"version":   "1.0",
 		"type":      "agent:message",
-		"sessionId": "00000000-0000-0000-0000-000000000000",
-		"role":      "test",
+		"userSessionId": "00000000-0000-0000-0000-000000000000",
+		"agentId":      "test",
 		"content":   "hello",
 	}
 	if err := conn.WriteJSON(msg); err != nil {
@@ -172,7 +172,7 @@ func demoErrorSemantics(conn *websocket.Conn) error {
 
 	// Create session for next test
 	fmt.Println("\n→ Creating session for AGENT_NOT_FOUND test...")
-	sessionID, err := createSession(conn)
+	userSessionID, err := createSession(conn)
 	if err != nil {
 		return err
 	}
@@ -182,8 +182,8 @@ func demoErrorSemantics(conn *websocket.Conn) error {
 	msg = map[string]interface{}{
 		"version":   "1.0",
 		"type":      "agent:message",
-		"sessionId": sessionID,
-		"role":      "non-existent-agent",
+		"userSessionId": userSessionID,
+		"agentId":      "non-existent-agent",
 		"content":   "hello",
 	}
 	if err := conn.WriteJSON(msg); err != nil {
@@ -235,19 +235,19 @@ func createSession(conn *websocket.Conn) (string, error) {
 		return "", err
 	}
 
-	sessionID, ok := resp["sessionId"].(string)
+	userSessionID, ok := resp["userSessionId"].(string)
 	if !ok {
-		return "", fmt.Errorf("no sessionId in response")
+		return "", fmt.Errorf("no userSessionId in response")
 	}
-	return sessionID, nil
+	return userSessionID, nil
 }
 
-func spawnAgent(conn *websocket.Conn, sessionID, role, workspace string) error {
+func spawnAgent(conn *websocket.Conn, userSessionID, role, workspace string) error {
 	msg := map[string]interface{}{
 		"version":   "1.0",
 		"type":      "agent:spawn",
-		"sessionId": sessionID,
-		"role":      role,
+		"userSessionId": userSessionID,
+		"agentId":      role,
 		"workspace": workspace,
 	}
 	if err := conn.WriteJSON(msg); err != nil {
@@ -258,12 +258,12 @@ func spawnAgent(conn *websocket.Conn, sessionID, role, workspace string) error {
 	return conn.ReadJSON(&resp)
 }
 
-func sendAgentMessage(conn *websocket.Conn, sessionID, role, content string) (string, error) {
+func sendAgentMessage(conn *websocket.Conn, userSessionID, role, content string) (string, error) {
 	msg := map[string]interface{}{
 		"version":   "1.0",
 		"type":      "agent:message",
-		"sessionId": sessionID,
-		"role":      role,
+		"userSessionId": userSessionID,
+		"agentId":      role,
 		"content":   content,
 	}
 	if err := conn.WriteJSON(msg); err != nil {

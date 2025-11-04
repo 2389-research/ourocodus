@@ -143,7 +143,7 @@ func runSmokeTest(verbose bool, fuzzCount int, maxPayload int) error {
 	}
 
 	// Test session lifecycle (session:create, agent:spawn, agent:message)
-	sessionID, sessionErr := verifySessionLifecycle(conn, verbose)
+	userSessionID, sessionErr := verifySessionLifecycle(conn, verbose)
 	if sessionErr != nil {
 		return sessionErr
 	}
@@ -152,7 +152,7 @@ func runSmokeTest(verbose bool, fuzzCount int, maxPayload int) error {
 	if sessionNotFoundErr := verifySessionNotFound(conn, verbose); sessionNotFoundErr != nil {
 		return sessionNotFoundErr
 	}
-	if agentNotFoundErr := verifyAgentNotFound(conn, sessionID, verbose); agentNotFoundErr != nil {
+	if agentNotFoundErr := verifyAgentNotFound(conn, userSessionID, verbose); agentNotFoundErr != nil {
 		return agentNotFoundErr
 	}
 
@@ -313,21 +313,21 @@ func verifySessionLifecycle(conn *websocket.Conn, verbose bool) (string, error) 
 	if createResp["type"] != "session:created" {
 		return "", fmt.Errorf("expected type session:created, got: %s", stringify(createResp))
 	}
-	sessionID, ok := createResp["sessionId"].(string)
-	if !ok || sessionID == "" {
-		return "", fmt.Errorf("missing or invalid sessionId in response: %s", stringify(createResp))
+	userSessionID, ok := createResp["userSessionId"].(string)
+	if !ok || userSessionID == "" {
+		return "", fmt.Errorf("missing or invalid userSessionId in response: %s", stringify(createResp))
 	}
 	if _, ok = createResp["timestamp"].(string); !ok {
 		return "", fmt.Errorf("missing timestamp in session:created: %s", stringify(createResp))
 	}
-	success("✅", "Session created: %s", sessionID)
+	success("✅", "Session created: %s", userSessionID)
 
 	// Step 2: Spawn agent
 	spawnMsg := map[string]interface{}{
 		"version":   "1.0",
 		"type":      "agent:spawn",
-		"sessionId": sessionID,
-		"role":      "smoke-test",
+		"userSessionId": userSessionID,
+		"agentId":      "smoke-test",
 		"workspace": "./workspaces/smoke-test",
 	}
 	debug(verbose, "📤", "Sending agent:spawn: %s", stringify(spawnMsg))
@@ -344,7 +344,7 @@ func verifySessionLifecycle(conn *websocket.Conn, verbose bool) (string, error) 
 	if spawnResp["type"] != "agent:ready" {
 		return "", fmt.Errorf("expected type agent:ready, got: %s", stringify(spawnResp))
 	}
-	if spawnResp["sessionId"] != sessionID {
+	if spawnResp["userSessionId"] != userSessionID {
 		return "", fmt.Errorf("sessionId mismatch in agent:ready: %s", stringify(spawnResp))
 	}
 	if spawnResp["role"] != "smoke-test" {
@@ -356,8 +356,8 @@ func verifySessionLifecycle(conn *websocket.Conn, verbose bool) (string, error) 
 	messageMsg := map[string]interface{}{
 		"version":   "1.0",
 		"type":      "agent:message",
-		"sessionId": sessionID,
-		"role":      "smoke-test",
+		"userSessionId": userSessionID,
+		"agentId":      "smoke-test",
 		"content":   "hello",
 	}
 	debug(verbose, "📤", "Sending agent:message: %s", stringify(messageMsg))
@@ -374,7 +374,7 @@ func verifySessionLifecycle(conn *websocket.Conn, verbose bool) (string, error) 
 	if messageResp["type"] != "agent:response" {
 		return "", fmt.Errorf("expected type agent:response, got: %s", stringify(messageResp))
 	}
-	if messageResp["sessionId"] != sessionID {
+	if messageResp["userSessionId"] != userSessionID {
 		return "", fmt.Errorf("sessionId mismatch in agent:response: %s", stringify(messageResp))
 	}
 	if messageResp["role"] != "smoke-test" {
@@ -392,7 +392,7 @@ func verifySessionLifecycle(conn *websocket.Conn, verbose bool) (string, error) 
 	}
 	success("✅", "Agent responded: %s", content)
 
-	return sessionID, nil
+	return userSessionID, nil
 }
 
 func verifySessionNotFound(conn *websocket.Conn, verbose bool) error {
@@ -400,8 +400,8 @@ func verifySessionNotFound(conn *websocket.Conn, verbose bool) error {
 	messageMsg := map[string]interface{}{
 		"version":   "1.0",
 		"type":      "agent:message",
-		"sessionId": "00000000-0000-0000-0000-000000000000",
-		"role":      "smoke-test",
+		"userSessionId": "00000000-0000-0000-0000-000000000000",
+		"agentId":      "smoke-test",
 		"content":   "hello",
 	}
 	debug(verbose, "📤", "Sending agent:message with fake session ID: %s", stringify(messageMsg))
@@ -432,13 +432,13 @@ func verifySessionNotFound(conn *websocket.Conn, verbose bool) error {
 	return nil
 }
 
-func verifyAgentNotFound(conn *websocket.Conn, sessionID string, verbose bool) error {
+func verifyAgentNotFound(conn *websocket.Conn, userSessionID string, verbose bool) error {
 	// Send agent:message with non-existent agent role
 	messageMsg := map[string]interface{}{
 		"version":   "1.0",
 		"type":      "agent:message",
-		"sessionId": sessionID,
-		"role":      "non-existent-agent",
+		"userSessionId": userSessionID,
+		"agentId":      "non-existent-agent",
 		"content":   "hello",
 	}
 	debug(verbose, "📤", "Sending agent:message with non-existent role: %s", stringify(messageMsg))
