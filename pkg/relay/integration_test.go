@@ -191,7 +191,7 @@ func setupIntegrationServer(t *testing.T) (*Server, *integrationMockClientFactor
 
 	// Create real session.Manager with injected mocks
 	store := session.NewMemoryStore()
-	sessionManager := session.NewManager(store, sessionIDGen, sessionClock, sessionCleaner, sessionLogger, clientFactory, tempDir)
+	sessionManager := session.NewManager(store, sessionIDGen, sessionClock, sessionCleaner, sessionLogger, clientFactory, tempDir, nil) // nil publisher for integration tests
 
 	// Create relay server with real session manager
 	server := NewServer(

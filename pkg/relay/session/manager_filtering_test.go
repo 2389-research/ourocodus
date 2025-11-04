@@ -18,7 +18,7 @@ func TestList(t *testing.T) {
 
 	// Create another active session
 	idGen := &mockIDGenerator{nextID: "session-2"}
-	manager2 := NewManager(NewMemoryStore(), idGen, &mockClock{}, &mockCleaner{}, &mockLogger{}, &mockClientFactory{}, ".")
+	manager2 := NewManager(NewMemoryStore(), idGen, &mockClock{}, &mockCleaner{}, &mockLogger{}, &mockClientFactory{}, ".", nil) // nil publisher for tests
 	session2, _ := manager2.CreateUserSession(ctx, &mockWebSocket{})
 
 	// Test list all

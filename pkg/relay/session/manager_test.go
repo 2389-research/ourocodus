@@ -144,7 +144,7 @@ func setupManager() (*Manager, *mockIDGenerator, *mockClock, *mockCleaner, *mock
 	clientFactory := &mockClientFactory{}
 
 	// Use current directory as base for tests (allows testdata/ paths)
-	manager := NewManager(store, idGen, clock, cleaner, logger, clientFactory, ".")
+	manager := NewManager(store, idGen, clock, cleaner, logger, clientFactory, ".", nil) // nil publisher for tests
 	return manager, idGen, clock, cleaner, logger, clientFactory
 }
 
@@ -684,7 +684,7 @@ func TestSpawnAgent_RejectsPathTraversal(t *testing.T) {
 	clientFactory := &mockClientFactory{}
 
 	// Use "./workspaces" as base to test directory name bypass
-	manager := NewManager(store, idGen, clock, cleaner, logger, clientFactory, "./workspaces")
+	manager := NewManager(store, idGen, clock, cleaner, logger, clientFactory, "./workspaces", nil) // nil publisher for tests
 
 	ctx := context.Background()
 	ws := &mockWebSocket{}

@@ -24,7 +24,7 @@ func TestTerminateAgent_CloseError(t *testing.T) {
 			}, nil
 		},
 	}
-	manager := NewManager(store, idGen, clock, cleaner, logger, failingFactory, ".")
+	manager := NewManager(store, idGen, clock, cleaner, logger, failingFactory, ".", nil) // nil publisher for tests
 
 	ctx := context.Background()
 	ws := &mockWebSocket{}
