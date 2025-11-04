@@ -7,7 +7,10 @@ Docker container lifecycle, workspace directories, and I/O streams.
 # Basic Usage
 
 	// Create manager with dependencies
-	dockerClient, _ := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	dockerClient, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	if err != nil {
+		log.Fatal(err)
+	}
 	idGen := &UUIDGenerator{}
 	clock := &SystemClock{}
 	logger := log.New(os.Stdout, "[containersession] ", log.LstdFlags)

@@ -37,10 +37,15 @@ type ContainerSession struct {
 
 // NewContainerSession creates a new container session in PENDING state
 func NewContainerSession(id, workspacePath string, labels map[string]string, createdAt time.Time) *ContainerSession {
+	// Create defensive copy of labels to prevent external mutation
+	labelsCopy := make(map[string]string, len(labels))
+	for k, v := range labels {
+		labelsCopy[k] = v
+	}
 	return &ContainerSession{
 		id:            id,
 		workspacePath: workspacePath,
-		labels:        labels,
+		labels:        labelsCopy,
 		state:         StatePending,
 		createdAt:     createdAt,
 	}
