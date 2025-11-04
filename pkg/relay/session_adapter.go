@@ -74,5 +74,6 @@ func NewSessionManager(logger Logger, clock Clock, idGen IDGenerator) (*session.
 	if baseWorkspaceDir == "" {
 		baseWorkspaceDir = "./workspaces"
 	}
-	return session.NewManager(store, sessionIDGen, sessionClock, cleaner, sessionLogger, clientFactory, baseWorkspaceDir), nil
+	// TODO: Wire EventPublisher when NATS client is available
+	return session.NewManager(store, sessionIDGen, sessionClock, cleaner, sessionLogger, clientFactory, baseWorkspaceDir, nil), nil
 }

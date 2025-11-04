@@ -48,17 +48,20 @@ type Manager struct {
 	logger           Logger
 	clientFactory    ClientFactory
 	baseWorkspaceDir string
+	publisher        EventPublisher // Optional: publishes lifecycle events to NATS
 }
 
 // NewManager creates a session manager with injected dependencies.
 //
-// All dependencies are required and must be non-nil. This constructor panics on
-// nil collaborators because missing dependencies indicate programmer configuration
+// All dependencies are required and must be non-nil (except publisher). This constructor
+// panics on nil collaborators because missing dependencies indicate programmer configuration
 // bugs, not runtime failures.
 //
 // baseWorkspaceDir specifies the base directory under which all workspace paths
 // must be constrained. If empty, defaults to "./workspaces".
-func NewManager(store Store, idGen IDGenerator, clock Clock, cleaner Cleaner, logger Logger, clientFactory ClientFactory, baseWorkspaceDir string) *Manager {
+//
+// publisher is optional and can be nil. If nil, event publishing is disabled.
+func NewManager(store Store, idGen IDGenerator, clock Clock, cleaner Cleaner, logger Logger, clientFactory ClientFactory, baseWorkspaceDir string, publisher EventPublisher) *Manager {
 	if store == nil {
 		panic("store cannot be nil")
 	}
@@ -90,6 +93,7 @@ func NewManager(store Store, idGen IDGenerator, clock Clock, cleaner Cleaner, lo
 		logger:           logger,
 		clientFactory:    clientFactory,
 		baseWorkspaceDir: baseWorkspaceDir,
+		publisher:        publisher,
 	}
 }
 
@@ -109,6 +113,13 @@ func (m *Manager) CreateUserSession(ctx context.Context, ws WebSocketConn) (*Use
 	// Store session
 	if err := m.store.Create(session); err != nil {
 		return nil, fmt.Errorf("failed to store session: %w", err)
+	}
+
+	// Publish session.created event (fire-and-forget, errors logged)
+	if m.publisher != nil {
+		if err := m.publisher.PublishSessionCreated(ctx, sessionID); err != nil {
+			m.logger.Printf("WARN: Failed to publish session.created event: %v", err)
+		}
 	}
 
 	m.logger.Printf("User session created: id=%s state=ACTIVE agents=0", sessionID)
@@ -233,6 +244,13 @@ func (m *Manager) SpawnAgent(ctx context.Context, sessionID, role, workspace str
 	agent.setAgentLastActive(m.clock.Now())
 	agent.mu.Unlock()
 
+	// Publish agent.spawned event (fire-and-forget, errors logged)
+	if m.publisher != nil {
+		if err := m.publisher.PublishAgentSpawned(ctx, sessionID, role, absPath); err != nil {
+			m.logger.Printf("WARN: Failed to publish agent.spawned event: %v", err)
+		}
+	}
+
 	m.logger.Printf("Agent spawned: session=%s role=%s state=ACTIVE", sessionID, role)
 	return nil
 }
@@ -312,6 +330,14 @@ func (m *Manager) TerminateAgent(ctx context.Context, sessionID, role string) er
 	session.removeAgent(role)
 	session.setLastActive(m.clock.Now())
 	session.mu.Unlock()
+
+	// Publish agent.terminated event (fire-and-forget, errors logged)
+	// TODO: Capture actual exit code when available from ACP client
+	if m.publisher != nil {
+		if err := m.publisher.PublishAgentTerminated(ctx, sessionID, role, 0); err != nil {
+			m.logger.Printf("WARN: Failed to publish agent.terminated event: %v", err)
+		}
+	}
 
 	m.logger.Printf("Agent terminated: session=%s role=%s", sessionID, role)
 	return nil
@@ -407,6 +433,13 @@ func (m *Manager) TerminateUserSession(ctx context.Context, sessionID string) er
 
 	// Remove from store (state already set to TERMINATED above)
 	m.store.Delete(sessionID)
+
+	// Publish session.terminated event (fire-and-forget, errors logged)
+	if m.publisher != nil {
+		if err := m.publisher.PublishSessionTerminated(ctx, sessionID); err != nil {
+			m.logger.Printf("WARN: Failed to publish session.terminated event: %v", err)
+		}
+	}
 
 	m.logger.Printf("User session terminated: id=%s", sessionID)
 	return nil
