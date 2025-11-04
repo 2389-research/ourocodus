@@ -20,8 +20,8 @@ func TestUserSession_GetWebSocket(t *testing.T) {
 func TestAgentSession_Accessors(t *testing.T) {
 	agent := NewAgentSession("auth", "workspace/auth", testTime())
 
-	if agent.GetRole() != "auth" {
-		t.Errorf("Expected role 'auth', got %s", agent.GetRole())
+	if agent.GetAgentID() != "auth" {
+		t.Errorf("Expected role 'auth', got %s", agent.GetAgentID())
 	}
 	if agent.GetWorkspace() != "workspace/auth" {
 		t.Errorf("Expected workspace 'workspace/auth', got %s", agent.GetWorkspace())

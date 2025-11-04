@@ -110,9 +110,9 @@ func (m *Manager) CreateUserSession(ctx context.Context, ws WebSocketConn) (*Use
 	now := m.clock.Now()
 	userSession := NewUserSession(userSessionID, ws, now)
 
-	// Store session
-	if err := m.store.Create(session); err != nil {
-		return nil, fmt.Errorf("failed to store session: %w", err)
+	// Store userSession
+	if err := m.store.Create(userSession); err != nil {
+		return nil, fmt.Errorf("failed to store user session: %w", err)
 	}
 
 	// Publish session.created event (synchronous, errors logged but non-fatal)
@@ -123,7 +123,7 @@ func (m *Manager) CreateUserSession(ctx context.Context, ws WebSocketConn) (*Use
 	}
 
 	m.logger.Printf("User session created: id=%s state=ACTIVE agents=0", userSessionID)
-	return session, nil
+	return userSession, nil
 }
 
 // Get retrieves a user session by ID
@@ -181,11 +181,11 @@ func (m *Manager) SpawnAgent(ctx context.Context, userSessionID, agentID, worksp
 
 	// Initial validation with lock (check-lock-check pattern to prevent TOCTOU)
 	userSession.mu.Lock()
-	if session.state != StateActive {
+	if userSession.state != StateActive {
 		userSession.mu.Unlock()
-		return fmt.Errorf("session %s is not active (state=%s)", userSessionID, session.state)
+		return fmt.Errorf("session %s is not active (state=%s)", userSessionID, userSession.state)
 	}
-	if session.agents[agentID] != nil {
+	if userSession.agents[agentID] != nil {
 		userSession.mu.Unlock()
 		return fmt.Errorf("agent %s already exists in session %s", agentID, userSessionID)
 	}
@@ -208,13 +208,13 @@ func (m *Manager) SpawnAgent(ctx context.Context, userSessionID, agentID, worksp
 	userSession.mu.Lock()
 
 	// Re-check state (session could have been terminated during I/O)
-	if session.state != StateActive {
+	if userSession.state != StateActive {
 		userSession.mu.Unlock()
-		return fmt.Errorf("session %s is not active (state=%s)", userSessionID, session.state)
+		return fmt.Errorf("session %s is not active (state=%s)", userSessionID, userSession.state)
 	}
 
 	// Re-check agent doesn't exist (another goroutine could have added it)
-	if session.agents[agentID] != nil {
+	if userSession.agents[agentID] != nil {
 		userSession.mu.Unlock()
 		return fmt.Errorf("agent %s already exists in session %s", agentID, userSessionID)
 	}
@@ -262,7 +262,7 @@ func (m *Manager) GetAgent(userSessionID, agentID string) (*AgentSession, error)
 		return nil, fmt.Errorf("%w: %s", ErrSessionNotFound, userSessionID)
 	}
 
-	agent := session.GetAgent(agentID)
+	agent := userSession.GetAgent(agentID)
 	if agent == nil {
 		return nil, fmt.Errorf("%w: agentID=%s session=%s", ErrAgentNotFound, agentID, userSessionID)
 	}
@@ -277,7 +277,7 @@ func (m *Manager) ListAgents(userSessionID string) (map[string]*AgentSession, er
 		return nil, fmt.Errorf("%w: %s", ErrSessionNotFound, userSessionID)
 	}
 
-	return session.ListAgents(), nil
+	return userSession.ListAgents(), nil
 }
 
 // GetAgentHistory returns the conversation history for a specific agent
@@ -300,7 +300,7 @@ func (m *Manager) TerminateAgent(ctx context.Context, userSessionID, agentID str
 		return nil
 	}
 
-	agent := session.GetAgent(agentID)
+	agent := userSession.GetAgent(agentID)
 	if agent == nil {
 		// Already removed - idempotent
 		m.logger.Printf("Agent not found during termination: session=%s agentID=%s (already terminated?)", userSessionID, agentID)
@@ -361,7 +361,7 @@ func (m *Manager) TerminateUserSession(ctx context.Context, userSessionID string
 	m.logger.Printf("Terminating user session: id=%s", userSessionID)
 
 	// Get all agents
-	agents := session.ListAgents()
+	agents := userSession.ListAgents()
 
 	// Terminate all agents in parallel with timeout
 	if len(agents) > 0 {
@@ -370,9 +370,9 @@ func (m *Manager) TerminateUserSession(ctx context.Context, userSessionID string
 		var wg sync.WaitGroup
 		agentTimeout := DefaultAgentTerminationTimeout
 
-		for role, agent := range agents {
+		for agentID, agent := range agents {
 			wg.Add(1)
-			go func(r string, a *AgentSession) {
+			go func(id string, a *AgentSession) {
 				defer wg.Done()
 
 				// Create context with timeout for this agent
@@ -398,13 +398,13 @@ func (m *Manager) TerminateUserSession(ctx context.Context, userSessionID string
 					select {
 					case err := <-done:
 						if err != nil {
-							m.logger.Printf("Error closing agent: session=%s role=%s error=%v", userSessionID, r, err)
+							m.logger.Printf("Error closing agent: userSession=%s agentID=%s error=%v", userSessionID, id, err)
 						}
 					case <-agentCtx.Done():
-						m.logger.Printf("Agent close timeout: session=%s role=%s", userSessionID, r)
+						m.logger.Printf("Agent close timeout: userSession=%s agentID=%s", userSessionID, id)
 					}
 				}
-			}(role, agent)
+			}(agentID, agent)
 		}
 
 		// Wait for all agents to terminate (with timeout)
@@ -423,8 +423,8 @@ func (m *Manager) TerminateUserSession(ctx context.Context, userSessionID string
 	}
 
 	// Run cleanup hook
-	if err := m.cleaner.Cleanup(ctx, session); err != nil {
-		m.logger.Printf("Cleanup error for session %s: %v", userSessionID, err)
+	if err := m.cleaner.Cleanup(ctx, userSession); err != nil {
+		m.logger.Printf("Cleanup error for user session %s: %v", userSessionID, err)
 		// Continue with termination even if hook fails
 	}
 

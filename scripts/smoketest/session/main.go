@@ -142,15 +142,15 @@ func testSpawnSingleAgent(ctx context.Context, manager *session.Manager, verbose
 		return fmt.Errorf("failed to get agent: %w", err)
 	}
 
-	if agent.GetRole() != "auth" {
-		return fmt.Errorf("expected role 'auth', got %s", agent.GetRole())
+	if agent.GetAgentID() != "auth" {
+		return fmt.Errorf("expected role 'coder-1', got %s", agent.GetAgentID())
 	}
 
 	if agent.GetState() != session.AgentActive {
 		return fmt.Errorf("expected ACTIVE state, got %s", agent.GetState())
 	}
 
-	debug(verbose, "  ✓ Agent 'auth' spawned successfully")
+	debug(verbose, "  ✓ Agent 'coder-1' spawned successfully")
 	debug(verbose, "  ✓ Agent state is ACTIVE")
 	debug(verbose, "  ✓ UserSession remains ACTIVE")
 	success("✅", "Single agent spawned successfully")
@@ -301,7 +301,7 @@ func testTerminateSingleAgent(ctx context.Context, manager *session.Manager, ver
 		return fmt.Errorf("session not ACTIVE after single termination: %s", userSession.GetState())
 	}
 
-	debug(verbose, "  ✓ Agent 'auth' terminated")
+	debug(verbose, "  ✓ Agent 'coder-1' terminated")
 	debug(verbose, "  ✓ Agent 'db' still ACTIVE")
 	debug(verbose, "  ✓ UserSession still ACTIVE")
 	success("✅", "Single agent termination verified")
@@ -526,22 +526,22 @@ type mockEventPublisher struct {
 	agentTerminatedCount   int
 }
 
-func (m *mockEventPublisher) PublishSessionCreated(ctx context.Context, sessionID string) error {
+func (m *mockEventPublisher) PublishSessionCreated(ctx context.Context, userSessionID string) error {
 	m.sessionCreatedCount++
 	return nil
 }
 
-func (m *mockEventPublisher) PublishSessionTerminated(ctx context.Context, sessionID string) error {
+func (m *mockEventPublisher) PublishSessionTerminated(ctx context.Context, userSessionID string) error {
 	m.sessionTerminatedCount++
 	return nil
 }
 
-func (m *mockEventPublisher) PublishAgentSpawned(ctx context.Context, sessionID, role, workspace string) error {
+func (m *mockEventPublisher) PublishAgentSpawned(ctx context.Context, userSessionID, agentID, workspace string) error {
 	m.agentSpawnedCount++
 	return nil
 }
 
-func (m *mockEventPublisher) PublishAgentTerminated(ctx context.Context, sessionID, role string, exitCode int) error {
+func (m *mockEventPublisher) PublishAgentTerminated(ctx context.Context, userSessionID, agentID string, exitCode int) error {
 	m.agentTerminatedCount++
 	return nil
 }

@@ -172,11 +172,11 @@ func (u *UserSession) GetWebSocket() WebSocketConn {
 	return u.webSocket
 }
 
-// GetAgent returns the agent session for the given role (may be nil)
-func (u *UserSession) GetAgent(role string) *AgentSession {
+// GetAgent returns the agent session for the given agent ID (may be nil)
+func (u *UserSession) GetAgent(agentID string) *AgentSession {
 	u.mu.RLock()
 	defer u.mu.RUnlock()
-	return u.agents[role]
+	return u.agents[agentID]
 }
 
 // ListAgents returns a copy of the agents map
