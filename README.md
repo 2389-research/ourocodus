@@ -303,10 +303,10 @@ The system automatically creates two streams:
 
 **Topic Naming Convention:**
 
-- Session events: `sessions.<session-id>.events`
-- Work distribution: `sessions.<session-id>.work.<role>`
-- Work results: `sessions.<session-id>.results.<role>`
-- Agent heartbeats: `agents.<session-id>.<role>.heartbeat`
+- Session events: `sessions.<user-session-id>.events`
+- Work distribution: `sessions.<user-session-id>.work.<agent-id>`
+- Work results: `sessions.<user-session-id>.results.<agent-id>`
+- Agent heartbeats: `agents.<user-session-id>.<agent-id>.heartbeat`
 
 **For detailed NATS usage**, including CLI commands, publishing, subscribing, and troubleshooting, see [docs/NATS.md](docs/NATS.md).
 
