@@ -106,6 +106,12 @@ func (m *Manager) CreateSession(ctx context.Context, imageName string, cmd []str
 		delete(m.sessions, sessionID)
 		m.mu.Unlock()
 
+		// Clean up workspace directory
+		if cleanupErr := CleanupWorkspace(workspacePath, m.logger); cleanupErr != nil {
+			m.logger.Printf("Workspace cleanup failed: session=%s path=%s error=%v",
+				sessionID, workspacePath, cleanupErr)
+		}
+
 		session.SetError(err.Error())
 		m.logger.Printf("Container creation failed: session=%s error=%v", sessionID, err)
 		return nil, fmt.Errorf("failed to create container: %w", err)
