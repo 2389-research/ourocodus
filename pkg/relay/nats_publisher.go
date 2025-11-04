@@ -11,6 +11,16 @@ import (
 	"github.com/2389-research/ourocodus/pkg/relay/session"
 )
 
+// contextKey is a custom type for context keys to avoid collisions
+type contextKey string
+
+const correlationIDKey contextKey = "correlationId"
+
+// WithCorrelationID adds a correlation ID to the context
+func WithCorrelationID(ctx context.Context, correlationID string) context.Context {
+	return context.WithValue(ctx, correlationIDKey, correlationID)
+}
+
 // NATSEventPublisher publishes session lifecycle events to NATS.
 // It is safe for concurrent use.
 type NATSEventPublisher struct {
@@ -90,7 +100,7 @@ func (p *NATSEventPublisher) publish(ctx context.Context, subject, eventType, se
 	}
 
 	// Add correlationId from context if present
-	if correlationID := ctx.Value("correlationId"); correlationID != nil {
+	if correlationID := ctx.Value(correlationIDKey); correlationID != nil {
 		event["correlationId"] = correlationID
 	}
 

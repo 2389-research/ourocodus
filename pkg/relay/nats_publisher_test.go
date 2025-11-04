@@ -311,7 +311,7 @@ func TestNATSEventPublisher_CorrelationID(t *testing.T) {
 	publisher := relay.NewNATSEventPublisher(mockClient, idGen, clock, logger)
 
 	// Create context with correlationId
-	ctx := context.WithValue(context.Background(), "correlationId", "request-123")
+	ctx := relay.WithCorrelationID(context.Background(), "request-123")
 
 	err := publisher.PublishSessionCreated(ctx, "test-session")
 	require.NoError(t, err)
