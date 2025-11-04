@@ -169,7 +169,7 @@ func TestValidateSessionCreateMessage(t *testing.T) {
 
 // TestParseAgentSpawnMessage tests parsing of agent:spawn messages
 func TestParseAgentSpawnMessage(t *testing.T) {
-	data := []byte(`{"version":"1.0","type":"agent:spawn","sessionId":"sess123","role":"auth","workspace":"/path/to/workspace"}`)
+	data := []byte(`{"version":"1.0","type":"agent:spawn","userSessionId":"sess123","agentId":"auth","workspace":"/path/to/workspace"}`)
 
 	msg, err := parseAgentSpawnMessage(data)
 	if err != nil {
@@ -179,50 +179,50 @@ func TestParseAgentSpawnMessage(t *testing.T) {
 	if msg.Version != "1.0" {
 		t.Errorf("expected version 1.0, got %s", msg.Version)
 	}
-	if msg.SessionID != "sess123" {
-		t.Errorf("expected sessionId sess123, got %s", msg.SessionID)
+	if msg.UserSessionID != "sess123" {
+		t.Errorf("expected userSessionId sess123, got %s", msg.UserSessionID)
 	}
-	if msg.Role != "auth" {
-		t.Errorf("expected role auth, got %s", msg.Role)
+	if msg.AgentID != "auth" {
+		t.Errorf("expected agentId auth, got %s", msg.AgentID)
 	}
 	if msg.Workspace != "/path/to/workspace" {
 		t.Errorf("expected workspace /path/to/workspace, got %s", msg.Workspace)
 	}
 }
 
-// TestValidateAgentSpawnMessage_MissingSessionID tests validation with missing sessionId
+// TestValidateAgentSpawnMessage_MissingSessionID tests validation with missing userSessionId
 func TestValidateAgentSpawnMessage_MissingSessionID(t *testing.T) {
 	msg := AgentSpawnMessage{
 		BaseMessage: BaseMessage{Version: "1.0", Type: "agent:spawn"},
-		Role:        "auth",
+		AgentID: "auth",
 		Workspace:   "/path",
 	}
 
 	err := validateAgentSpawnMessage(msg)
 	if err == nil {
-		t.Fatal("expected error for missing sessionId, got nil")
+		t.Fatal("expected error for missing userSessionId, got nil")
 	}
 
-	expectedMsg := "Missing required field: sessionId"
+	expectedMsg := "Missing required field: userSessionId"
 	if err.Error() != expectedMsg {
 		t.Errorf("expected error %q, got %q", expectedMsg, err.Error())
 	}
 }
 
-// TestValidateAgentSpawnMessage_MissingRole tests validation with missing role
+// TestValidateAgentSpawnMessage_MissingRole tests validation with missing agentId
 func TestValidateAgentSpawnMessage_MissingRole(t *testing.T) {
 	msg := AgentSpawnMessage{
 		BaseMessage: BaseMessage{Version: "1.0", Type: "agent:spawn"},
-		SessionID:   "sess123",
+		UserSessionID: "sess123",
 		Workspace:   "/path",
 	}
 
 	err := validateAgentSpawnMessage(msg)
 	if err == nil {
-		t.Fatal("expected error for missing role, got nil")
+		t.Fatal("expected error for missing agentId, got nil")
 	}
 
-	expectedMsg := "Missing required field: role"
+	expectedMsg := "Missing required field: agentId"
 	if err.Error() != expectedMsg {
 		t.Errorf("expected error %q, got %q", expectedMsg, err.Error())
 	}
@@ -232,8 +232,8 @@ func TestValidateAgentSpawnMessage_MissingRole(t *testing.T) {
 func TestValidateAgentSpawnMessage_MissingWorkspace(t *testing.T) {
 	msg := AgentSpawnMessage{
 		BaseMessage: BaseMessage{Version: "1.0", Type: "agent:spawn"},
-		SessionID:   "sess123",
-		Role:        "auth",
+		UserSessionID: "sess123",
+		AgentID: "auth",
 	}
 
 	err := validateAgentSpawnMessage(msg)
@@ -251,8 +251,8 @@ func TestValidateAgentSpawnMessage_MissingWorkspace(t *testing.T) {
 func TestValidateAgentSpawnMessage_Valid(t *testing.T) {
 	msg := AgentSpawnMessage{
 		BaseMessage: BaseMessage{Version: "1.0", Type: "agent:spawn"},
-		SessionID:   "sess123",
-		Role:        "auth",
+		UserSessionID: "sess123",
+		AgentID: "auth",
 		Workspace:   "/path",
 	}
 
@@ -264,7 +264,7 @@ func TestValidateAgentSpawnMessage_Valid(t *testing.T) {
 
 // TestParseAgentMessageRequest tests parsing of agent:message messages
 func TestParseAgentMessageRequest(t *testing.T) {
-	data := []byte(`{"version":"1.0","type":"agent:message","sessionId":"sess123","role":"auth","content":"implement JWT"}`)
+	data := []byte(`{"version":"1.0","type":"agent:message","userSessionId":"sess123","agentId":"auth","content":"implement JWT"}`)
 
 	msg, err := parseAgentMessageRequest(data)
 	if err != nil {
@@ -274,50 +274,50 @@ func TestParseAgentMessageRequest(t *testing.T) {
 	if msg.Version != "1.0" {
 		t.Errorf("expected version 1.0, got %s", msg.Version)
 	}
-	if msg.SessionID != "sess123" {
-		t.Errorf("expected sessionId sess123, got %s", msg.SessionID)
+	if msg.UserSessionID != "sess123" {
+		t.Errorf("expected userSessionId sess123, got %s", msg.UserSessionID)
 	}
-	if msg.Role != "auth" {
-		t.Errorf("expected role auth, got %s", msg.Role)
+	if msg.AgentID != "auth" {
+		t.Errorf("expected agentId auth, got %s", msg.AgentID)
 	}
 	if msg.Content != "implement JWT" {
 		t.Errorf("expected content 'implement JWT', got %s", msg.Content)
 	}
 }
 
-// TestValidateAgentMessageRequest_MissingSessionID tests validation with missing sessionId
+// TestValidateAgentMessageRequest_MissingSessionID tests validation with missing userSessionId
 func TestValidateAgentMessageRequest_MissingSessionID(t *testing.T) {
 	msg := AgentMessageRequest{
 		BaseMessage: BaseMessage{Version: "1.0", Type: "agent:message"},
-		Role:        "auth",
+		AgentID: "auth",
 		Content:     "test",
 	}
 
 	err := validateAgentMessageRequest(msg)
 	if err == nil {
-		t.Fatal("expected error for missing sessionId, got nil")
+		t.Fatal("expected error for missing userSessionId, got nil")
 	}
 
-	expectedMsg := "Missing required field: sessionId"
+	expectedMsg := "Missing required field: userSessionId"
 	if err.Error() != expectedMsg {
 		t.Errorf("expected error %q, got %q", expectedMsg, err.Error())
 	}
 }
 
-// TestValidateAgentMessageRequest_MissingRole tests validation with missing role
+// TestValidateAgentMessageRequest_MissingRole tests validation with missing agentId
 func TestValidateAgentMessageRequest_MissingRole(t *testing.T) {
 	msg := AgentMessageRequest{
 		BaseMessage: BaseMessage{Version: "1.0", Type: "agent:message"},
-		SessionID:   "sess123",
+		UserSessionID: "sess123",
 		Content:     "test",
 	}
 
 	err := validateAgentMessageRequest(msg)
 	if err == nil {
-		t.Fatal("expected error for missing role, got nil")
+		t.Fatal("expected error for missing agentId, got nil")
 	}
 
-	expectedMsg := "Missing required field: role"
+	expectedMsg := "Missing required field: agentId"
 	if err.Error() != expectedMsg {
 		t.Errorf("expected error %q, got %q", expectedMsg, err.Error())
 	}
@@ -327,8 +327,8 @@ func TestValidateAgentMessageRequest_MissingRole(t *testing.T) {
 func TestValidateAgentMessageRequest_MissingContent(t *testing.T) {
 	msg := AgentMessageRequest{
 		BaseMessage: BaseMessage{Version: "1.0", Type: "agent:message"},
-		SessionID:   "sess123",
-		Role:        "auth",
+		UserSessionID: "sess123",
+		AgentID: "auth",
 	}
 
 	err := validateAgentMessageRequest(msg)
@@ -346,8 +346,8 @@ func TestValidateAgentMessageRequest_MissingContent(t *testing.T) {
 func TestValidateAgentMessageRequest_Valid(t *testing.T) {
 	msg := AgentMessageRequest{
 		BaseMessage: BaseMessage{Version: "1.0", Type: "agent:message"},
-		SessionID:   "sess123",
-		Role:        "auth",
+		UserSessionID: "sess123",
+		AgentID: "auth",
 		Content:     "test",
 	}
 
@@ -367,8 +367,8 @@ func TestNewSessionCreatedMessage(t *testing.T) {
 	if msg.Type != "session:created" {
 		t.Errorf("expected type session:created, got %s", msg.Type)
 	}
-	if msg.SessionID != "sess123" {
-		t.Errorf("expected sessionId sess123, got %s", msg.SessionID)
+	if msg.UserSessionID != "sess123" {
+		t.Errorf("expected userSessionId sess123, got %s", msg.UserSessionID)
 	}
 	if msg.Timestamp != "2025-10-27T12:00:00Z" {
 		t.Errorf("expected timestamp 2025-10-27T12:00:00Z, got %s", msg.Timestamp)
@@ -385,11 +385,11 @@ func TestNewAgentReadyMessage(t *testing.T) {
 	if msg.Type != "agent:ready" {
 		t.Errorf("expected type agent:ready, got %s", msg.Type)
 	}
-	if msg.SessionID != "sess123" {
-		t.Errorf("expected sessionId sess123, got %s", msg.SessionID)
+	if msg.UserSessionID != "sess123" {
+		t.Errorf("expected userSessionId sess123, got %s", msg.UserSessionID)
 	}
-	if msg.Role != "auth" {
-		t.Errorf("expected role auth, got %s", msg.Role)
+	if msg.AgentID != "auth" {
+		t.Errorf("expected agentId auth, got %s", msg.AgentID)
 	}
 }
 
@@ -403,11 +403,11 @@ func TestNewAgentMessageResponse(t *testing.T) {
 	if msg.Type != "agent:response" {
 		t.Errorf("expected type agent:response, got %s", msg.Type)
 	}
-	if msg.SessionID != "sess123" {
-		t.Errorf("expected sessionId sess123, got %s", msg.SessionID)
+	if msg.UserSessionID != "sess123" {
+		t.Errorf("expected userSessionId sess123, got %s", msg.UserSessionID)
 	}
-	if msg.Role != "auth" {
-		t.Errorf("expected role auth, got %s", msg.Role)
+	if msg.AgentID != "auth" {
+		t.Errorf("expected agentId auth, got %s", msg.AgentID)
 	}
 	if msg.Content != "JWT implemented" {
 		t.Errorf("expected content 'JWT implemented', got %s", msg.Content)

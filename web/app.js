@@ -92,7 +92,7 @@ class RelayConnection {
         this.maxReconnectAttempts = 10;
         this.reconnectDelay = 1000; // Start with 1 second
         this.maxReconnectDelay = 30000; // Max 30 seconds
-        this.sessionId = null;
+        this.userSessionId = null;
         this.reconnectTimeout = null;
 
         // Get WebSocket URL (same host as HTTP)
@@ -176,8 +176,8 @@ class RelayConnection {
                     break;
 
                 case 'session:created':
-                    console.log('[RelayConnection] Session created:', message.sessionId);
-                    this.sessionId = message.sessionId;
+                    console.log('[RelayConnection] Session created:', message.userSessionId);
+                    this.userSessionId = message.userSessionId;
                     this.handleSessionCreated(message);
                     break;
 
@@ -209,7 +209,7 @@ class RelayConnection {
      */
     handleSessionCreated(message) {
         const sessionInfoCard = document.getElementById('sessionInfo');
-        const sessionIdEl = document.getElementById('sessionId');
+        const sessionIdEl = document.getElementById('userSessionId');
         const sessionStatusEl = document.getElementById('sessionStatus');
         const welcomeCard = document.getElementById('welcomeCard');
 
@@ -224,7 +224,7 @@ class RelayConnection {
         }
 
         sessionInfoCard.style.display = 'block';
-        sessionIdEl.textContent = message.sessionId;
+        sessionIdEl.textContent = message.userSessionId;
         sessionStatusEl.textContent = 'Active';
 
         console.log('[RelayConnection] Session UI updated');
@@ -249,13 +249,13 @@ class RelayConnection {
         }
 
         agentCard.style.display = 'block';
-        agentRoleDisplay.textContent = message.role;
-        this.currentAgentRole = message.role;
+        agentRoleDisplay.textContent = message.agentId;
+        this.currentAgentRole = message.agentId;
 
         // Add welcome message from agent
-        this.displayMessage('agent', `Hi! I'm ${message.role}. I'm here to help. Send me a message to get started!`);
+        this.displayMessage('agent', `Hi! I'm ${message.agentId}. I'm here to help. Send me a message to get started!`);
 
-        console.log('[RelayConnection] Agent UI displayed for role:', message.role);
+        console.log('[RelayConnection] Agent UI displayed for agentId:', message.agentId);
     }
 
     /**
@@ -390,7 +390,7 @@ class RelayConnection {
      * Spawn an agent in the current session
      */
     spawnAgent(role, workspace) {
-        if (!this.sessionId) {
+        if (!this.userSessionId) {
             console.error('[RelayConnection] Cannot spawn agent: no session');
             return false;
         }
@@ -398,8 +398,8 @@ class RelayConnection {
         const message = {
             type: 'agent:spawn',
             version: '1.0',
-            sessionId: this.sessionId,
-            role: role,
+            userSessionId: this.userSessionId,
+            agentId: role,
             workspace: workspace
         };
 
@@ -411,7 +411,7 @@ class RelayConnection {
      * Send a message to an agent
      */
     sendAgentMessage(role, content) {
-        if (!this.sessionId) {
+        if (!this.userSessionId) {
             console.error('[RelayConnection] Cannot send message: no session');
             return false;
         }
@@ -419,8 +419,8 @@ class RelayConnection {
         const message = {
             type: 'agent:message',
             version: '1.0',
-            sessionId: this.sessionId,
-            role: role,
+            userSessionId: this.userSessionId,
+            agentId: role,
             content: content
         };
 
@@ -436,7 +436,7 @@ class RelayConnection {
      * Sends session:end message to server for graceful shutdown
      */
     endSession() {
-        if (!this.sessionId) {
+        if (!this.userSessionId) {
             console.error('[RelayConnection] Cannot end session: no session');
             return false;
         }
@@ -444,7 +444,7 @@ class RelayConnection {
         const message = {
             type: 'session:end',
             version: '1.0',
-            sessionId: this.sessionId
+            userSessionId: this.userSessionId
         };
 
         console.log('[RelayConnection] Ending session:', message);
@@ -456,7 +456,7 @@ class RelayConnection {
      * Sends agent:terminate message to server
      */
     terminateAgent(role) {
-        if (!this.sessionId) {
+        if (!this.userSessionId) {
             console.error('[RelayConnection] Cannot terminate agent: no session');
             return false;
         }
@@ -464,8 +464,8 @@ class RelayConnection {
         const message = {
             type: 'agent:terminate',
             version: '1.0',
-            sessionId: this.sessionId,
-            role: role
+            userSessionId: this.userSessionId,
+            agentId: role
         };
 
         console.log('[RelayConnection] Terminating agent:', message);
@@ -559,7 +559,7 @@ class RelayConnection {
         }
 
         this.isConnected = false;
-        this.sessionId = null;
+        this.userSessionId = null;
         this.currentAgentRole = null;
         this.updateConnectionStatus('disconnected', 'Disconnected');
     }
@@ -755,7 +755,7 @@ class App {
         // Try to send agent:terminate message (Phase 3 feature)
         // If server doesn't support it yet, will get error but we still update UI
         if (this.connection.terminateAgent(role)) {
-            console.log('[App] agent:terminate message sent for role:', role);
+            console.log('[App] agent:terminate message sent for agentId:', role);
         } else {
             console.log('[App] Could not send agent:terminate (may not be connected)');
         }

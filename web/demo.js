@@ -7,7 +7,7 @@ class ProtocolInspector {
         this.stateIndicator = document.getElementById('state-indicator');
         this.sessionPanel = document.getElementById('session-panel');
         this.currentState = 'disconnected';
-        this.sessionId = null;
+        this.userSessionId = null;
         this.reconnectAttempts = 0;
 
         if (!this.messageList || !this.stateIndicator || !this.sessionPanel) {
@@ -119,10 +119,10 @@ class ProtocolInspector {
             console.log('[Protocol Inspector] Processing message:', msg);
 
             if (msg.type === 'session:created') {
-                console.log('[Protocol Inspector] Session created! ID:', msg.sessionId);
-                this.sessionId = msg.sessionId;
+                console.log('[Protocol Inspector] Session created! ID:', msg.userSessionId);
+                this.userSessionId = msg.userSessionId;
                 this.updateSessionPanel();
-                console.log('[Protocol Inspector] Session panel updated with ID:', this.sessionId);
+                console.log('[Protocol Inspector] Session panel updated with ID:', this.userSessionId);
             }
 
             if (msg.type === 'error') {
@@ -135,7 +135,7 @@ class ProtocolInspector {
     }
 
     updateSessionPanel(errorCode, errorMsg) {
-        console.log('[Protocol Inspector] updateSessionPanel called. SessionId:', this.sessionId, 'ErrorCode:', errorCode);
+        console.log('[Protocol Inspector] updateSessionPanel called. SessionId:', this.userSessionId, 'ErrorCode:', errorCode);
 
         if (!this.sessionPanel) {
             console.error('[Protocol Inspector] sessionPanel element not found!');
@@ -144,8 +144,8 @@ class ProtocolInspector {
 
         let html = '<h3>Session</h3>';
 
-        if (this.sessionId) {
-            html += '<div><strong>ID:</strong> ' + this.sessionId + '</div>';
+        if (this.userSessionId) {
+            html += '<div><strong>ID:</strong> ' + this.userSessionId + '</div>';
             html += '<div><strong>State:</strong> ' + this.currentState + '</div>';
         } else {
             html += '<div>No session</div>';

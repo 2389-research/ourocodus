@@ -10,22 +10,22 @@ import (
 // Implementations can be in-memory (Phase 1) or persistent (future phases)
 type Store interface {
 	// Create adds a new user session to storage
-	// Returns error if session with same ID already exists
+	// Returns error if user session with same ID already exists
 	Create(session *UserSession) error
 
-	// Get retrieves a user session by ID
+	// Get retrieves a user session by user session ID
 	// Returns nil if not found
-	Get(id string) *UserSession
+	Get(userSessionID string) *UserSession
 
 	// List returns all user sessions, optionally filtered by state
 	// Pass nil filter to get all sessions
 	List(filter *SessionFilter) []*UserSession
 
-	// Delete removes a user session from storage
-	// Idempotent - no error if session doesn't exist
-	Delete(id string)
+	// Delete removes a user session from storage by user session ID
+	// Idempotent - no error if user session doesn't exist
+	Delete(userSessionID string)
 
-	// Count returns total number of stored sessions
+	// Count returns total number of stored user sessions
 	Count() int
 }
 
@@ -37,7 +37,7 @@ type SessionFilter struct {
 // MemoryStore implements Store interface with in-memory storage
 // Thread-safe using sync.RWMutex
 type MemoryStore struct {
-	sessions map[string]*UserSession // session_id → session
+	sessions map[string]*UserSession // user_session_id → UserSession
 	mu       sync.RWMutex
 }
 
@@ -73,17 +73,17 @@ func (m *MemoryStore) Create(session *UserSession) error {
 	return nil
 }
 
-// Get retrieves a user session by ID
-func (m *MemoryStore) Get(id string) *UserSession {
-	// Return nil for empty or whitespace-only IDs
-	if len(id) == 0 || len(id) != len(strings.TrimSpace(id)) {
+// Get retrieves a user session by user session ID
+func (m *MemoryStore) Get(userSessionID string) *UserSession {
+	// Return nil for empty or whitespace-only user session IDs
+	if len(userSessionID) == 0 || len(userSessionID) != len(strings.TrimSpace(userSessionID)) {
 		return nil
 	}
 
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	return m.sessions[id]
+	return m.sessions[userSessionID]
 }
 
 // List returns all user sessions matching the filter
@@ -120,16 +120,16 @@ func (m *MemoryStore) matchesFilter(session *UserSession, filter *SessionFilter)
 	return true
 }
 
-// Delete removes a user session from storage
-func (m *MemoryStore) Delete(id string) {
+// Delete removes a user session from storage by user session ID
+func (m *MemoryStore) Delete(userSessionID string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	// Idempotent - no error if already deleted
-	delete(m.sessions, id)
+	delete(m.sessions, userSessionID)
 }
 
-// Count returns total number of stored sessions
+// Count returns total number of stored user sessions
 func (m *MemoryStore) Count() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

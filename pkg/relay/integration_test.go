@@ -276,17 +276,17 @@ func Test_FullFlow_CreateSession_SpawnAgent_SendMessage(t *testing.T) {
 		t.Errorf("Expected session:created, got %v", sessionCreated["type"])
 	}
 
-	sessionID, ok := sessionCreated["sessionId"].(string)
-	if !ok || sessionID == "" {
-		t.Fatalf("Missing or invalid sessionId in response")
+	userSessionID, ok := sessionCreated["userSessionId"].(string)
+	if !ok || userSessionID == "" {
+		t.Fatalf("Missing or invalid userSessionId in response")
 	}
 
 	// 3. Send agent:spawn
 	agentSpawn := map[string]interface{}{
 		"version":   ProtocolVersion,
 		"type":      "agent:spawn",
-		"sessionId": sessionID,
-		"role":      "test-agent",
+		"userSessionId": userSessionID,
+		"agentId":      "test-agent",
 		"workspace": fmt.Sprintf("%s/test-agent", tempDir),
 	}
 	err = conn.WriteJSON(agentSpawn)
@@ -308,16 +308,16 @@ func Test_FullFlow_CreateSession_SpawnAgent_SendMessage(t *testing.T) {
 	if agentReady["type"] != "agent:ready" {
 		t.Errorf("Expected agent:ready, got %v", agentReady["type"])
 	}
-	if agentReady["role"] != "test-agent" {
-		t.Errorf("Expected role test-agent, got %v", agentReady["role"])
+	if agentReady["agentId"] != "test-agent" {
+		t.Errorf("Expected role test-agent, got %v", agentReady["agentId"])
 	}
 
 	// 4. Send agent:message
 	agentMessage := map[string]interface{}{
 		"version":   ProtocolVersion,
 		"type":      "agent:message",
-		"sessionId": sessionID,
-		"role":      "test-agent",
+		"userSessionId": userSessionID,
+		"agentId":      "test-agent",
 		"content":   "Hello, agent!",
 	}
 	err = conn.WriteJSON(agentMessage)
@@ -341,11 +341,11 @@ func Test_FullFlow_CreateSession_SpawnAgent_SendMessage(t *testing.T) {
 	if agentResponse["type"] != "agent:response" {
 		t.Errorf("Expected agent:response, got %v", agentResponse["type"])
 	}
-	if agentResponse["sessionId"] != sessionID {
-		t.Errorf("Expected sessionId %s, got %v", sessionID, agentResponse["sessionId"])
+	if agentResponse["userSessionId"] != userSessionID {
+		t.Errorf("Expected userSessionId %s, got %v", userSessionID, agentResponse["userSessionId"])
 	}
-	if agentResponse["role"] != "test-agent" {
-		t.Errorf("Expected role test-agent, got %v", agentResponse["role"])
+	if agentResponse["agentId"] != "test-agent" {
+		t.Errorf("Expected role test-agent, got %v", agentResponse["agentId"])
 	}
 
 	content, ok := agentResponse["content"].(string)
@@ -375,7 +375,7 @@ func Test_FullFlow_CreateSession_SpawnAgent_SendMessage(t *testing.T) {
 	if !ok {
 		t.Fatal("Expected session manager to be *session.Manager")
 	}
-	history, err := sessionMgr.GetAgentHistory(sessionID, "test-agent")
+	history, err := sessionMgr.GetAgentHistory(userSessionID, "test-agent")
 	if err != nil {
 		t.Fatalf("Failed to get agent history: %v", err)
 	}
@@ -442,14 +442,14 @@ func Test_HandleSessionCreate_Success(t *testing.T) {
 		t.Errorf("Expected type session:created, got %v", response["type"])
 	}
 
-	sessionID, ok := response["sessionId"].(string)
-	if !ok || sessionID == "" {
+	userSessionID, ok := response["userSessionId"].(string)
+	if !ok || userSessionID == "" {
 		t.Fatal("Missing or invalid sessionId")
 	}
 
 	// Verify session ID format (avoid coupling to internal mock counter)
-	if !strings.HasPrefix(sessionID, "test-id-") {
-		t.Errorf("Unexpected sessionId format: %s", sessionID)
+	if !strings.HasPrefix(userSessionID, "test-id-") {
+		t.Errorf("Unexpected sessionId format: %s", userSessionID)
 	}
 
 	// Verify timestamp exists
@@ -506,8 +506,8 @@ func Test_HandleAgentSpawn_Success(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to parse session:created: %v", err)
 	}
-	sessionID, ok := sessionCreated["sessionId"].(string)
-	if !ok || sessionID == "" {
+	userSessionID, ok := sessionCreated["userSessionId"].(string)
+	if !ok || userSessionID == "" {
 		t.Fatal("Missing or invalid sessionId in session:created response")
 	}
 
@@ -515,8 +515,8 @@ func Test_HandleAgentSpawn_Success(t *testing.T) {
 	agentSpawn := map[string]interface{}{
 		"version":   ProtocolVersion,
 		"type":      "agent:spawn",
-		"sessionId": sessionID,
-		"role":      "test-agent",
+		"userSessionId": userSessionID,
+		"agentId":      "test-agent",
 		"workspace": fmt.Sprintf("%s/spawn-test", tempDir),
 	}
 	err = conn.WriteJSON(agentSpawn)
@@ -542,11 +542,11 @@ func Test_HandleAgentSpawn_Success(t *testing.T) {
 	if agentReady["type"] != "agent:ready" {
 		t.Errorf("Expected type agent:ready, got %v", agentReady["type"])
 	}
-	if agentReady["sessionId"] != sessionID {
-		t.Errorf("Expected sessionId %s, got %v", sessionID, agentReady["sessionId"])
+	if agentReady["userSessionId"] != userSessionID {
+		t.Errorf("Expected userSessionId %s, got %v", userSessionID, agentReady["userSessionId"])
 	}
-	if agentReady["role"] != "test-agent" {
-		t.Errorf("Expected role test-agent, got %v", agentReady["role"])
+	if agentReady["agentId"] != "test-agent" {
+		t.Errorf("Expected role test-agent, got %v", agentReady["agentId"])
 	}
 
 	// Verify client factory was called
@@ -609,8 +609,8 @@ func Test_HandleAgentMessage_Success_FullFlow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to parse session:created: %v", err)
 	}
-	sessionID, ok := sessionCreated["sessionId"].(string)
-	if !ok || sessionID == "" {
+	userSessionID, ok := sessionCreated["userSessionId"].(string)
+	if !ok || userSessionID == "" {
 		t.Fatal("Missing or invalid sessionId in session:created response")
 	}
 
@@ -618,8 +618,8 @@ func Test_HandleAgentMessage_Success_FullFlow(t *testing.T) {
 	agentSpawn := map[string]interface{}{
 		"version":   ProtocolVersion,
 		"type":      "agent:spawn",
-		"sessionId": sessionID,
-		"role":      "test-agent",
+		"userSessionId": userSessionID,
+		"agentId":      "test-agent",
 		"workspace": fmt.Sprintf("%s/message-test", tempDir),
 	}
 	err = conn.WriteJSON(agentSpawn)
@@ -638,8 +638,8 @@ func Test_HandleAgentMessage_Success_FullFlow(t *testing.T) {
 	agentMessage := map[string]interface{}{
 		"version":   ProtocolVersion,
 		"type":      "agent:message",
-		"sessionId": sessionID,
-		"role":      "test-agent",
+		"userSessionId": userSessionID,
+		"agentId":      "test-agent",
 		"content":   testContent,
 	}
 	err = conn.WriteJSON(agentMessage)
@@ -666,11 +666,11 @@ func Test_HandleAgentMessage_Success_FullFlow(t *testing.T) {
 	if agentResponse["type"] != "agent:response" {
 		t.Errorf("Expected type agent:response, got %v", agentResponse["type"])
 	}
-	if agentResponse["sessionId"] != sessionID {
-		t.Errorf("Expected sessionId %s, got %v", sessionID, agentResponse["sessionId"])
+	if agentResponse["userSessionId"] != userSessionID {
+		t.Errorf("Expected userSessionId %s, got %v", userSessionID, agentResponse["userSessionId"])
 	}
-	if agentResponse["role"] != "test-agent" {
-		t.Errorf("Expected role test-agent, got %v", agentResponse["role"])
+	if agentResponse["agentId"] != "test-agent" {
+		t.Errorf("Expected role test-agent, got %v", agentResponse["agentId"])
 	}
 
 	// Verify content

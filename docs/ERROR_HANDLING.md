@@ -107,8 +107,8 @@ These errors affect a single session but other sessions can continue.
 **Handling:**
 
 ```go
-log.Error("Session %s: %v", sessionID, err)
-session.Close()
+log.Error("User session %s: %v", userSessionID, err)
+userSession.Close()
 // Notify client via WebSocket error message
 ws.WriteJSON(ErrorMessage{Type: "error", Error: err.Error()})
 ws.Close()
@@ -132,7 +132,7 @@ These errors affect a single message but the session continues.
 **Handling:**
 
 ```go
-log.Warn("Session %s: Invalid message: %v", sessionID, err)
+log.Warn("User session %s: Invalid message: %v", userSessionID, err)
 ws.WriteJSON(ErrorMessage{Type: "error", Error: "Invalid message format"})
 // Keep session alive, wait for next message
 ```
@@ -213,8 +213,8 @@ Phase 1 uses the simple `ValidationError` shape above. The structured error form
 ```json
 {
   "type": "error",
-  "sessionId": "uuid-here",
-  "agentId": "auth",
+  "userSessionId": "uuid-here",
+  "agentId": "coder-1",
   "error": {
     "code": "ACP_PROCESS_CRASHED",
     "message": "Agent process exited unexpectedly",
@@ -271,8 +271,8 @@ Phase 1 uses the simple `ValidationError` shape above. The structured error form
   "level": "ERROR",
   "timestamp": "2025-10-22T12:34:56Z",
   "component": "relay",
-  "sessionId": "uuid-here",
-  "agentId": "auth",
+  "userSessionId": "uuid-here",
+  "agentId": "coder-1",
   "message": "ACP process crashed",
   "error": "exit status 1",
   "stderr": "Error: ANTHROPIC_API_KEY not found"

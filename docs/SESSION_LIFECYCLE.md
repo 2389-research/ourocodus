@@ -159,7 +159,7 @@ manager.CreateUserSession(ctx, websocketConn)
 ```json
 {
   "type": "session:created",
-  "sessionId": "550e8400-e29b-41d4-a716-446655440000",
+  "userSessionId": "550e8400-e29b-41d4-a716-446655440000",
   "timestamp": "2025-10-24T12:34:56Z"
 }
 ```text
@@ -196,7 +196,7 @@ manager.SpawnAgent(ctx, sessionID, agentID, workspace)
 ```json
 {
   "type": "agent:ready",
-  "sessionId": "550e8400-e29b-41d4-a716-446655440000",
+  "userSessionId": "550e8400-e29b-41d4-a716-446655440000",
   "agentId": "coder-1",
   "workspace": "/path/to/agent/coder-1"
 }
@@ -222,7 +222,7 @@ manager.SpawnAgent(ctx, sessionID, agentID, workspace)
 // PWA → Relay
 {
   "type": "agent:message",
-  "sessionId": "550e8400-e29b-41d4-a716-446655440000",
+  "userSessionId": "550e8400-e29b-41d4-a716-446655440000",
   "agentId": "coder-1",
   "content": "Create a user authentication module"
 }
@@ -240,7 +240,7 @@ manager.SpawnAgent(ctx, sessionID, agentID, workspace)
 // Relay → PWA
 {
   "type": "agent:response",
-  "sessionId": "550e8400-e29b-41d4-a716-446655440000",
+  "userSessionId": "550e8400-e29b-41d4-a716-446655440000",
   "agentId": "coder-1",
   "content": "I've created auth.go with JWT implementation...",
   "timestamp": "2025-10-24T12:34:57Z"
@@ -339,7 +339,7 @@ manager.TerminateAgent(ctx, sessionID, agentID)
 ```json
 {
   "type": "agent:terminated",
-  "sessionId": "550e8400-e29b-41d4-a716-446655440000",
+  "userSessionId": "550e8400-e29b-41d4-a716-446655440000",
   "agentId": "coder-1",
   "reason": "user requested"
 }
@@ -382,7 +382,7 @@ manager.TerminateUserSession(ctx, sessionID)
 ```json
 {
   "type": "session:terminated",
-  "sessionId": "550e8400-e29b-41d4-a716-446655440000",
+  "userSessionId": "550e8400-e29b-41d4-a716-446655440000",
   "reason": "user requested",
   "agentsTerminated": 3
 }
