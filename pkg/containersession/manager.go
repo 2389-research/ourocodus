@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"time"
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/pkg/stdcopy"
@@ -65,6 +66,18 @@ func (m *Manager) CreateSession(ctx context.Context, imageName string, cmd []str
 	sessionID := m.idGen.Generate()
 	now := m.clock.Now()
 
+	// Check for existing container with this session ID (for reuse scenarios)
+	existingID, state, err := m.findContainer(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check for existing container: %w", err)
+	}
+
+	// If container exists, handle it based on state
+	if existingID != "" {
+		return m.handleExistingContainer(ctx, existingID, state, sessionID)
+	}
+
+	// No existing container - proceed with normal creation
 	// Build labels
 	labels := BuildLabels(sessionID, now)
 
@@ -120,6 +133,225 @@ func (m *Manager) CreateSession(ctx context.Context, imageName string, cmd []str
 	session.SetContainerID(resp.ID)
 	m.logger.Printf("Container session created: id=%s container=%s state=PENDING", sessionID, resp.ID)
 
+	return session, nil
+}
+
+// findContainer searches for an existing container by session ID.
+// Returns: containerID (string), state (string), error
+// State can be: "running", "created", "restarting", "removing", "paused", "exited", "dead"
+func (m *Manager) findContainer(ctx context.Context, sessionID string) (string, string, error) {
+	// Build label filters for this session
+	filterArgs := BuildLabelFilters(sessionID)
+
+	// List containers with matching labels (include stopped containers)
+	listOptions := container.ListOptions{
+		All:     true, // Include stopped containers
+		Filters: filterArgs,
+	}
+
+	containers, err := m.dockerClient.ContainerList(ctx, listOptions)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to list containers: %w", err)
+	}
+
+	// No containers found
+	if len(containers) == 0 {
+		return "", "", nil
+	}
+
+	// Multiple containers found - this shouldn't happen but handle gracefully
+	if len(containers) > 1 {
+		m.logger.Printf("WARNING: Multiple containers found for session %s, using first one", sessionID)
+	}
+
+	// Return first container's ID and state
+	c := containers[0]
+	return c.ID, c.State, nil
+}
+
+// handleExistingContainer processes an existing container based on its state
+func (m *Manager) handleExistingContainer(ctx context.Context, containerID, state, sessionID string) (*ContainerSession, error) {
+	m.logger.Printf("Found existing container: session=%s container=%s state=%s", sessionID, containerID, state)
+
+	// Inspect container to get full details
+	inspectData, err := m.dockerClient.ContainerInspect(ctx, containerID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to inspect container %s: %w", containerID, err)
+	}
+
+	// Extract workspace path from volume mounts
+	workspacePath := ""
+	for _, mount := range inspectData.Mounts {
+		if mount.Destination == "/workspace" {
+			workspacePath = mount.Source
+			break
+		}
+	}
+	if workspacePath == "" {
+		return nil, fmt.Errorf("container %s has no /workspace mount", containerID)
+	}
+
+	// Get labels and creation time
+	labels := inspectData.Config.Labels
+	createdAt := m.clock.Now() // Use current time if we can't parse original
+	if createdStr, ok := labels[LabelCreatedAt]; ok {
+		if t, err := time.Parse(time.RFC3339, createdStr); err == nil {
+			createdAt = t
+		}
+	}
+
+	// Create or retrieve session object
+	m.mu.Lock()
+	session, exists := m.sessions[sessionID]
+	if !exists {
+		session = NewContainerSession(sessionID, workspacePath, labels, createdAt)
+		session.SetContainerID(containerID)
+		m.sessions[sessionID] = session
+	}
+	m.mu.Unlock()
+
+	// Handle based on container state
+	switch state {
+	case "running":
+		// Container is already running - just attach I/O
+		attachResp, err := m.dockerClient.ContainerAttach(ctx, containerID, container.AttachOptions{
+			Stream: true,
+			Stdin:  false,
+			Stdout: true,
+			Stderr: true,
+			Logs:   true,
+		})
+		if err != nil {
+			m.logger.Printf("Container attach failed: session=%s container=%s error=%v", sessionID, containerID, err)
+			// Continue even if attach fails - container is still usable
+		} else {
+			go m.handleContainerOutput(sessionID, containerID, attachResp.Reader)
+		}
+		session.MarkStarted(m.clock.Now())
+		m.logger.Printf("Reattached to running container: session=%s container=%s", sessionID, containerID)
+
+	case "created", "exited":
+		// Container exists but is stopped - start it
+		err := m.dockerClient.ContainerStart(ctx, containerID, container.StartOptions{})
+		if err != nil {
+			return nil, fmt.Errorf("failed to start existing container: %w", err)
+		}
+
+		// Attach to I/O
+		attachResp, err := m.dockerClient.ContainerAttach(ctx, containerID, container.AttachOptions{
+			Stream: true,
+			Stdin:  false,
+			Stdout: true,
+			Stderr: true,
+			Logs:   true,
+		})
+		if err != nil {
+			m.logger.Printf("Container attach failed: session=%s container=%s error=%v", sessionID, containerID, err)
+		} else {
+			go m.handleContainerOutput(sessionID, containerID, attachResp.Reader)
+		}
+		session.MarkStarted(m.clock.Now())
+		m.logger.Printf("Started and attached to existing container: session=%s container=%s", sessionID, containerID)
+
+	case "paused":
+		// Container is paused - unpause it
+		// Note: Docker SDK doesn't have Unpause in our interface yet, so we'll treat as error for now
+		return nil, fmt.Errorf("container %s is paused - unpause not yet supported", containerID)
+
+	case "dead", "removing":
+		// Container is in a bad state - remove it and let caller create new one
+		m.logger.Printf("Container in bad state (%s), removing: session=%s container=%s", state, sessionID, containerID)
+		_ = m.dockerClient.ContainerRemove(ctx, containerID, container.RemoveOptions{Force: true})
+
+		// Remove from session map so CreateSession can create new one
+		m.mu.Lock()
+		delete(m.sessions, sessionID)
+		m.mu.Unlock()
+
+		return nil, fmt.Errorf("container %s in bad state (%s), removed - retry CreateSession", containerID, state)
+
+	default:
+		return nil, fmt.Errorf("unknown container state: %s", state)
+	}
+
+	return session, nil
+}
+
+// AttachSession reconnects to an existing container session by session ID.
+// This is useful for reconnecting to sessions after a restart or from a different process.
+// Returns error if session doesn't exist or container is not running.
+func (m *Manager) AttachSession(ctx context.Context, sessionID string) (*ContainerSession, error) {
+	m.logger.Printf("Attempting to attach to session: %s", sessionID)
+
+	// Find the container
+	containerID, state, err := m.findContainer(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find container: %w", err)
+	}
+
+	if containerID == "" {
+		return nil, fmt.Errorf("%w: %s", ErrSessionNotFound, sessionID)
+	}
+
+	// Only allow attaching to running containers
+	if state != "running" {
+		return nil, fmt.Errorf("cannot attach to container in state %s (must be running)", state)
+	}
+
+	// Inspect container to get full details
+	inspectData, err := m.dockerClient.ContainerInspect(ctx, containerID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to inspect container %s: %w", containerID, err)
+	}
+
+	// Extract workspace path from volume mounts
+	workspacePath := ""
+	for _, mount := range inspectData.Mounts {
+		if mount.Destination == "/workspace" {
+			workspacePath = mount.Source
+			break
+		}
+	}
+	if workspacePath == "" {
+		return nil, fmt.Errorf("container %s has no /workspace mount", containerID)
+	}
+
+	// Get labels and creation time
+	labels := inspectData.Config.Labels
+	createdAt := m.clock.Now()
+	if createdStr, ok := labels[LabelCreatedAt]; ok {
+		if t, err := time.Parse(time.RFC3339, createdStr); err == nil {
+			createdAt = t
+		}
+	}
+
+	// Create or retrieve session object
+	m.mu.Lock()
+	session, exists := m.sessions[sessionID]
+	if !exists {
+		session = NewContainerSession(sessionID, workspacePath, labels, createdAt)
+		session.SetContainerID(containerID)
+		session.MarkStarted(createdAt) // Mark as started since we know it's running
+		m.sessions[sessionID] = session
+	}
+	m.mu.Unlock()
+
+	// Attach to container I/O
+	attachResp, err := m.dockerClient.ContainerAttach(ctx, containerID, container.AttachOptions{
+		Stream: true,
+		Stdin:  false,
+		Stdout: true,
+		Stderr: true,
+		Logs:   true,
+	})
+	if err != nil {
+		m.logger.Printf("Container attach failed: session=%s container=%s error=%v", sessionID, containerID, err)
+		// Return session anyway - container is still accessible even if I/O attach failed
+	} else {
+		go m.handleContainerOutput(sessionID, containerID, attachResp.Reader)
+	}
+
+	m.logger.Printf("Successfully attached to session: id=%s container=%s", sessionID, containerID)
 	return session, nil
 }
 

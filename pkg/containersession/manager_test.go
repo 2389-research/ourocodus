@@ -15,12 +15,13 @@ import (
 // Mock implementations for testing
 
 type mockDockerClient struct {
-	createFn func(ctx context.Context, config *container.Config, hostConfig *container.HostConfig, networkingConfig *network.NetworkingConfig, platform *ocispec.Platform, containerName string) (container.CreateResponse, error)
-	startFn  func(ctx context.Context, containerID string, options container.StartOptions) error
-	stopFn   func(ctx context.Context, containerID string, options container.StopOptions) error
-	attachFn func(ctx context.Context, containerID string, options container.AttachOptions) (types.HijackedResponse, error)
-	listFn   func(ctx context.Context, options container.ListOptions) ([]container.Summary, error)
-	removeFn func(ctx context.Context, containerID string, options container.RemoveOptions) error
+	createFn  func(ctx context.Context, config *container.Config, hostConfig *container.HostConfig, networkingConfig *network.NetworkingConfig, platform *ocispec.Platform, containerName string) (container.CreateResponse, error)
+	startFn   func(ctx context.Context, containerID string, options container.StartOptions) error
+	stopFn    func(ctx context.Context, containerID string, options container.StopOptions) error
+	attachFn  func(ctx context.Context, containerID string, options container.AttachOptions) (types.HijackedResponse, error)
+	listFn    func(ctx context.Context, options container.ListOptions) ([]container.Summary, error)
+	removeFn  func(ctx context.Context, containerID string, options container.RemoveOptions) error
+	inspectFn func(ctx context.Context, containerID string) (container.InspectResponse, error)
 }
 
 func (m *mockDockerClient) ContainerCreate(ctx context.Context, config *container.Config, hostConfig *container.HostConfig, networkingConfig *network.NetworkingConfig, platform *ocispec.Platform, containerName string) (container.CreateResponse, error) {
@@ -63,6 +64,13 @@ func (m *mockDockerClient) ContainerRemove(ctx context.Context, containerID stri
 		return m.removeFn(ctx, containerID, options)
 	}
 	return nil
+}
+
+func (m *mockDockerClient) ContainerInspect(ctx context.Context, containerID string) (container.InspectResponse, error) {
+	if m.inspectFn != nil {
+		return m.inspectFn(ctx, containerID)
+	}
+	return container.InspectResponse{}, nil
 }
 
 type mockIDGenerator struct {

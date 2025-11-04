@@ -24,6 +24,7 @@ type DockerClient interface {
 	ContainerList(ctx context.Context, options container.ListOptions) ([]container.Summary, error)
 	ContainerRemove(ctx context.Context, containerID string,
 		options container.RemoveOptions) error
+	ContainerInspect(ctx context.Context, containerID string) (container.InspectResponse, error)
 }
 
 // IDGenerator abstracts unique ID generation
