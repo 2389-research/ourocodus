@@ -194,7 +194,7 @@ func TestParseAgentSpawnMessage(t *testing.T) {
 func TestValidateAgentSpawnMessage_MissingSessionID(t *testing.T) {
 	msg := AgentSpawnMessage{
 		BaseMessage: BaseMessage{Version: "1.0", Type: "agent:spawn"},
-		AgentID: "auth",
+		AgentID:     "auth",
 		Workspace:   "/path",
 	}
 
@@ -212,9 +212,9 @@ func TestValidateAgentSpawnMessage_MissingSessionID(t *testing.T) {
 // TestValidateAgentSpawnMessage_MissingRole tests validation with missing agentId
 func TestValidateAgentSpawnMessage_MissingRole(t *testing.T) {
 	msg := AgentSpawnMessage{
-		BaseMessage: BaseMessage{Version: "1.0", Type: "agent:spawn"},
+		BaseMessage:   BaseMessage{Version: "1.0", Type: "agent:spawn"},
 		UserSessionID: "sess123",
-		Workspace:   "/path",
+		Workspace:     "/path",
 	}
 
 	err := validateAgentSpawnMessage(msg)
@@ -231,9 +231,9 @@ func TestValidateAgentSpawnMessage_MissingRole(t *testing.T) {
 // TestValidateAgentSpawnMessage_MissingWorkspace tests validation with missing workspace
 func TestValidateAgentSpawnMessage_MissingWorkspace(t *testing.T) {
 	msg := AgentSpawnMessage{
-		BaseMessage: BaseMessage{Version: "1.0", Type: "agent:spawn"},
+		BaseMessage:   BaseMessage{Version: "1.0", Type: "agent:spawn"},
 		UserSessionID: "sess123",
-		AgentID: "auth",
+		AgentID:       "auth",
 	}
 
 	err := validateAgentSpawnMessage(msg)
@@ -250,10 +250,10 @@ func TestValidateAgentSpawnMessage_MissingWorkspace(t *testing.T) {
 // TestValidateAgentSpawnMessage_Valid tests validation with all fields
 func TestValidateAgentSpawnMessage_Valid(t *testing.T) {
 	msg := AgentSpawnMessage{
-		BaseMessage: BaseMessage{Version: "1.0", Type: "agent:spawn"},
+		BaseMessage:   BaseMessage{Version: "1.0", Type: "agent:spawn"},
 		UserSessionID: "sess123",
-		AgentID: "auth",
-		Workspace:   "/path",
+		AgentID:       "auth",
+		Workspace:     "/path",
 	}
 
 	err := validateAgentSpawnMessage(msg)
@@ -289,7 +289,7 @@ func TestParseAgentMessageRequest(t *testing.T) {
 func TestValidateAgentMessageRequest_MissingSessionID(t *testing.T) {
 	msg := AgentMessageRequest{
 		BaseMessage: BaseMessage{Version: "1.0", Type: "agent:message"},
-		AgentID: "auth",
+		AgentID:     "auth",
 		Content:     "test",
 	}
 
@@ -307,9 +307,9 @@ func TestValidateAgentMessageRequest_MissingSessionID(t *testing.T) {
 // TestValidateAgentMessageRequest_MissingRole tests validation with missing agentId
 func TestValidateAgentMessageRequest_MissingRole(t *testing.T) {
 	msg := AgentMessageRequest{
-		BaseMessage: BaseMessage{Version: "1.0", Type: "agent:message"},
+		BaseMessage:   BaseMessage{Version: "1.0", Type: "agent:message"},
 		UserSessionID: "sess123",
-		Content:     "test",
+		Content:       "test",
 	}
 
 	err := validateAgentMessageRequest(msg)
@@ -326,9 +326,9 @@ func TestValidateAgentMessageRequest_MissingRole(t *testing.T) {
 // TestValidateAgentMessageRequest_MissingContent tests validation with missing content
 func TestValidateAgentMessageRequest_MissingContent(t *testing.T) {
 	msg := AgentMessageRequest{
-		BaseMessage: BaseMessage{Version: "1.0", Type: "agent:message"},
+		BaseMessage:   BaseMessage{Version: "1.0", Type: "agent:message"},
 		UserSessionID: "sess123",
-		AgentID: "auth",
+		AgentID:       "auth",
 	}
 
 	err := validateAgentMessageRequest(msg)
@@ -345,10 +345,10 @@ func TestValidateAgentMessageRequest_MissingContent(t *testing.T) {
 // TestValidateAgentMessageRequest_Valid tests validation with all fields
 func TestValidateAgentMessageRequest_Valid(t *testing.T) {
 	msg := AgentMessageRequest{
-		BaseMessage: BaseMessage{Version: "1.0", Type: "agent:message"},
+		BaseMessage:   BaseMessage{Version: "1.0", Type: "agent:message"},
 		UserSessionID: "sess123",
-		AgentID: "auth",
-		Content:     "test",
+		AgentID:       "auth",
+		Content:       "test",
 	}
 
 	err := validateAgentMessageRequest(msg)

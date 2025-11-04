@@ -99,7 +99,7 @@ func (m *Manager) CreateSession(ctx context.Context, imageName string, cmd []str
 		},
 	}
 
-	resp, err := m.dockerClient.ContainerCreate(ctx, containerConfig, hostConfig, nil, "")
+	resp, err := m.dockerClient.ContainerCreate(ctx, containerConfig, hostConfig, nil, nil, "")
 	if err != nil {
 		// Remove session from map on failure
 		m.mu.Lock()

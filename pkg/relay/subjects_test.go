@@ -10,9 +10,9 @@ import (
 
 func TestSessionCreated(t *testing.T) {
 	tests := []struct {
-		name           string
-		userSessionID  string
-		want           string
+		name          string
+		userSessionID string
+		want          string
 	}{
 		{
 			name:          "normal user session ID",

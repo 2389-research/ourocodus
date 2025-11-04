@@ -7,13 +7,14 @@ import (
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/network"
+	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
 // DockerClient abstracts Docker SDK operations for testability
 type DockerClient interface {
 	ContainerCreate(ctx context.Context, config *container.Config,
 		hostConfig *container.HostConfig, networkingConfig *network.NetworkingConfig,
-		containerName string) (container.CreateResponse, error)
+		platform *ocispec.Platform, containerName string) (container.CreateResponse, error)
 	ContainerStart(ctx context.Context, containerID string,
 		options container.StartOptions) error
 	ContainerStop(ctx context.Context, containerID string,

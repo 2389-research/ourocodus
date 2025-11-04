@@ -9,12 +9,13 @@ import (
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/network"
+	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
 // Mock implementations for testing
 
 type mockDockerClient struct {
-	createFn func(ctx context.Context, config *container.Config, hostConfig *container.HostConfig, networkingConfig *network.NetworkingConfig, containerName string) (container.CreateResponse, error)
+	createFn func(ctx context.Context, config *container.Config, hostConfig *container.HostConfig, networkingConfig *network.NetworkingConfig, platform *ocispec.Platform, containerName string) (container.CreateResponse, error)
 	startFn  func(ctx context.Context, containerID string, options container.StartOptions) error
 	stopFn   func(ctx context.Context, containerID string, options container.StopOptions) error
 	attachFn func(ctx context.Context, containerID string, options container.AttachOptions) (types.HijackedResponse, error)
@@ -22,9 +23,9 @@ type mockDockerClient struct {
 	removeFn func(ctx context.Context, containerID string, options container.RemoveOptions) error
 }
 
-func (m *mockDockerClient) ContainerCreate(ctx context.Context, config *container.Config, hostConfig *container.HostConfig, networkingConfig *network.NetworkingConfig, containerName string) (container.CreateResponse, error) {
+func (m *mockDockerClient) ContainerCreate(ctx context.Context, config *container.Config, hostConfig *container.HostConfig, networkingConfig *network.NetworkingConfig, platform *ocispec.Platform, containerName string) (container.CreateResponse, error) {
 	if m.createFn != nil {
-		return m.createFn(ctx, config, hostConfig, networkingConfig, containerName)
+		return m.createFn(ctx, config, hostConfig, networkingConfig, platform, containerName)
 	}
 	return container.CreateResponse{ID: "test-container-id"}, nil
 }

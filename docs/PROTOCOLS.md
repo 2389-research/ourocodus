@@ -195,7 +195,7 @@ All NATS messages use a standard envelope format:
 - `version` (string, required) - Envelope format version (currently "1")
 - `id` (string, required) - Unique message ID (for deduplication)
 - `timestamp` (RFC3339, required) - Message creation time
-- `session_id` (string, required) - Session this message belongs to
+- `userSessionId` (string, required) - UserSession this message belongs to
 - `type` (string, required) - Message type (see [Message Types](#message-types))
 - `payload` (object, required) - Type-specific data
 

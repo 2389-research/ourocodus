@@ -283,11 +283,11 @@ func Test_FullFlow_CreateSession_SpawnAgent_SendMessage(t *testing.T) {
 
 	// 3. Send agent:spawn
 	agentSpawn := map[string]interface{}{
-		"version":   ProtocolVersion,
-		"type":      "agent:spawn",
+		"version":       ProtocolVersion,
+		"type":          "agent:spawn",
 		"userSessionId": userSessionID,
-		"agentId":      "test-agent",
-		"workspace": fmt.Sprintf("%s/test-agent", tempDir),
+		"agentId":       "test-agent",
+		"workspace":     fmt.Sprintf("%s/test-agent", tempDir),
 	}
 	err = conn.WriteJSON(agentSpawn)
 	if err != nil {
@@ -314,11 +314,11 @@ func Test_FullFlow_CreateSession_SpawnAgent_SendMessage(t *testing.T) {
 
 	// 4. Send agent:message
 	agentMessage := map[string]interface{}{
-		"version":   ProtocolVersion,
-		"type":      "agent:message",
+		"version":       ProtocolVersion,
+		"type":          "agent:message",
 		"userSessionId": userSessionID,
-		"agentId":      "test-agent",
-		"content":   "Hello, agent!",
+		"agentId":       "test-agent",
+		"content":       "Hello, agent!",
 	}
 	err = conn.WriteJSON(agentMessage)
 	if err != nil {
@@ -513,11 +513,11 @@ func Test_HandleAgentSpawn_Success(t *testing.T) {
 
 	// Send agent:spawn
 	agentSpawn := map[string]interface{}{
-		"version":   ProtocolVersion,
-		"type":      "agent:spawn",
+		"version":       ProtocolVersion,
+		"type":          "agent:spawn",
 		"userSessionId": userSessionID,
-		"agentId":      "test-agent",
-		"workspace": fmt.Sprintf("%s/spawn-test", tempDir),
+		"agentId":       "test-agent",
+		"workspace":     fmt.Sprintf("%s/spawn-test", tempDir),
 	}
 	err = conn.WriteJSON(agentSpawn)
 	if err != nil {
@@ -616,11 +616,11 @@ func Test_HandleAgentMessage_Success_FullFlow(t *testing.T) {
 
 	// Spawn agent
 	agentSpawn := map[string]interface{}{
-		"version":   ProtocolVersion,
-		"type":      "agent:spawn",
+		"version":       ProtocolVersion,
+		"type":          "agent:spawn",
 		"userSessionId": userSessionID,
-		"agentId":      "test-agent",
-		"workspace": fmt.Sprintf("%s/message-test", tempDir),
+		"agentId":       "test-agent",
+		"workspace":     fmt.Sprintf("%s/message-test", tempDir),
 	}
 	err = conn.WriteJSON(agentSpawn)
 	if err != nil {
@@ -636,11 +636,11 @@ func Test_HandleAgentMessage_Success_FullFlow(t *testing.T) {
 	// Send agent:message
 	testContent := "Test message for agent"
 	agentMessage := map[string]interface{}{
-		"version":   ProtocolVersion,
-		"type":      "agent:message",
+		"version":       ProtocolVersion,
+		"type":          "agent:message",
 		"userSessionId": userSessionID,
-		"agentId":      "test-agent",
-		"content":   testContent,
+		"agentId":       "test-agent",
+		"content":       testContent,
 	}
 	err = conn.WriteJSON(agentMessage)
 	if err != nil {
