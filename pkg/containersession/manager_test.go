@@ -3,6 +3,7 @@ package containersession
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -481,7 +482,7 @@ func TestFindContainer(t *testing.T) {
 		logger.mu.Lock()
 		foundWarning := false
 		for _, log := range logger.logs {
-			if len(log) > 0 && log[0:7] == "WARNING" {
+			if strings.HasPrefix(log, "WARNING") {
 				foundWarning = true
 				break
 			}

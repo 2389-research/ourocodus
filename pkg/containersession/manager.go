@@ -140,7 +140,7 @@ func (m *Manager) CreateContainerSession(ctx context.Context, imageName string, 
 //
 // Returns:
 //   - containerID: Docker container ID if found, empty string if not found
-//   - state: Container state ("running", "created", "exited", "paused", "dead", "removing")
+//   - state: Container state ("running", "created", "exited", "paused", "dead")
 //   - error: Non-nil if Docker API call fails
 //
 // If multiple containers are found with the same session ID (which shouldn't happen),
@@ -387,10 +387,12 @@ func (m *Manager) AttachContainerSession(ctx context.Context, sessionID string) 
 	session, exists := m.sessions[sessionID]
 	if !exists {
 		session = NewContainerSession(sessionID, workspacePath, labels, createdAt)
-		session.SetContainerID(containerID)
-		session.MarkStarted(createdAt) // Mark as started since we know it's running
 		m.sessions[sessionID] = session
 	}
+	// Always update container ID and state when reattaching, even if session exists
+	// This handles the case where a container was restarted externally
+	session.SetContainerID(containerID)
+	session.MarkStarted(m.clock.Now())
 	m.mu.Unlock()
 
 	// Attach to container I/O
