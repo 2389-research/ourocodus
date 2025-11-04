@@ -187,7 +187,7 @@ All messages are JSON with required `version` and `type` fields.
 **For Recoverable Errors:**
 - `INVALID_MESSAGE`: Log error details for debugging. Do not retry automatically (message is fundamentally malformed).
 - `SESSION_CREATE_FAILED`: Display error, enable "retry" button. Use exponential backoff if user retries multiple times.
-- `AGENT_SPAWN_FAILED`: Display error, enable "retry" button for spawning that specific agent role.
+- `AGENT_SPAWN_FAILED`: Display error, enable "retry" button for spawning that specific agent.
 - `AGENT_NOT_READY`: Wait briefly (e.g., 2s) and retry automatically up to 3 times. Agent may still be initializing.
 - `AGENT_MESSAGE_FAILED`: Retry once automatically after 1s. If fails again, display error and require user action.
 - `INTERNAL_ERROR`: Display generic error message. Log full error details. Allow manual retry but do not auto-retry.
