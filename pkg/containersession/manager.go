@@ -136,9 +136,18 @@ func (m *Manager) CreateContainerSession(ctx context.Context, imageName string, 
 	return session, nil
 }
 
-// findContainer searches for an existing container by session ID.
-// Returns: containerID (string), state (string), error
-// State can be: "running", "created", "restarting", "removing", "paused", "exited", "dead"
+// findContainer searches for an existing container by session ID using label-based filtering.
+//
+// Returns:
+//   - containerID: Docker container ID if found, empty string if not found
+//   - state: Container state ("running", "created", "exited", "paused", "dead", "removing")
+//   - error: Non-nil if Docker API call fails
+//
+// If multiple containers are found with the same session ID (which shouldn't happen),
+// returns the first one and logs a warning.
+//
+// This is an internal helper used by CreateContainerSession and AttachContainerSession
+// to check for existing containers before creating new ones or validating attach requests.
 func (m *Manager) findContainer(ctx context.Context, sessionID string) (string, string, error) {
 	// Build label filters for this session
 	filterArgs := BuildLabelFilters(sessionID)
@@ -169,7 +178,22 @@ func (m *Manager) findContainer(ctx context.Context, sessionID string) (string, 
 	return c.ID, c.State, nil
 }
 
-// handleExistingContainer processes an existing container based on its state
+// handleExistingContainer processes an existing container based on its state.
+//
+// This is an internal helper used by CreateContainerSession when findContainer()
+// discovers an existing container with the same session ID.
+//
+// Behavior by container state:
+//   - "running": Reattaches I/O streams without restarting the container
+//   - "created", "exited": Starts the container, then attaches I/O streams
+//   - "paused": Returns error (unpause not yet supported)
+//   - "dead", "removing": Removes the bad container and returns error (caller should retry)
+//
+// The method extracts the workspace path from the container's volume mounts,
+// validates it, and creates or retrieves the ContainerSession object.
+//
+// Returns the ContainerSession with proper state, or an error if the container
+// cannot be reused.
 func (m *Manager) handleExistingContainer(ctx context.Context, containerID, state, sessionID string) (*ContainerSession, error) {
 	m.logger.Printf("Found existing container: session=%s container=%s state=%s", sessionID, containerID, state)
 
@@ -278,8 +302,41 @@ func (m *Manager) handleExistingContainer(ctx context.Context, containerID, stat
 }
 
 // AttachContainerSession reconnects to an existing container session by session ID.
-// This is useful for reconnecting to sessions after a restart or from a different process.
-// Returns error if session doesn't exist or container is not running.
+//
+// This method is useful for:
+//   - Reconnecting to a session after process restart
+//   - Attaching from a different process or Manager instance
+//   - Monitoring or debugging existing sessions
+//
+// Requirements:
+//   - Container must exist (returns ErrSessionNotFound if not found)
+//   - Container must be in "running" state (returns error for stopped/dead containers)
+//   - Container must have /workspace mount (returns error if missing)
+//
+// The method automatically:
+//   - Locates the container using label-based filtering
+//   - Extracts workspace path from volume mounts
+//   - Attaches I/O streams for output monitoring
+//   - Creates or updates the in-memory ContainerSession object
+//
+// I/O attachment failures are logged but do not fail the operation, as the
+// container is still accessible even if stream attachment fails.
+//
+// Example:
+//
+//	// Process A creates and stores session ID
+//	session, _ := manager.CreateContainerSession(ctx, "ubuntu:latest", []string{"/bin/bash"})
+//	sessionID := session.ID()
+//	saveSessionID(sessionID) // persist to database/file
+//
+//	// Process B reconnects to the same session
+//	sessionID := loadSessionID()
+//	manager2 := NewManager(...) // new Manager instance
+//	reattached, err := manager2.AttachContainerSession(ctx, sessionID)
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//	// reattached is now connected to the same running container
 func (m *Manager) AttachContainerSession(ctx context.Context, sessionID string) (*ContainerSession, error) {
 	m.logger.Printf("Attempting to attach to session: %s", sessionID)
 
