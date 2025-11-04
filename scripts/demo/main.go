@@ -141,11 +141,11 @@ func demoErrorSemantics(conn *websocket.Conn) error {
 	// Try to message non-existent session
 	fmt.Println("→ Testing SESSION_NOT_FOUND error...")
 	msg := map[string]interface{}{
-		"version":   "1.0",
-		"type":      "agent:message",
+		"version":       "1.0",
+		"type":          "agent:message",
 		"userSessionId": "00000000-0000-0000-0000-000000000000",
-		"agentId":      "test",
-		"content":   "hello",
+		"agentId":       "test",
+		"content":       "hello",
 	}
 	if err := conn.WriteJSON(msg); err != nil {
 		return err
@@ -180,11 +180,11 @@ func demoErrorSemantics(conn *websocket.Conn) error {
 	// Try to message non-existent agent
 	fmt.Println("→ Testing AGENT_NOT_FOUND error...")
 	msg = map[string]interface{}{
-		"version":   "1.0",
-		"type":      "agent:message",
+		"version":       "1.0",
+		"type":          "agent:message",
 		"userSessionId": userSessionID,
-		"agentId":      "non-existent-agent",
-		"content":   "hello",
+		"agentId":       "non-existent-agent",
+		"content":       "hello",
 	}
 	if err := conn.WriteJSON(msg); err != nil {
 		return err
@@ -244,11 +244,11 @@ func createSession(conn *websocket.Conn) (string, error) {
 
 func spawnAgent(conn *websocket.Conn, userSessionID, role, workspace string) error {
 	msg := map[string]interface{}{
-		"version":   "1.0",
-		"type":      "agent:spawn",
+		"version":       "1.0",
+		"type":          "agent:spawn",
 		"userSessionId": userSessionID,
-		"agentId":      role,
-		"workspace": workspace,
+		"agentId":       role,
+		"workspace":     workspace,
 	}
 	if err := conn.WriteJSON(msg); err != nil {
 		return err
@@ -260,11 +260,11 @@ func spawnAgent(conn *websocket.Conn, userSessionID, role, workspace string) err
 
 func sendAgentMessage(conn *websocket.Conn, userSessionID, role, content string) (string, error) {
 	msg := map[string]interface{}{
-		"version":   "1.0",
-		"type":      "agent:message",
+		"version":       "1.0",
+		"type":          "agent:message",
 		"userSessionId": userSessionID,
-		"agentId":      role,
-		"content":   content,
+		"agentId":       role,
+		"content":       content,
 	}
 	if err := conn.WriteJSON(msg); err != nil {
 		return "", err

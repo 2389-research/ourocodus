@@ -21,9 +21,9 @@ const (
 )
 
 type replState struct {
-	conn      *websocket.Conn
+	conn          *websocket.Conn
 	userSessionID string
-	agents    map[string]bool // Track spawned agents
+	agents        map[string]bool // Track spawned agents
 }
 
 //nolint:gocyclo // Interactive REPL command dispatch justifies complexity
@@ -225,11 +225,11 @@ func handleSpawn(state *replState, role, workspace string) {
 	}
 
 	msg := map[string]interface{}{
-		"version":   "1.0",
-		"type":      "agent:spawn",
+		"version":       "1.0",
+		"type":          "agent:spawn",
 		"userSessionId": state.userSessionID,
-		"agentId":      role,
-		"workspace": workspace,
+		"agentId":       role,
+		"workspace":     workspace,
 	}
 	if err := state.conn.WriteJSON(msg); err != nil {
 		fmt.Printf("❌ Failed to send: %v\n", err)
@@ -263,11 +263,11 @@ func handleMessage(state *replState, role, content string) {
 	}
 
 	msg := map[string]interface{}{
-		"version":   "1.0",
-		"type":      "agent:message",
+		"version":       "1.0",
+		"type":          "agent:message",
 		"userSessionId": state.userSessionID,
-		"agentId":      role,
-		"content":   content,
+		"agentId":       role,
+		"content":       content,
 	}
 	if err := state.conn.WriteJSON(msg); err != nil {
 		fmt.Printf("❌ Failed to send: %v\n", err)
