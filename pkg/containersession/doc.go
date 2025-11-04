@@ -18,18 +18,18 @@ Docker container lifecycle, workspace directories, and I/O streams.
 	manager := containersession.NewManager(dockerClient, idGen, clock, logger, "./workspaces")
 
 	// Create and start a session
-	session, err := manager.CreateSession(ctx, "ubuntu:latest", []string{"/bin/bash"})
+	session, err := manager.CreateContainerSession(ctx, "ubuntu:latest", []string{"/bin/bash"})
 	if err != nil {
 	    log.Fatal(err)
 	}
 
-	err = manager.StartSession(ctx, session.ID())
+	err = manager.StartContainerSession(ctx, session.ID())
 	if err != nil {
 	    log.Fatal(err)
 	}
 
 	// Stop the session
-	err = manager.StopSession(ctx, session.ID())
+	err = manager.StopContainerSession(ctx, session.ID())
 
 # Thread Safety
 

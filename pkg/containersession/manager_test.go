@@ -161,7 +161,7 @@ func TestNewManager(t *testing.T) {
 	})
 }
 
-func TestCreateSession(t *testing.T) {
+func TestCreateContainerSession(t *testing.T) {
 	t.Run("creates session successfully", func(t *testing.T) {
 		docker := &mockDockerClient{}
 		idGen := &mockIDGenerator{nextID: "test-123"}
@@ -170,7 +170,7 @@ func TestCreateSession(t *testing.T) {
 
 		manager := NewManager(docker, idGen, clock, logger, t.TempDir())
 
-		session, err := manager.CreateSession(context.Background(), "ubuntu:latest", []string{"/bin/bash"})
+		session, err := manager.CreateContainerSession(context.Background(), "ubuntu:latest", []string{"/bin/bash"})
 		if err != nil {
 			t.Fatalf("Expected no error, got %v", err)
 		}
@@ -204,7 +204,7 @@ func TestCreateSession(t *testing.T) {
 
 		manager := NewManager(docker, idGen, clock, logger, t.TempDir())
 
-		session, err := manager.CreateSession(context.Background(), "ubuntu:latest", []string{"/bin/bash"})
+		session, err := manager.CreateContainerSession(context.Background(), "ubuntu:latest", []string{"/bin/bash"})
 		if err == nil {
 			t.Error("Expected error, got nil")
 		}
@@ -214,13 +214,13 @@ func TestCreateSession(t *testing.T) {
 		}
 
 		// Session should not be in manager's map
-		if manager.GetSession("test-session-id") != nil {
+		if manager.GetContainerSession("test-session-id") != nil {
 			t.Error("Session should not be stored after creation failure")
 		}
 	})
 }
 
-func TestStartSession(t *testing.T) {
+func TestStartContainerSession(t *testing.T) {
 	t.Run("starts session successfully", func(t *testing.T) {
 		docker := &mockDockerClient{}
 		idGen := &mockIDGenerator{}
@@ -229,9 +229,9 @@ func TestStartSession(t *testing.T) {
 
 		manager := NewManager(docker, idGen, clock, logger, t.TempDir())
 
-		session, _ := manager.CreateSession(context.Background(), "ubuntu:latest", []string{"/bin/bash"})
+		session, _ := manager.CreateContainerSession(context.Background(), "ubuntu:latest", []string{"/bin/bash"})
 
-		err := manager.StartSession(context.Background(), session.ID())
+		err := manager.StartContainerSession(context.Background(), session.ID())
 		if err != nil {
 			t.Fatalf("Expected no error, got %v", err)
 		}
@@ -245,7 +245,7 @@ func TestStartSession(t *testing.T) {
 		docker := &mockDockerClient{}
 		manager := NewManager(docker, &mockIDGenerator{}, &mockClock{}, &mockLogger{}, t.TempDir())
 
-		err := manager.StartSession(context.Background(), "non-existent")
+		err := manager.StartContainerSession(context.Background(), "non-existent")
 		if err == nil {
 			t.Error("Expected error for non-existent session")
 		}
@@ -255,10 +255,10 @@ func TestStartSession(t *testing.T) {
 		docker := &mockDockerClient{}
 		manager := NewManager(docker, &mockIDGenerator{}, &mockClock{}, &mockLogger{}, t.TempDir())
 
-		session, _ := manager.CreateSession(context.Background(), "ubuntu:latest", []string{"/bin/bash"})
+		session, _ := manager.CreateContainerSession(context.Background(), "ubuntu:latest", []string{"/bin/bash"})
 		session.SetState(StateRunning) // Already running
 
-		err := manager.StartSession(context.Background(), session.ID())
+		err := manager.StartContainerSession(context.Background(), session.ID())
 		if err == nil {
 			t.Error("Expected error when starting already-running session")
 		}
@@ -272,9 +272,9 @@ func TestStartSession(t *testing.T) {
 		}
 		manager := NewManager(docker, &mockIDGenerator{}, &mockClock{}, &mockLogger{}, t.TempDir())
 
-		session, _ := manager.CreateSession(context.Background(), "ubuntu:latest", []string{"/bin/bash"})
+		session, _ := manager.CreateContainerSession(context.Background(), "ubuntu:latest", []string{"/bin/bash"})
 
-		err := manager.StartSession(context.Background(), session.ID())
+		err := manager.StartContainerSession(context.Background(), session.ID())
 		if err == nil {
 			t.Error("Expected error when container start fails")
 		}
@@ -285,15 +285,15 @@ func TestStartSession(t *testing.T) {
 	})
 }
 
-func TestStopSession(t *testing.T) {
+func TestStopContainerSession(t *testing.T) {
 	t.Run("stops session successfully", func(t *testing.T) {
 		docker := &mockDockerClient{}
 		manager := NewManager(docker, &mockIDGenerator{}, &mockClock{}, &mockLogger{}, t.TempDir())
 
-		session, _ := manager.CreateSession(context.Background(), "ubuntu:latest", []string{"/bin/bash"})
-		_ = manager.StartSession(context.Background(), session.ID())
+		session, _ := manager.CreateContainerSession(context.Background(), "ubuntu:latest", []string{"/bin/bash"})
+		_ = manager.StartContainerSession(context.Background(), session.ID())
 
-		err := manager.StopSession(context.Background(), session.ID())
+		err := manager.StopContainerSession(context.Background(), session.ID())
 		if err != nil {
 			t.Fatalf("Expected no error, got %v", err)
 		}
@@ -307,12 +307,12 @@ func TestStopSession(t *testing.T) {
 		docker := &mockDockerClient{}
 		manager := NewManager(docker, &mockIDGenerator{}, &mockClock{}, &mockLogger{}, t.TempDir())
 
-		session, _ := manager.CreateSession(context.Background(), "ubuntu:latest", []string{"/bin/bash"})
-		_ = manager.StartSession(context.Background(), session.ID())
-		_ = manager.StopSession(context.Background(), session.ID())
+		session, _ := manager.CreateContainerSession(context.Background(), "ubuntu:latest", []string{"/bin/bash"})
+		_ = manager.StartContainerSession(context.Background(), session.ID())
+		_ = manager.StopContainerSession(context.Background(), session.ID())
 
 		// Stop again - should be idempotent
-		err := manager.StopSession(context.Background(), session.ID())
+		err := manager.StopContainerSession(context.Background(), session.ID())
 		if err != nil {
 			t.Errorf("Expected no error for idempotent stop, got %v", err)
 		}
@@ -323,7 +323,7 @@ func TestStopSession(t *testing.T) {
 		manager := NewManager(docker, &mockIDGenerator{}, &mockClock{}, &mockLogger{}, t.TempDir())
 
 		// Should not error
-		err := manager.StopSession(context.Background(), "non-existent")
+		err := manager.StopContainerSession(context.Background(), "non-existent")
 		if err != nil {
 			t.Errorf("Expected no error for non-existent session, got %v", err)
 		}
@@ -337,24 +337,24 @@ func TestStopSession(t *testing.T) {
 		}
 		manager := NewManager(docker, &mockIDGenerator{}, &mockClock{}, &mockLogger{}, t.TempDir())
 
-		session, _ := manager.CreateSession(context.Background(), "ubuntu:latest", []string{"/bin/bash"})
-		_ = manager.StartSession(context.Background(), session.ID())
+		session, _ := manager.CreateContainerSession(context.Background(), "ubuntu:latest", []string{"/bin/bash"})
+		_ = manager.StartContainerSession(context.Background(), session.ID())
 
-		err := manager.StopSession(context.Background(), session.ID())
+		err := manager.StopContainerSession(context.Background(), session.ID())
 		if err == nil {
 			t.Error("Expected error when container stop fails")
 		}
 	})
 }
 
-func TestGetSession(t *testing.T) {
+func TestGetContainerSession(t *testing.T) {
 	t.Run("returns session when found", func(t *testing.T) {
 		docker := &mockDockerClient{}
 		manager := NewManager(docker, &mockIDGenerator{}, &mockClock{}, &mockLogger{}, t.TempDir())
 
-		created, _ := manager.CreateSession(context.Background(), "ubuntu:latest", []string{"/bin/bash"})
+		created, _ := manager.CreateContainerSession(context.Background(), "ubuntu:latest", []string{"/bin/bash"})
 
-		retrieved := manager.GetSession(created.ID())
+		retrieved := manager.GetContainerSession(created.ID())
 		if retrieved == nil {
 			t.Error("Expected non-nil session")
 		}
@@ -368,19 +368,19 @@ func TestGetSession(t *testing.T) {
 		docker := &mockDockerClient{}
 		manager := NewManager(docker, &mockIDGenerator{}, &mockClock{}, &mockLogger{}, t.TempDir())
 
-		session := manager.GetSession("non-existent")
+		session := manager.GetContainerSession("non-existent")
 		if session != nil {
 			t.Error("Expected nil session")
 		}
 	})
 }
 
-func TestListSessions(t *testing.T) {
+func TestListContainerSessions(t *testing.T) {
 	t.Run("returns empty list when no sessions", func(t *testing.T) {
 		docker := &mockDockerClient{}
 		manager := NewManager(docker, &mockIDGenerator{}, &mockClock{}, &mockLogger{}, t.TempDir())
 
-		sessions := manager.ListSessions()
+		sessions := manager.ListContainerSessions()
 		if len(sessions) != 0 {
 			t.Errorf("Expected 0 sessions, got %d", len(sessions))
 		}
@@ -393,12 +393,12 @@ func TestListSessions(t *testing.T) {
 
 		// Create multiple sessions
 		idGen.nextID = "session-1"
-		_, _ = manager.CreateSession(context.Background(), "ubuntu:latest", []string{"/bin/bash"})
+		_, _ = manager.CreateContainerSession(context.Background(), "ubuntu:latest", []string{"/bin/bash"})
 
 		idGen.nextID = "session-2"
-		_, _ = manager.CreateSession(context.Background(), "ubuntu:latest", []string{"/bin/bash"})
+		_, _ = manager.CreateContainerSession(context.Background(), "ubuntu:latest", []string{"/bin/bash"})
 
-		sessions := manager.ListSessions()
+		sessions := manager.ListContainerSessions()
 		if len(sessions) != 2 {
 			t.Errorf("Expected 2 sessions, got %d", len(sessions))
 		}

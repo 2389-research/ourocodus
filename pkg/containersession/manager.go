@@ -60,8 +60,8 @@ func NewManager(dockerClient DockerClient, idGen IDGenerator, clock Clock, logge
 	}
 }
 
-// CreateSession creates a new container session with workspace and Docker container
-func (m *Manager) CreateSession(ctx context.Context, imageName string, cmd []string) (*ContainerSession, error) {
+// CreateContainerSession creates a new container session with workspace and Docker container
+func (m *Manager) CreateContainerSession(ctx context.Context, imageName string, cmd []string) (*ContainerSession, error) {
 	// Generate unique session ID
 	sessionID := m.idGen.Generate()
 	now := m.clock.Now()
@@ -263,12 +263,12 @@ func (m *Manager) handleExistingContainer(ctx context.Context, containerID, stat
 		m.logger.Printf("Container in bad state (%s), removing: session=%s container=%s", state, sessionID, containerID)
 		_ = m.dockerClient.ContainerRemove(ctx, containerID, container.RemoveOptions{Force: true})
 
-		// Remove from session map so CreateSession can create new one
+		// Remove from session map so CreateContainerSession can create new one
 		m.mu.Lock()
 		delete(m.sessions, sessionID)
 		m.mu.Unlock()
 
-		return nil, fmt.Errorf("container %s in bad state (%s), removed - retry CreateSession", containerID, state)
+		return nil, fmt.Errorf("container %s in bad state (%s), removed - retry CreateContainerSession", containerID, state)
 
 	default:
 		return nil, fmt.Errorf("unknown container state: %s", state)
@@ -277,10 +277,10 @@ func (m *Manager) handleExistingContainer(ctx context.Context, containerID, stat
 	return session, nil
 }
 
-// AttachSession reconnects to an existing container session by session ID.
+// AttachContainerSession reconnects to an existing container session by session ID.
 // This is useful for reconnecting to sessions after a restart or from a different process.
 // Returns error if session doesn't exist or container is not running.
-func (m *Manager) AttachSession(ctx context.Context, sessionID string) (*ContainerSession, error) {
+func (m *Manager) AttachContainerSession(ctx context.Context, sessionID string) (*ContainerSession, error) {
 	m.logger.Printf("Attempting to attach to session: %s", sessionID)
 
 	// Find the container
@@ -355,9 +355,9 @@ func (m *Manager) AttachSession(ctx context.Context, sessionID string) (*Contain
 	return session, nil
 }
 
-// StartSession starts a container and attaches I/O streams
-func (m *Manager) StartSession(ctx context.Context, sessionID string) error {
-	session := m.GetSession(sessionID)
+// StartContainerSession starts a container and attaches I/O streams
+func (m *Manager) StartContainerSession(ctx context.Context, sessionID string) error {
+	session := m.GetContainerSession(sessionID)
 	if session == nil {
 		return fmt.Errorf("%w: %s", ErrSessionNotFound, sessionID)
 	}
@@ -434,9 +434,9 @@ func (w *logWriter) Write(p []byte) (n int, err error) {
 	return len(p), nil
 }
 
-// StopSession stops a running container gracefully
-func (m *Manager) StopSession(ctx context.Context, sessionID string) error {
-	session := m.GetSession(sessionID)
+// StopContainerSession stops a running container gracefully
+func (m *Manager) StopContainerSession(ctx context.Context, sessionID string) error {
+	session := m.GetContainerSession(sessionID)
 	if session == nil {
 		// Idempotent - already removed
 		m.logger.Printf("Session not found during stop: %s (already removed?)", sessionID)
@@ -473,15 +473,15 @@ func (m *Manager) StopSession(ctx context.Context, sessionID string) error {
 	return nil
 }
 
-// GetSession retrieves a session by ID
-func (m *Manager) GetSession(sessionID string) *ContainerSession {
+// GetContainerSession retrieves a session by ID
+func (m *Manager) GetContainerSession(sessionID string) *ContainerSession {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.sessions[sessionID]
 }
 
-// ListSessions returns all tracked sessions
-func (m *Manager) ListSessions() []*ContainerSession {
+// ListContainerSessions returns all tracked sessions
+func (m *Manager) ListContainerSessions() []*ContainerSession {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
