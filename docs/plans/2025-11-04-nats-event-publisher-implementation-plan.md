@@ -27,16 +27,16 @@ import "context"
 // Implementations must be safe for concurrent use and should not block.
 type EventPublisher interface {
     // PublishSessionCreated publishes a session.created event.
-    PublishSessionCreated(ctx context.Context, sessionID string) error
+    PublishSessionCreated(ctx context.Context, userSessionID string) error
 
     // PublishSessionTerminated publishes a session.terminated event.
-    PublishSessionTerminated(ctx context.Context, sessionID string) error
+    PublishSessionTerminated(ctx context.Context, userSessionID string) error
 
     // PublishAgentSpawned publishes an agent.spawned event.
-    PublishAgentSpawned(ctx context.Context, sessionID, role, workspace string) error
+    PublishAgentSpawned(ctx context.Context, userSessionID, agentID, workspace string) error
 
     // PublishAgentTerminated publishes an agent.terminated event.
-    PublishAgentTerminated(ctx context.Context, sessionID, role string, exitCode int) error
+    PublishAgentTerminated(ctx context.Context, userSessionID, agentID string, exitCode int) error
 
     // Close gracefully shuts down the publisher.
     Close() error
@@ -51,19 +51,19 @@ func NewNoOpPublisher() *NoOpPublisher {
     return &NoOpPublisher{}
 }
 
-func (n *NoOpPublisher) PublishSessionCreated(ctx context.Context, sessionID string) error {
+func (n *NoOpPublisher) PublishSessionCreated(ctx context.Context, userSessionID string) error {
     return nil
 }
 
-func (n *NoOpPublisher) PublishSessionTerminated(ctx context.Context, sessionID string) error {
+func (n *NoOpPublisher) PublishSessionTerminated(ctx context.Context, userSessionID string) error {
     return nil
 }
 
-func (n *NoOpPublisher) PublishAgentSpawned(ctx context.Context, sessionID, role, workspace string) error {
+func (n *NoOpPublisher) PublishAgentSpawned(ctx context.Context, userSessionID, agentID, workspace string) error {
     return nil
 }
 
-func (n *NoOpPublisher) PublishAgentTerminated(ctx context.Context, sessionID, role string, exitCode int) error {
+func (n *NoOpPublisher) PublishAgentTerminated(ctx context.Context, userSessionID, agentID string, exitCode int) error {
     return nil
 }
 
@@ -120,23 +120,23 @@ import (
 )
 
 // SessionCreated returns the subject for session.created events.
-func SessionCreated(sessionID string) string {
-    return fmt.Sprintf("sessions.%s.session.created", sanitizeID(sessionID))
+func SessionCreated(userSessionID string) string {
+    return fmt.Sprintf("sessions.%s.session.created", sanitizeID(userSessionID))
 }
 
 // SessionTerminated returns the subject for session.terminated events.
-func SessionTerminated(sessionID string) string {
-    return fmt.Sprintf("sessions.%s.session.terminated", sanitizeID(sessionID))
+func SessionTerminated(userSessionID string) string {
+    return fmt.Sprintf("sessions.%s.session.terminated", sanitizeID(userSessionID))
 }
 
 // AgentSpawned returns the subject for agent.spawned events.
-func AgentSpawned(sessionID string) string {
-    return fmt.Sprintf("sessions.%s.agent.spawned", sanitizeID(sessionID))
+func AgentSpawned(userSessionID string) string {
+    return fmt.Sprintf("sessions.%s.agent.spawned", sanitizeID(userSessionID))
 }
 
 // AgentTerminated returns the subject for agent.terminated events.
-func AgentTerminated(sessionID string) string {
-    return fmt.Sprintf("sessions.%s.agent.terminated", sanitizeID(sessionID))
+func AgentTerminated(userSessionID string) string {
+    return fmt.Sprintf("sessions.%s.agent.terminated", sanitizeID(userSessionID))
 }
 
 // sanitizeID sanitizes a session ID for use in NATS subjects.
@@ -170,24 +170,24 @@ import (
 func TestSessionCreated(t *testing.T) {
     tests := []struct {
         name      string
-        sessionID string
+        userSessionID string
         want      string
     }{
         {
             name:      "normal session ID",
-            sessionID: "sess-abc123",
+            userSessionID: "sess-abc123",
             want:      "sessions.sess-abc123.session.created",
         },
         {
             name:      "session ID with dots",
-            sessionID: "sess.abc.123",
+            userSessionID: "sess.abc.123",
             want:      "sessions.sess_abc_123.session.created",
         },
     }
 
     for _, tt := range tests {
         t.Run(tt.name, func(t *testing.T) {
-            got := relay.SessionCreated(tt.sessionID)
+            got := relay.SessionCreated(tt.userSessionID)
             assert.Equal(t, tt.want, got)
         })
     }
@@ -252,7 +252,7 @@ type NATSEventPublisher struct {
     idGen      IDGenerator
     clock      Clock
     logger     Logger
-    eventIndex sync.Map // map[sessionID]*atomic.Int64
+    eventIndex sync.Map // map[userSessionID]*atomic.Int64
 }
 
 // NewNATSEventPublisher creates a new NATS event publisher.
@@ -266,47 +266,47 @@ func NewNATSEventPublisher(client nats.Client, idGen IDGenerator, clock Clock, l
 }
 
 // PublishSessionCreated publishes a session.created event.
-func (p *NATSEventPublisher) PublishSessionCreated(ctx context.Context, sessionID string) error {
+func (p *NATSEventPublisher) PublishSessionCreated(ctx context.Context, userSessionID string) error {
     payload := map[string]interface{}{
-        "sessionId": sessionID,
+        "userSessionId": userSessionID,
         "createdAt": p.clock.Now().Format(time.RFC3339Nano),
     }
 
-    return p.publish(ctx, SessionCreated(sessionID), "session.created", sessionID, payload)
+    return p.publish(ctx, SessionCreated(userSessionID), "session.created", userSessionID, payload)
 }
 
 // PublishSessionTerminated publishes a session.terminated event.
-func (p *NATSEventPublisher) PublishSessionTerminated(ctx context.Context, sessionID string) error {
+func (p *NATSEventPublisher) PublishSessionTerminated(ctx context.Context, userSessionID string) error {
     payload := map[string]interface{}{
-        "sessionId":     sessionID,
+        "userSessionId":     userSessionID,
         "terminatedAt": p.clock.Now().Format(time.RFC3339Nano),
     }
 
-    return p.publish(ctx, SessionTerminated(sessionID), "session.terminated", sessionID, payload)
+    return p.publish(ctx, SessionTerminated(userSessionID), "session.terminated", userSessionID, payload)
 }
 
 // PublishAgentSpawned publishes an agent.spawned event.
-func (p *NATSEventPublisher) PublishAgentSpawned(ctx context.Context, sessionID, role, workspace string) error {
+func (p *NATSEventPublisher) PublishAgentSpawned(ctx context.Context, userSessionID, agentID, workspace string) error {
     payload := map[string]interface{}{
-        "sessionId": sessionID,
-        "role":      role,
+        "userSessionId": userSessionID,
+        "agentId":  agentID,
         "workspace": workspace,
         "spawnedAt": p.clock.Now().Format(time.RFC3339Nano),
     }
 
-    return p.publish(ctx, AgentSpawned(sessionID), "agent.spawned", sessionID, payload)
+    return p.publish(ctx, AgentSpawned(userSessionID), "agent.spawned", userSessionID, payload)
 }
 
 // PublishAgentTerminated publishes an agent.terminated event.
-func (p *NATSEventPublisher) PublishAgentTerminated(ctx context.Context, sessionID, role string, exitCode int) error {
+func (p *NATSEventPublisher) PublishAgentTerminated(ctx context.Context, userSessionID, agentID string, exitCode int) error {
     payload := map[string]interface{}{
-        "sessionId":     sessionID,
-        "role":          role,
+        "userSessionId":     userSessionID,
+        "agentId":      agentID,
         "terminatedAt": p.clock.Now().Format(time.RFC3339Nano),
         "exitCode":      exitCode,
     }
 
-    return p.publish(ctx, AgentTerminated(sessionID), "agent.terminated", sessionID, payload)
+    return p.publish(ctx, AgentTerminated(userSessionID), "agent.terminated", userSessionID, payload)
 }
 
 // Close gracefully shuts down the publisher.
@@ -315,13 +315,13 @@ func (p *NATSEventPublisher) Close() error {
 }
 
 // publish publishes an event to NATS.
-func (p *NATSEventPublisher) publish(ctx context.Context, subject, eventType, sessionID string, payload interface{}) error {
+func (p *NATSEventPublisher) publish(ctx context.Context, subject, eventType, userSessionID string, payload interface{}) error {
     now := p.clock.Now()
 
     event := map[string]interface{}{
         "version":     "1.0",
         "messageId":   p.idGen.Generate(),
-        "eventIndex":  p.nextEventIndex(sessionID),
+        "eventIndex":  p.nextEventIndex(userSessionID),
         "occurredAt":  now.Format(time.RFC3339Nano),
         "publishedAt": now.Format(time.RFC3339Nano),
         "type":        eventType,
@@ -341,7 +341,7 @@ func (p *NATSEventPublisher) publish(ctx context.Context, subject, eventType, se
 
     // Publish to NATS (pkg/nats.Client handles retry/backoff/metrics)
     if err := p.client.Publish(ctx, subject, data); err != nil {
-        p.logger.Printf("ERROR: Failed to publish %s event for session %s: %v", eventType, sessionID, err)
+        p.logger.Printf("ERROR: Failed to publish %s event for session %s: %v", eventType, userSessionID, err)
         return err
     }
 
@@ -349,9 +349,9 @@ func (p *NATSEventPublisher) publish(ctx context.Context, subject, eventType, se
 }
 
 // nextEventIndex returns the next event index for a session.
-func (p *NATSEventPublisher) nextEventIndex(sessionID string) int64 {
+func (p *NATSEventPublisher) nextEventIndex(userSessionID string) int64 {
     // Load or create atomic counter for this session
-    val, _ := p.eventIndex.LoadOrStore(sessionID, &atomic.Int64{})
+    val, _ := p.eventIndex.LoadOrStore(userSessionID, &atomic.Int64{})
     counter := val.(*atomic.Int64)
 
     // Increment and return
@@ -425,7 +425,7 @@ func TestNATSEventPublisher_SessionCreated(t *testing.T) {
     assert.Equal(t, "session.created", event["type"])
 
     payload := event["payload"].(map[string]interface{})
-    assert.Equal(t, "test-session", payload["sessionId"])
+    assert.Equal(t, "test-session", payload["userSessionId"])
 }
 
 func TestNATSEventPublisher_EventIndexIncrement(t *testing.T) {
@@ -499,10 +499,10 @@ import "context"
 
 // EventPublisher publishes session lifecycle events.
 type EventPublisher interface {
-    PublishSessionCreated(ctx context.Context, sessionID string) error
-    PublishSessionTerminated(ctx context.Context, sessionID string) error
-    PublishAgentSpawned(ctx context.Context, sessionID, role, workspace string) error
-    PublishAgentTerminated(ctx context.Context, sessionID, role string, exitCode int) error
+    PublishSessionCreated(ctx context.Context, userSessionID string) error
+    PublishSessionTerminated(ctx context.Context, userSessionID string) error
+    PublishAgentSpawned(ctx context.Context, userSessionID, agentID, workspace string) error
+    PublishAgentTerminated(ctx context.Context, userSessionID, agentID string, exitCode int) error
 }
 ```
 
@@ -522,25 +522,25 @@ func (m *Manager) CreateUserSession(ctx context.Context) (string, error) {
     // Publish event (non-blocking)
     if m.publisher != nil {
         go func() {
-            if err := m.publisher.PublishSessionCreated(context.Background(), sessionID); err != nil {
+            if err := m.publisher.PublishSessionCreated(context.Background(), userSessionID); err != nil {
                 m.logger.Printf("Failed to publish session.created: %v", err)
             }
         }()
     }
 
-    return sessionID, nil
+    return userSessionID, nil
 }
 ```
 
 **In TerminateUserSession method:**
 ```go
-func (m *Manager) TerminateUserSession(ctx context.Context, sessionID string) error {
+func (m *Manager) TerminateUserSession(ctx context.Context, userSessionID string) error {
     // ... existing termination code ...
 
     // Publish event (non-blocking)
     if m.publisher != nil {
         go func() {
-            if err := m.publisher.PublishSessionTerminated(context.Background(), sessionID); err != nil {
+            if err := m.publisher.PublishSessionTerminated(context.Background(), userSessionID); err != nil {
                 m.logger.Printf("Failed to publish session.terminated: %v", err)
             }
         }()
@@ -552,13 +552,13 @@ func (m *Manager) TerminateUserSession(ctx context.Context, sessionID string) er
 
 **In SpawnAgent method:**
 ```go
-func (m *Manager) SpawnAgent(ctx context.Context, sessionID, role, workspace string) error {
+func (m *Manager) SpawnAgent(ctx context.Context, userSessionID, agentID, workspace string) error {
     // ... existing spawn code ...
 
     // Publish event (non-blocking)
     if m.publisher != nil {
         go func() {
-            if err := m.publisher.PublishAgentSpawned(context.Background(), sessionID, role, workspace); err != nil {
+            if err := m.publisher.PublishAgentSpawned(context.Background(), userSessionID, agentID, workspace); err != nil {
                 m.logger.Printf("Failed to publish agent.spawned: %v", err)
             }
         }()
@@ -570,11 +570,11 @@ func (m *Manager) SpawnAgent(ctx context.Context, sessionID, role, workspace str
 
 **In TerminateAgent method:**
 ```go
-func (m *Manager) TerminateAgent(ctx context.Context, sessionID, role string) error {
+func (m *Manager) TerminateAgent(ctx context.Context, userSessionID, agentID string) error {
     // ... existing termination code ...
 
     // Get exit code before cleanup
-    agent, err := m.GetAgent(sessionID, role)
+    agent, err := m.GetAgent(userSessionID, agentID)
     exitCode := 0
     if agent != nil && agent.ExitCode != nil {
         exitCode = *agent.ExitCode
@@ -585,7 +585,7 @@ func (m *Manager) TerminateAgent(ctx context.Context, sessionID, role string) er
     // Publish event (non-blocking)
     if m.publisher != nil {
         go func() {
-            if err := m.publisher.PublishAgentTerminated(context.Background(), sessionID, role, exitCode); err != nil {
+            if err := m.publisher.PublishAgentTerminated(context.Background(), userSessionID, agentID, exitCode); err != nil {
                 m.logger.Printf("Failed to publish agent.terminated: %v", err)
             }
         }()
@@ -609,10 +609,10 @@ type mockPublisher struct {
     mu    sync.Mutex
 }
 
-func (m *mockPublisher) PublishSessionCreated(ctx context.Context, sessionID string) error {
+func (m *mockPublisher) PublishSessionCreated(ctx context.Context, userSessionID string) error {
     m.mu.Lock()
     defer m.mu.Unlock()
-    m.calls = append(m.calls, fmt.Sprintf("session.created:%s", sessionID))
+    m.calls = append(m.calls, fmt.Sprintf("session.created:%s", userSessionID))
     return nil
 }
 
@@ -622,14 +622,14 @@ func TestManager_CreateSession_PublishesEvent(t *testing.T) {
     mockPub := &mockPublisher{}
     manager, _ := NewManager(logger, clock, idGen, mockPub)
 
-    sessionID, err := manager.CreateUserSession(context.Background())
+    userSessionID, err := manager.CreateUserSession(context.Background())
     require.NoError(t, err)
 
     // Wait for goroutine (use sync or sleep)
     time.Sleep(10 * time.Millisecond)
 
     // Verify event published
-    assert.Contains(t, mockPub.calls, fmt.Sprintf("session.created:%s", sessionID))
+    assert.Contains(t, mockPub.calls, fmt.Sprintf("session.created:%s", userSessionID))
 }
 ```
 
@@ -792,7 +792,7 @@ func TestNATSEventPublisher_Integration(t *testing.T) {
         assert.Equal(t, "session.created", event["type"])
 
         payload := event["payload"].(map[string]interface{})
-        assert.Equal(t, testSessionID, payload["sessionId"])
+        assert.Equal(t, testSessionID, payload["userSessionId"])
 
     case <-time.After(5 * time.Second):
         t.Fatal("Timeout waiting for event")
@@ -858,7 +858,7 @@ func TestEndToEnd_SessionLifecycle(t *testing.T) {
     })
 
     // Create session
-    sessionID, err := manager.CreateUserSession(context.Background())
+    userSessionID, err := manager.CreateUserSession(context.Background())
     require.NoError(t, err)
 
     // Verify session.created event
@@ -870,7 +870,7 @@ func TestEndToEnd_SessionLifecycle(t *testing.T) {
     }
 
     // Spawn agent
-    err = manager.SpawnAgent(context.Background(), sessionID, "test-agent", "/workspace")
+    err = manager.SpawnAgent(context.Background(), userSessionID, "test-agent", "/workspace")
     require.NoError(t, err)
 
     // Verify agent.spawned event
@@ -882,7 +882,7 @@ func TestEndToEnd_SessionLifecycle(t *testing.T) {
     }
 
     // Terminate agent
-    err = manager.TerminateAgent(context.Background(), sessionID, "test-agent")
+    err = manager.TerminateAgent(context.Background(), userSessionID, "test-agent")
     require.NoError(t, err)
 
     // Verify agent.terminated event
@@ -894,7 +894,7 @@ func TestEndToEnd_SessionLifecycle(t *testing.T) {
     }
 
     // Terminate session
-    err = manager.TerminateUserSession(context.Background(), sessionID)
+    err = manager.TerminateUserSession(context.Background(), userSessionID)
     require.NoError(t, err)
 
     // Verify session.terminated event

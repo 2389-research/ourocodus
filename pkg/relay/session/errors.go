@@ -24,8 +24,8 @@ var (
 	// ErrWebSocketNil is returned when a nil websocket connection is provided
 	ErrWebSocketNil = errors.New("websocket connection cannot be nil")
 
-	// ErrEmptyRole is returned when an empty or whitespace-only role is provided
-	ErrEmptyRole = errors.New("role cannot be empty or whitespace-only")
+	// ErrEmptyAgentID is returned when an empty or whitespace-only agent ID is provided
+	ErrEmptyAgentID = errors.New("agent ID cannot be empty or whitespace-only")
 
 	// ErrEmptyWorkspace is returned when an empty or whitespace-only workspace is provided
 	ErrEmptyWorkspace = errors.New("workspace cannot be empty or whitespace-only")

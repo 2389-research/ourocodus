@@ -143,7 +143,7 @@ Every message includes:
   "messageId": "msg_001",
   "type": "session.created",
   "payload": {
-    "sessionId": "sess_abc123",
+    "userSessionId": "sess_abc123",
     "state": "ACTIVE",
     "createdAt": "2025-10-28T12:34:56Z"
   }
@@ -159,8 +159,8 @@ Every message includes:
   "messageId": "msg_002",
   "type": "work.spawn_agent",
   "payload": {
-    "sessionId": "sess_abc123",
-    "role": "auth",
+    "userSessionId": "sess_abc123",
+    "agentId": "auth",
     "workspace": "workspaces/sess_abc123/auth",
     "task": {
       "description": "Implement user authentication using bcrypt",
@@ -180,8 +180,8 @@ Every message includes:
   "type": "result.success",
   "correlationId": "msg_002",
   "payload": {
-    "sessionId": "sess_abc123",
-    "role": "auth",
+    "userSessionId": "sess_abc123",
+    "agentId": "auth",
     "summary": "Implemented authentication with bcrypt. Tests passing.",
     "filesChanged": ["src/auth.go", "src/auth_test.go"],
     "commitSha": "abc123def"
@@ -855,7 +855,7 @@ done
 # Publish a work result
 nats pub "sessions.test-123.results.coder" '{
   "session_id": "test-123",
-  "role": "coder",
+  "agentId": "coder",
   "status": "completed",
   "output": "// Generated code here"
 }'

@@ -630,11 +630,11 @@ func buildValidSessionCreateMessage() []byte {
 }
 
 func buildValidAgentSpawnMessage() []byte {
-	return []byte(`{"version":"1.0","type":"agent:spawn","sessionId":"test-session","role":"test-agent","workspace":"/tmp/workspace"}`)
+	return []byte(`{"version":"1.0","type":"agent:spawn","userSessionId":"test-session","agentId":"test-agent","workspace":"/tmp/workspace"}`)
 }
 
 func buildValidAgentMessageRequest() []byte {
-	return []byte(`{"version":"1.0","type":"agent:message","sessionId":"test-session","role":"test-agent","content":"hello"}`)
+	return []byte(`{"version":"1.0","type":"agent:message","userSessionId":"test-session","agentId":"test-agent","content":"hello"}`)
 }
 
 // handleAgentMessage tests
@@ -692,7 +692,7 @@ func TestHandleAgentMessage_MissingSessionID(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	rawMessage := []byte(`{"version":"1.0","type":"agent:message","role":"test-agent","content":"hello"}`)
+	rawMessage := []byte(`{"version":"1.0","type":"agent:message","agentId":"test-agent","content":"hello"}`)
 
 	shouldClose := server.handleAgentMessage(ctx, conn, rawMessage)
 
@@ -923,7 +923,7 @@ func TestHandleAgentSpawn_MissingWorkspace(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	rawMessage := []byte(`{"version":"1.0","type":"agent:spawn","sessionId":"test-session","role":"test-agent"}`)
+	rawMessage := []byte(`{"version":"1.0","type":"agent:spawn","userSessionId":"test-session","agentId":"test-agent"}`)
 
 	shouldClose := server.handleAgentSpawn(ctx, conn, rawMessage)
 

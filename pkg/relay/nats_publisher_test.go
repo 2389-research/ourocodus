@@ -140,7 +140,7 @@ func TestNATSEventPublisher_SessionCreated(t *testing.T) {
 	assert.Equal(t, "session.created", event["type"])
 
 	payload := event["payload"].(map[string]interface{})
-	assert.Equal(t, "test-session", payload["sessionId"])
+	assert.Equal(t, "test-session", payload["userSessionId"])
 	assert.Equal(t, "2025-11-04T10:00:00Z", payload["createdAt"])
 }
 
@@ -165,7 +165,7 @@ func TestNATSEventPublisher_SessionTerminated(t *testing.T) {
 
 	assert.Equal(t, "session.terminated", event["type"])
 	payload := event["payload"].(map[string]interface{})
-	assert.Equal(t, "session-456", payload["sessionId"])
+	assert.Equal(t, "session-456", payload["userSessionId"])
 	assert.Equal(t, "2025-11-04T10:05:00Z", payload["terminatedAt"])
 }
 
@@ -190,8 +190,8 @@ func TestNATSEventPublisher_AgentSpawned(t *testing.T) {
 
 	assert.Equal(t, "agent.spawned", event["type"])
 	payload := event["payload"].(map[string]interface{})
-	assert.Equal(t, "session-abc", payload["sessionId"])
-	assert.Equal(t, "coder", payload["role"])
+	assert.Equal(t, "session-abc", payload["userSessionId"])
+	assert.Equal(t, "coder", payload["agentId"])
 	assert.Equal(t, "/workspace/coder", payload["workspace"])
 	assert.Equal(t, "2025-11-04T10:10:00Z", payload["spawnedAt"])
 }
@@ -217,8 +217,8 @@ func TestNATSEventPublisher_AgentTerminated(t *testing.T) {
 
 	assert.Equal(t, "agent.terminated", event["type"])
 	payload := event["payload"].(map[string]interface{})
-	assert.Equal(t, "session-xyz", payload["sessionId"])
-	assert.Equal(t, "tester", payload["role"])
+	assert.Equal(t, "session-xyz", payload["userSessionId"])
+	assert.Equal(t, "tester", payload["agentId"])
 	assert.Equal(t, float64(0), payload["exitCode"])
 	assert.Equal(t, "2025-11-04T10:15:00Z", payload["terminatedAt"])
 }

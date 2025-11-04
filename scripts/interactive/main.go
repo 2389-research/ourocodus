@@ -21,9 +21,9 @@ const (
 )
 
 type replState struct {
-	conn      *websocket.Conn
-	sessionID string
-	agents    map[string]bool // Track spawned agents
+	conn          *websocket.Conn
+	userSessionID string
+	agents        map[string]bool // Track spawned agents
 }
 
 //nolint:gocyclo // Interactive REPL command dispatch justifies complexity
@@ -103,8 +103,8 @@ func main() {
 	scanner := bufio.NewScanner(os.Stdin)
 	for {
 		// Show prompt
-		if state.sessionID != "" {
-			fmt.Printf("\n[session:%s] > ", state.sessionID[:8])
+		if state.userSessionID != "" {
+			fmt.Printf("\n[session:%s] > ", state.userSessionID[:8])
 		} else {
 			fmt.Print("\n[no session] > ")
 		}
@@ -207,29 +207,29 @@ func handleCreate(state *replState) {
 		return
 	}
 
-	sessionID, ok := resp["sessionId"].(string)
+	userSessionID, ok := resp["userSessionId"].(string)
 	if !ok {
 		fmt.Printf("❌ Invalid response: %v\n", resp)
 		return
 	}
 
-	state.sessionID = sessionID
+	state.userSessionID = userSessionID
 	state.agents = make(map[string]bool) // Reset agents for new session
-	fmt.Printf("✅ Session created: %s\n", sessionID)
+	fmt.Printf("✅ Session created: %s\n", userSessionID)
 }
 
 func handleSpawn(state *replState, role, workspace string) {
-	if state.sessionID == "" {
+	if state.userSessionID == "" {
 		fmt.Println("❌ No session. Run 'create' first.")
 		return
 	}
 
 	msg := map[string]interface{}{
-		"version":   "1.0",
-		"type":      "agent:spawn",
-		"sessionId": state.sessionID,
-		"role":      role,
-		"workspace": workspace,
+		"version":       "1.0",
+		"type":          "agent:spawn",
+		"userSessionId": state.userSessionID,
+		"agentId":       role,
+		"workspace":     workspace,
 	}
 	if err := state.conn.WriteJSON(msg); err != nil {
 		fmt.Printf("❌ Failed to send: %v\n", err)
@@ -253,7 +253,7 @@ func handleSpawn(state *replState, role, workspace string) {
 }
 
 func handleMessage(state *replState, role, content string) {
-	if state.sessionID == "" {
+	if state.userSessionID == "" {
 		fmt.Println("❌ No session. Run 'create' first.")
 		return
 	}
@@ -263,11 +263,11 @@ func handleMessage(state *replState, role, content string) {
 	}
 
 	msg := map[string]interface{}{
-		"version":   "1.0",
-		"type":      "agent:message",
-		"sessionId": state.sessionID,
-		"role":      role,
-		"content":   content,
+		"version":       "1.0",
+		"type":          "agent:message",
+		"userSessionId": state.userSessionID,
+		"agentId":       role,
+		"content":       content,
 	}
 	if err := state.conn.WriteJSON(msg); err != nil {
 		fmt.Printf("❌ Failed to send: %v\n", err)
@@ -301,7 +301,7 @@ func handleMessage(state *replState, role, content string) {
 }
 
 func handleListAgents(state *replState) {
-	if state.sessionID == "" {
+	if state.userSessionID == "" {
 		fmt.Println("❌ No session. Run 'create' first.")
 		return
 	}

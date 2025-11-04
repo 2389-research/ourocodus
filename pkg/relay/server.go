@@ -249,11 +249,11 @@ func (s *Server) handleAgentSpawn(ctx context.Context, conn WebSocketConn, rawMe
 		return s.handleValidationError(conn, validationErr)
 	}
 
-	s.logger.Printf("Spawning agent: session=%s role=%s workspace=%s",
-		msg.SessionID, msg.Role, msg.Workspace)
+	s.logger.Printf("Spawning agent: userSession=%s agentID=%s workspace=%s",
+		msg.UserSessionID, msg.AgentID, msg.Workspace)
 
-	// Spawn agent in session
-	err = s.sessionManager.SpawnAgent(ctx, msg.SessionID, msg.Role, msg.Workspace)
+	// Spawn agent in user session
+	err = s.sessionManager.SpawnAgent(ctx, msg.UserSessionID, msg.AgentID, msg.Workspace)
 	if err != nil {
 		s.logger.Printf("Failed to spawn agent: %v", err)
 
@@ -275,10 +275,10 @@ func (s *Server) handleAgentSpawn(ctx context.Context, conn WebSocketConn, rawMe
 		return !recoverable // Close if non-recoverable
 	}
 
-	s.logger.Printf("Agent spawned: session=%s role=%s", msg.SessionID, msg.Role)
+	s.logger.Printf("Agent spawned: userSession=%s agentID=%s", msg.UserSessionID, msg.AgentID)
 
 	// Send agent:ready response
-	response := NewAgentReadyMessage(msg.SessionID, msg.Role)
+	response := NewAgentReadyMessage(msg.UserSessionID, msg.AgentID)
 	if err := conn.WriteJSON(response); err != nil {
 		s.logger.Printf("Failed to send agent:ready: %v", err)
 		return true // Close on write failure
@@ -319,11 +319,11 @@ func (s *Server) handleAgentMessage(ctx context.Context, conn WebSocketConn, raw
 
 	_ = ctx // TODO: Pass context to ACP client when timeout/cancellation support is implemented in ACPClient.SendMessage
 
-	s.logger.Printf("Routing message to agent: session=%s role=%s",
-		msg.SessionID, msg.Role)
+	s.logger.Printf("Routing message to agent: userSession=%s agentID=%s",
+		msg.UserSessionID, msg.AgentID)
 
-	// Get agent from session
-	agent, err := s.sessionManager.GetAgent(msg.SessionID, msg.Role)
+	// Get agent from user session
+	agent, err := s.sessionManager.GetAgent(msg.UserSessionID, msg.AgentID)
 	if err != nil {
 		s.logger.Printf("Failed to get agent: %v", err)
 
@@ -343,8 +343,8 @@ func (s *Server) handleAgentMessage(ctx context.Context, conn WebSocketConn, raw
 
 	// Check agent state
 	if agent.GetState() != session.AgentActive {
-		s.logger.Printf("Agent not ready: session=%s role=%s state=%s",
-			msg.SessionID, msg.Role, agent.GetState())
+		s.logger.Printf("Agent not ready: userSession=%s agentID=%s state=%s",
+			msg.UserSessionID, msg.AgentID, agent.GetState())
 
 		errorMsg := NewErrorMessage(
 			"AGENT_NOT_READY",
@@ -362,7 +362,7 @@ func (s *Server) handleAgentMessage(ctx context.Context, conn WebSocketConn, raw
 	// Get ACP client and send message
 	acpClient := agent.GetACPClient()
 	if acpClient == nil {
-		s.logger.Printf("Agent has no ACP client: session=%s role=%s", msg.SessionID, msg.Role)
+		s.logger.Printf("Agent has no ACP client: userSession=%s agentID=%s", msg.UserSessionID, msg.AgentID)
 
 		errorMsg := NewErrorMessage(
 			"AGENT_NOT_READY",
@@ -395,8 +395,8 @@ func (s *Server) handleAgentMessage(ctx context.Context, conn WebSocketConn, raw
 		return false // Keep connection open for retry
 	}
 
-	s.logger.Printf("Agent response received: session=%s role=%s",
-		msg.SessionID, msg.Role)
+	s.logger.Printf("Agent response received: userSession=%s agentID=%s",
+		msg.UserSessionID, msg.AgentID)
 
 	// Type assert response to *acp.AgentMessage and extract content
 	agentMsg, ok := response.(*acp.AgentMessage)
@@ -423,8 +423,8 @@ func (s *Server) handleAgentMessage(ctx context.Context, conn WebSocketConn, raw
 
 	// Send agent:response
 	responseMsg := NewAgentMessageResponse(
-		msg.SessionID,
-		msg.Role,
+		msg.UserSessionID,
+		msg.AgentID,
 		responseStr,
 		s.clock.Now(),
 	)

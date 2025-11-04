@@ -40,11 +40,11 @@ type SessionManagerInterface interface {
 	// CreateUserSession creates a new user session with WebSocket connection
 	CreateUserSession(ctx context.Context, ws session.WebSocketConn) (*session.UserSession, error)
 
-	// SpawnAgent spawns an agent in an existing session
-	SpawnAgent(ctx context.Context, sessionID, role, workspace string) error
+	// SpawnAgent spawns an agent in an existing user session
+	SpawnAgent(ctx context.Context, userSessionID, agentID, workspace string) error
 
-	// GetAgent retrieves an agent by session ID and role
-	GetAgent(sessionID, role string) (*session.AgentSession, error)
+	// GetAgent retrieves an agent by user session ID and agent ID
+	GetAgent(userSessionID, agentID string) (*session.AgentSession, error)
 }
 
 // Ensure gorilla websocket implements our interface

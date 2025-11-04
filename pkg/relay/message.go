@@ -155,17 +155,17 @@ func validateSessionCreateMessage(msg SessionCreateMessage) error {
 
 // validateAgentSpawnMessage validates AgentSpawnMessage required fields (pure function)
 func validateAgentSpawnMessage(msg AgentSpawnMessage) error {
-	if msg.SessionID == "" {
+	if msg.UserSessionID == "" {
 		return ValidationError{
 			Code:        "INVALID_MESSAGE",
-			Message:     "Missing required field: sessionId",
+			Message:     "Missing required field: userSessionId",
 			Recoverable: true,
 		}
 	}
-	if msg.Role == "" {
+	if msg.AgentID == "" {
 		return ValidationError{
 			Code:        "INVALID_MESSAGE",
-			Message:     "Missing required field: role",
+			Message:     "Missing required field: agentId",
 			Recoverable: true,
 		}
 	}
@@ -181,17 +181,17 @@ func validateAgentSpawnMessage(msg AgentSpawnMessage) error {
 
 // validateAgentMessageRequest validates AgentMessageRequest required fields (pure function)
 func validateAgentMessageRequest(msg AgentMessageRequest) error {
-	if msg.SessionID == "" {
+	if msg.UserSessionID == "" {
 		return ValidationError{
 			Code:        "INVALID_MESSAGE",
-			Message:     "Missing required field: sessionId",
+			Message:     "Missing required field: userSessionId",
 			Recoverable: true,
 		}
 	}
-	if msg.Role == "" {
+	if msg.AgentID == "" {
 		return ValidationError{
 			Code:        "INVALID_MESSAGE",
-			Message:     "Missing required field: role",
+			Message:     "Missing required field: agentId",
 			Recoverable: true,
 		}
 	}
@@ -245,40 +245,40 @@ type SessionCreateMessage struct {
 // SessionCreatedMessage is sent by relay confirming session creation
 type SessionCreatedMessage struct {
 	BaseMessage
-	SessionID string `json:"sessionId"`
-	Timestamp string `json:"timestamp"`
+	UserSessionID string `json:"userSessionId"`
+	Timestamp     string `json:"timestamp"`
 }
 
-// AgentSpawnMessage is sent by PWA to spawn an agent in a session
+// AgentSpawnMessage is sent by PWA to spawn an agent in a user session
 type AgentSpawnMessage struct {
 	BaseMessage
-	SessionID string `json:"sessionId"`
-	Role      string `json:"role"`
-	Workspace string `json:"workspace"`
+	UserSessionID string `json:"userSessionId"`
+	AgentID       string `json:"agentId"`
+	Workspace     string `json:"workspace"`
 }
 
 // AgentReadyMessage is sent by relay confirming agent is ready
 type AgentReadyMessage struct {
 	BaseMessage
-	SessionID string `json:"sessionId"`
-	Role      string `json:"role"`
+	UserSessionID string `json:"userSessionId"`
+	AgentID       string `json:"agentId"`
 }
 
 // AgentMessageRequest is sent by PWA to send a message to an agent
 type AgentMessageRequest struct {
 	BaseMessage
-	SessionID string `json:"sessionId"`
-	Role      string `json:"role"`
-	Content   string `json:"content"`
+	UserSessionID string `json:"userSessionId"`
+	AgentID       string `json:"agentId"`
+	Content       string `json:"content"`
 }
 
 // AgentMessageResponse is sent by relay with agent's response
 type AgentMessageResponse struct {
 	BaseMessage
-	SessionID string `json:"sessionId"`
-	Role      string `json:"role"`
-	Content   string `json:"content"`
-	Timestamp string `json:"timestamp"`
+	UserSessionID string `json:"userSessionId"`
+	AgentID       string `json:"agentId"`
+	Content       string `json:"content"`
+	Timestamp     string `json:"timestamp"`
 }
 
 // NewConnectionEstablished creates a connection established message (pure function)
@@ -309,39 +309,39 @@ func NewErrorMessage(code, message string, recoverable bool) ErrorMessage {
 }
 
 // NewSessionCreatedMessage creates a session created message (pure function)
-func NewSessionCreatedMessage(sessionID, timestamp string) SessionCreatedMessage {
+func NewSessionCreatedMessage(userSessionID, timestamp string) SessionCreatedMessage {
 	return SessionCreatedMessage{
 		BaseMessage: BaseMessage{
 			Version: ProtocolVersion,
 			Type:    "session:created",
 		},
-		SessionID: sessionID,
-		Timestamp: timestamp,
+		UserSessionID: userSessionID,
+		Timestamp:     timestamp,
 	}
 }
 
 // NewAgentReadyMessage creates an agent ready message (pure function)
-func NewAgentReadyMessage(sessionID, role string) AgentReadyMessage {
+func NewAgentReadyMessage(userSessionID, agentID string) AgentReadyMessage {
 	return AgentReadyMessage{
 		BaseMessage: BaseMessage{
 			Version: ProtocolVersion,
 			Type:    "agent:ready",
 		},
-		SessionID: sessionID,
-		Role:      role,
+		UserSessionID: userSessionID,
+		AgentID:       agentID,
 	}
 }
 
 // NewAgentMessageResponse creates an agent response message (pure function)
-func NewAgentMessageResponse(sessionID, role, content, timestamp string) AgentMessageResponse {
+func NewAgentMessageResponse(userSessionID, agentID, content, timestamp string) AgentMessageResponse {
 	return AgentMessageResponse{
 		BaseMessage: BaseMessage{
 			Version: ProtocolVersion,
 			Type:    "agent:response",
 		},
-		SessionID: sessionID,
-		Role:      role,
-		Content:   content,
-		Timestamp: timestamp,
+		UserSessionID: userSessionID,
+		AgentID:       agentID,
+		Content:       content,
+		Timestamp:     timestamp,
 	}
 }

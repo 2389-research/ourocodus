@@ -74,7 +74,7 @@ type Message struct {
 // Immutable after creation except for state transitions through Manager
 type AgentSession struct {
 	// Immutable fields (set at creation, never modified)
-	Role      string    // "auth", "db", "tests", etc.
+	AgentID   string    // User-chosen agent identifier (e.g., "coder-1", "analyzer")
 	Workspace string    // Path to agent workspace directory
 	createdAt time.Time // Agent creation timestamp
 
@@ -98,7 +98,7 @@ type UserSession struct {
 	// Mutable fields (protected by mu)
 	state      UserSessionState
 	webSocket  WebSocketConn
-	agents     map[string]*AgentSession // role → agent instance
+	agents     map[string]*AgentSession // agentID → agent instance
 	lastActive time.Time
 
 	mu sync.RWMutex
@@ -140,9 +140,9 @@ func NewUserSession(id string, ws WebSocketConn, createdAt time.Time) *UserSessi
 
 // NewAgentSession creates a new agent session in SPAWNING state
 // Pure function - no side effects, no I/O
-func NewAgentSession(role, workspace string, createdAt time.Time) *AgentSession {
+func NewAgentSession(agentID, workspace string, createdAt time.Time) *AgentSession {
 	return &AgentSession{
-		Role:       role,
+		AgentID:    agentID,
 		Workspace:  workspace,
 		state:      AgentSpawning,
 		createdAt:  createdAt,
@@ -172,11 +172,11 @@ func (u *UserSession) GetWebSocket() WebSocketConn {
 	return u.webSocket
 }
 
-// GetAgent returns the agent session for the given role (may be nil)
-func (u *UserSession) GetAgent(role string) *AgentSession {
+// GetAgent returns the agent session for the given agent ID (may be nil)
+func (u *UserSession) GetAgent(agentID string) *AgentSession {
 	u.mu.RLock()
 	defer u.mu.RUnlock()
-	return u.agents[role]
+	return u.agents[agentID]
 }
 
 // ListAgents returns a copy of the agents map
@@ -204,9 +204,9 @@ func (u *UserSession) GetLastActive() time.Time {
 
 // --- AgentSession accessors (thread-safe) ---
 
-// GetRole returns the agent role (immutable, no lock needed)
-func (a *AgentSession) GetRole() string {
-	return a.Role
+// GetAgentID returns the agent identifier (immutable, no lock needed)
+func (a *AgentSession) GetAgentID() string {
+	return a.AgentID
 }
 
 // GetWorkspace returns the agent workspace path (immutable, no lock needed)
@@ -277,12 +277,12 @@ func (u *UserSession) setState(state UserSessionState) {
 
 // addAgent adds an agent to the session (must hold lock)
 func (u *UserSession) addAgent(agent *AgentSession) {
-	u.agents[agent.Role] = agent
+	u.agents[agent.AgentID] = agent
 }
 
 // removeAgent removes an agent from the session (must hold lock)
-func (u *UserSession) removeAgent(role string) {
-	delete(u.agents, role)
+func (u *UserSession) removeAgent(agentID string) {
+	delete(u.agents, agentID)
 }
 
 // setLastActive updates the last activity timestamp (must hold lock)

@@ -84,7 +84,7 @@ sequenceDiagram
     PWA->>Relay: session:create (version: 1.0)
     Relay->>SessionMgr: CreateSession()
     SessionMgr-->>Relay: Session ID
-    Relay->>PWA: session:created (sessionId)
+    Relay->>PWA: session:created (userSessionId)
 ```
 
 ### Message Types
@@ -138,13 +138,13 @@ All messages are JSON with required `version` and `type` fields.
 {
     "version": "1.0",
     "type": "session:created",
-    "sessionId": "uuid-v4",
+    "userSessionId": "uuid-v4",
     "timestamp": "2025-10-29T15:00:00Z"
 }
 ```
 
 **Fields:**
-- `sessionId`: UUID v4 format session identifier
+- `userSessionId`: UUID v4 format user session identifier (WebSocket session)
 - `timestamp`: ISO 8601 format (RFC3339) in UTC timezone
 
 #### 4. error
@@ -187,7 +187,7 @@ All messages are JSON with required `version` and `type` fields.
 **For Recoverable Errors:**
 - `INVALID_MESSAGE`: Log error details for debugging. Do not retry automatically (message is fundamentally malformed).
 - `SESSION_CREATE_FAILED`: Display error, enable "retry" button. Use exponential backoff if user retries multiple times.
-- `AGENT_SPAWN_FAILED`: Display error, enable "retry" button for spawning that specific agent role.
+- `AGENT_SPAWN_FAILED`: Display error, enable "retry" button for spawning that specific agent.
 - `AGENT_NOT_READY`: Wait briefly (e.g., 2s) and retry automatically up to 3 times. Agent may still be initializing.
 - `AGENT_MESSAGE_FAILED`: Retry once automatically after 1s. If fails again, display error and require user action.
 - `INTERNAL_ERROR`: Display generic error message. Log full error details. Allow manual retry but do not auto-retry.
@@ -367,7 +367,7 @@ echo '{"type":"session:create","version":"1.0"}' | websocat ws://localhost:8080/
 
 # Expected response:
 # {"version":"1.0","type":"connection:established",...}
-# {"version":"1.0","type":"session:created","sessionId":"..."}
+# {"version":"1.0","type":"session:created","userSessionId":"..."}
 ```
 
 ## Limitations (Phase 1)

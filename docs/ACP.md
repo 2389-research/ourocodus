@@ -222,7 +222,7 @@ The ACP relay bridges NATS (internal) and ACP (containers):
 1. **Session management** - Track which agent belongs to which session
 2. **Protocol translation** - NATS JSON → ACP WebSocket
 3. **Connection pooling** - Maintain WebSocket connections to agents
-4. **Message routing** - Route based on session_id + agent_role
+4. **Message routing** - Route based on userSessionID + agentID
 5. **Error handling** - Reconnect on disconnection, report failures
 
 ### Relay API (Internal - NATS)
@@ -230,14 +230,14 @@ The ACP relay bridges NATS (internal) and ACP (containers):
 **Subscribe to:**
 
 ```text
-sessions.{session_id}.work.{role}   # Work for specific agent role
+sessions.{user_session_id}.work.{agent_id}   # Work for specific agent
 ```
 
 **Publish to:**
 
 ```text
-sessions.{session_id}.results.{role}  # Results from agent
-sessions.{session_id}.events          # Status events
+sessions.{user_session_id}.results.{agent_id}  # Results from agent
+sessions.{user_session_id}.events               # Status events
 ```
 
 ### Relay API (External - ACP Containers)
@@ -245,7 +245,7 @@ sessions.{session_id}.events          # Status events
 **WebSocket endpoint:**
 
 ```text
-ws://relay:8080/acp/{session_id}/{role}
+ws://relay:8080/acp/{user_session_id}/{agent_id}
 ```
 
 **Headers:**
@@ -277,8 +277,8 @@ chunks:
 ```http
 POST /api/agents
 {
-  "session_id": "sess_123",
-  "role": "coding",
+  "user_session_id": "sess_123",
+  "agent_id": "coder-1",
   "worktree": "agent/auth-implementation"
 }
 ```
@@ -287,7 +287,7 @@ POST /api/agents
 
 - Container starts with Claude Code
 - Claude Code connects to relay WebSocket
-- Relay registers: `sess_123` + `coding` → `ws://container_ip:5000`
+- Relay registers: `sess_123` + `coder-1` → `ws://container_ip:5000`
 
 1. **Coordinator sends work via NATS:**
 

@@ -207,8 +207,8 @@ func TestSpawnAgent_SingleAgent(t *testing.T) {
 	if agent == nil {
 		t.Fatal("Expected agent to be added to session")
 	}
-	if agent.GetRole() != "auth" {
-		t.Errorf("Expected role 'auth', got %s", agent.GetRole())
+	if agent.GetAgentID() != "auth" {
+		t.Errorf("Expected role 'auth', got %s", agent.GetAgentID())
 	}
 	if agent.GetState() != AgentActive {
 		t.Errorf("Expected agent state ACTIVE, got %s", agent.GetState())
@@ -617,8 +617,8 @@ func TestGetAgent(t *testing.T) {
 	if agent == nil {
 		t.Fatal("Expected agent, got nil")
 	}
-	if agent.GetRole() != "auth" {
-		t.Errorf("Expected role 'auth', got %s", agent.GetRole())
+	if agent.GetAgentID() != "auth" {
+		t.Errorf("Expected role 'auth', got %s", agent.GetAgentID())
 	}
 }
 

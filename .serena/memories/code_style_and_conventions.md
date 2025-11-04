@@ -41,7 +41,7 @@ Follow standard Go naming conventions:
 - **Files**: Lowercase with underscores (e.g., `session_manager.go`, `client_factory.go`)
 - **Types**: PascalCase (e.g., `SessionManager`, `AgentLauncher`)
 - **Functions/Methods**: PascalCase for exported, camelCase for unexported
-- **Variables**: camelCase (e.g., `sessionID`, `agentRole`)
+- **Variables**: camelCase (e.g., `userSessionID`, `agentID`)
 - **Constants**: PascalCase or SCREAMING_SNAKE_CASE depending on context
 - **Interfaces**: Typically end with `-er` suffix (e.g., `Launcher`, `Manager`, `Factory`)
 
@@ -53,8 +53,8 @@ Follow standard Go naming conventions:
 
 Example:
 ```go
-// SessionManager manages the lifecycle of agent sessions.
-// It coordinates session creation, agent spawning, and cleanup.
+// SessionManager manages the lifecycle of UserSessions.
+// It coordinates UserSession creation, AgentSession spawning, and cleanup.
 type SessionManager struct {
     // ...
 }
@@ -95,28 +95,46 @@ func TestIntegration_SpawnAndStop(t *testing.T) {
 The project uses an `AgentLauncher` interface to abstract agent lifecycle management:
 ```go
 type AgentLauncher interface {
-    Spawn(ctx context.Context, role, workspace string) (AgentHandle, error)
+    Spawn(ctx context.Context, agentID, workspace string) (AgentHandle, error)
 }
 ```
 
 ### Session Management
 
-Sessions are identified by UUIDs and track multiple agents by role:
-- Session lifecycle: Create → Spawn Agents → Communicate → Cleanup
-- State transitions: PENDING → SPAWNING → ACTIVE → STOPPED → ERROR
+Sessions are identified by UUIDs and track multiple agents by agentID:
+- UserSession lifecycle: Create → Spawn AgentSessions → Communicate → Cleanup
+- AgentSession state transitions: PENDING → SPAWNING → ACTIVE → STOPPED → ERROR
+
+### Session Terminology
+
+The project uses explicit session terminology to avoid confusion:
+
+- **UserSession**: WebSocket connection from PWA to relay (contains 0-N AgentSessions)
+  - Identifier: `userSessionID` (UUID)
+  - Managed by: `SessionManager`
+  
+- **AgentSession**: Individual ACP agent process with workspace and state
+  - Identifier: `agentID` (string, typically a role like "coder" or "reviewer")
+  - Managed by: `AgentLauncher` implementations
+  
+- **ContainerSession**: Docker container runtime environment (managed by `pkg/containersession`)
+  - Identifier: `containerID` (Docker container ID)
+  - One ContainerSession may host one AgentSession
+
+Always use explicit terminology in code, comments, and documentation.
 
 ### Docker Labels
 
 Containers managed by Packnplay use labels:
 - `managed-by=packnplay` - Identifies Packnplay-managed containers
-- Session and role information stored in labels for discovery
+- UserSession and agentID information stored in labels for discovery
 
 ### NATS Topic Naming
 
-- Session events: `sessions.<session-id>.events`
-- Work distribution: `sessions.<session-id>.work.<role>`
-- Work results: `sessions.<session-id>.results.<role>`
-- Agent heartbeats: `agents.<session-id>.<role>.heartbeat`
+- Session events: `sessions.<user-session-id>.events`
+- Work distribution: `sessions.<user-session-id>.work.<agent-id>`
+- Work results: `sessions.<user-session-id>.results.<agent-id>`
+- Agent heartbeats: `agents.<user-session-id>.<agent-id>.heartbeat`
 
 ## Dependencies
 

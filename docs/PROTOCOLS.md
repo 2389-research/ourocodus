@@ -79,10 +79,10 @@ flowchart TD
 
 ```text
 event: message
-data: {"type":"work.started","session_id":"sess_123"}
+data: {"type":"work.started","userSessionId":"sess_123"}
 
 event: message
-data: {"type":"work.completed","session_id":"sess_123"}
+data: {"type":"work.completed","userSessionId":"sess_123"}
 ```text
 
 ### 3. NATS Pub/Sub (All Backend Components)
@@ -182,7 +182,7 @@ All NATS messages use a standard envelope format:
   "version": "1",
   "id": "msg_abc123",
   "timestamp": "2025-10-22T10:00:00Z",
-  "session_id": "sess_123",
+  "userSessionId": "sess_123",
   "type": "work.coding",
   "payload": {
     // Type-specific data
@@ -195,7 +195,7 @@ All NATS messages use a standard envelope format:
 - `version` (string, required) - Envelope format version (currently "1")
 - `id` (string, required) - Unique message ID (for deduplication)
 - `timestamp` (RFC3339, required) - Message creation time
-- `session_id` (string, required) - Session this message belongs to
+- `userSessionId` (string, required) - UserSession this message belongs to
 - `type` (string, required) - Message type (see [Message Types](#message-types))
 - `payload` (object, required) - Type-specific data
 

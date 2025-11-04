@@ -10,30 +10,30 @@ import (
 
 func TestSessionCreated(t *testing.T) {
 	tests := []struct {
-		name      string
-		sessionID string
-		want      string
+		name          string
+		userSessionID string
+		want          string
 	}{
 		{
-			name:      "normal session ID",
-			sessionID: "sess-abc123",
-			want:      "sessions.sess-abc123.session.created",
+			name:          "normal user session ID",
+			userSessionID: "sess-abc123",
+			want:          "sessions.sess-abc123.session.created",
 		},
 		{
-			name:      "session ID with dots",
-			sessionID: "sess.abc.123",
-			want:      "sessions.sess_abc_123.session.created",
+			name:          "user session ID with dots",
+			userSessionID: "sess.abc.123",
+			want:          "sessions.sess_abc_123.session.created",
 		},
 		{
-			name:      "UUID session ID",
-			sessionID: "550e8400-e29b-41d4-a716-446655440000",
-			want:      "sessions.550e8400-e29b-41d4-a716-446655440000.session.created",
+			name:          "UUID user session ID",
+			userSessionID: "550e8400-e29b-41d4-a716-446655440000",
+			want:          "sessions.550e8400-e29b-41d4-a716-446655440000.session.created",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := relay.SessionCreated(tt.sessionID)
+			got, err := relay.SessionCreated(tt.userSessionID)
 			assert.NoError(t, err)
 			assert.Equal(t, tt.want, got)
 		})
@@ -42,25 +42,25 @@ func TestSessionCreated(t *testing.T) {
 
 func TestSessionTerminated(t *testing.T) {
 	tests := []struct {
-		name      string
-		sessionID string
-		want      string
+		name          string
+		userSessionID string
+		want          string
 	}{
 		{
-			name:      "normal session ID",
-			sessionID: "test-session",
-			want:      "sessions.test-session.session.terminated",
+			name:          "normal user session ID",
+			userSessionID: "test-session",
+			want:          "sessions.test-session.session.terminated",
 		},
 		{
-			name:      "session ID with dots",
-			sessionID: "test.session",
-			want:      "sessions.test_session.session.terminated",
+			name:          "user session ID with dots",
+			userSessionID: "test.session",
+			want:          "sessions.test_session.session.terminated",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := relay.SessionTerminated(tt.sessionID)
+			got, err := relay.SessionTerminated(tt.userSessionID)
 			assert.NoError(t, err)
 			assert.Equal(t, tt.want, got)
 		})
@@ -80,40 +80,40 @@ func TestAgentTerminated(t *testing.T) {
 }
 
 func TestSanitizeID_TooLong(t *testing.T) {
-	// Create a session ID longer than 200 chars
+	// Create a user session ID longer than 200 chars
 	longID := strings.Repeat("a", 201)
 
 	_, err := relay.SessionCreated(longID)
 	assert.Error(t, err)
-	assert.ErrorIs(t, err, relay.ErrSessionIDTooLong)
+	assert.ErrorIs(t, err, relay.ErrUserSessionIDTooLong)
 }
 
 func TestSanitizeID_EdgeCases(t *testing.T) {
 	tests := []struct {
-		name      string
-		sessionID string
-		want      string
+		name          string
+		userSessionID string
+		want          string
 	}{
 		{
-			name:      "multiple consecutive dots",
-			sessionID: "sess...123",
-			want:      "sessions.sess___123.session.created",
+			name:          "multiple consecutive dots",
+			userSessionID: "sess...123",
+			want:          "sessions.sess___123.session.created",
 		},
 		{
-			name:      "dots at boundaries",
-			sessionID: ".sess123.",
-			want:      "sessions._sess123_.session.created",
+			name:          "dots at boundaries",
+			userSessionID: ".sess123.",
+			want:          "sessions._sess123_.session.created",
 		},
 		{
-			name:      "only dots",
-			sessionID: "...",
-			want:      "sessions.___.session.created",
+			name:          "only dots",
+			userSessionID: "...",
+			want:          "sessions.___.session.created",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := relay.SessionCreated(tt.sessionID)
+			got, err := relay.SessionCreated(tt.userSessionID)
 			assert.NoError(t, err)
 			assert.Equal(t, tt.want, got)
 		})
