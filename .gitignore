@@ -9,6 +9,8 @@ bin/
 /relay
 /cli
 /echo-agent
+/demo
+/interactive
 
 # Test binary, built with `go test -c`
 *.test
