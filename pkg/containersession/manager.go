@@ -215,6 +215,11 @@ func (m *Manager) handleExistingContainer(ctx context.Context, containerID, stat
 		return nil, fmt.Errorf("container %s has no /workspace mount", containerID)
 	}
 
+	// Validate workspace path to prevent directory traversal attacks
+	if err := ValidateWorkspacePath(m.baseWorkspaceDir, workspacePath); err != nil {
+		return nil, fmt.Errorf("invalid workspace mount for container %s: %w", containerID, err)
+	}
+
 	// Get labels and creation time
 	labels := inspectData.Config.Labels
 	createdAt := m.clock.Now() // Use current time if we can't parse original
@@ -229,9 +234,10 @@ func (m *Manager) handleExistingContainer(ctx context.Context, containerID, stat
 	session, exists := m.sessions[sessionID]
 	if !exists {
 		session = NewContainerSession(sessionID, workspacePath, labels, createdAt)
-		session.SetContainerID(containerID)
 		m.sessions[sessionID] = session
 	}
+	// Always update container ID (even for existing sessions) to handle container replacement
+	session.SetContainerID(containerID)
 	m.mu.Unlock()
 
 	// Handle based on container state
@@ -371,6 +377,11 @@ func (m *Manager) AttachContainerSession(ctx context.Context, sessionID string) 
 	}
 	if workspacePath == "" {
 		return nil, fmt.Errorf("container %s has no /workspace mount", containerID)
+	}
+
+	// Validate workspace path to prevent directory traversal attacks
+	if err := ValidateWorkspacePath(m.baseWorkspaceDir, workspacePath); err != nil {
+		return nil, fmt.Errorf("invalid workspace mount for container %s: %w", containerID, err)
 	}
 
 	// Get labels and creation time

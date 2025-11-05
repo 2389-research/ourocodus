@@ -45,6 +45,39 @@ func PrepareWorkspace(basePath, sessionID string) (string, error) {
 	return absPath, nil
 }
 
+// ValidateWorkspacePath verifies that a workspace path is under the base directory.
+// This function is used to validate workspace paths extracted from container mounts
+// to prevent directory traversal attacks when reusing containers.
+//
+// Security: A malicious actor could create a container with our session labels but
+// mount an arbitrary host path at /workspace. This validation ensures we only accept
+// paths that are descendants of baseWorkspaceDir.
+func ValidateWorkspacePath(baseWorkspaceDir, workspacePath string) error {
+	// Get absolute paths for validation
+	absPath, err := filepath.Abs(workspacePath)
+	if err != nil {
+		return fmt.Errorf("%w: cannot resolve workspace path: %v", ErrInvalidWorkspacePath, err)
+	}
+
+	baseAbs, err := filepath.Abs(baseWorkspaceDir)
+	if err != nil {
+		return fmt.Errorf("%w: cannot resolve base path: %v", ErrInvalidWorkspacePath, err)
+	}
+
+	// Defense-in-depth: Check prefix with separator to prevent directory name bypass
+	if absPath != baseAbs && !strings.HasPrefix(absPath, baseAbs+string(os.PathSeparator)) {
+		return fmt.Errorf("%w: workspace path must be under base directory %s", ErrInvalidWorkspacePath, baseWorkspaceDir)
+	}
+
+	// Use filepath.Rel to prevent directory traversal with ".."
+	relPath, err := filepath.Rel(baseAbs, absPath)
+	if err != nil || strings.HasPrefix(relPath, "..") || relPath == ".." || filepath.IsAbs(relPath) {
+		return fmt.Errorf("%w: workspace path must be under base directory %s", ErrInvalidWorkspacePath, baseWorkspaceDir)
+	}
+
+	return nil
+}
+
 // CleanupWorkspace removes a workspace directory
 // Idempotent - does not fail if directory doesn't exist
 func CleanupWorkspace(path string, logger Logger) error {

@@ -3,6 +3,8 @@ package containersession
 import (
 	"context"
 	"errors"
+	"fmt"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -106,7 +108,7 @@ func (m *mockLogger) Printf(format string, v ...interface{}) {
 	// Store logs for verification (thread-safe)
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.logs = append(m.logs, format)
+	m.logs = append(m.logs, fmt.Sprintf(format, v...))
 }
 
 // Tests
@@ -535,6 +537,8 @@ func TestFindContainer(t *testing.T) {
 
 func TestHandleExistingContainer(t *testing.T) {
 	t.Run("reattaches to running container", func(t *testing.T) {
+		baseDir := t.TempDir()
+		workspacePath := filepath.Join(baseDir, "test-session")
 		docker := &mockDockerClient{
 			inspectFn: func(ctx context.Context, containerID string) (container.InspectResponse, error) {
 				return container.InspectResponse{
@@ -542,7 +546,7 @@ func TestHandleExistingContainer(t *testing.T) {
 						ID: containerID,
 					},
 					Mounts: []container.MountPoint{
-						{Source: "/host/workspace", Destination: "/workspace"},
+						{Source: workspacePath, Destination: "/workspace"},
 					},
 					Config: &container.Config{
 						Labels: map[string]string{
@@ -556,7 +560,7 @@ func TestHandleExistingContainer(t *testing.T) {
 				return types.HijackedResponse{}, nil
 			},
 		}
-		manager := NewManager(docker, &mockIDGenerator{}, &mockClock{}, &mockLogger{}, t.TempDir())
+		manager := NewManager(docker, &mockIDGenerator{}, &mockClock{}, &mockLogger{}, baseDir)
 
 		session, err := manager.handleExistingContainer(context.Background(), "container-123", "running", "test-session")
 		if err != nil {
@@ -574,6 +578,8 @@ func TestHandleExistingContainer(t *testing.T) {
 	})
 
 	t.Run("starts and attaches to stopped container", func(t *testing.T) {
+		baseDir := t.TempDir()
+		workspacePath := filepath.Join(baseDir, "test-session")
 		startCalled := false
 		docker := &mockDockerClient{
 			inspectFn: func(ctx context.Context, containerID string) (container.InspectResponse, error) {
@@ -582,7 +588,7 @@ func TestHandleExistingContainer(t *testing.T) {
 						ID: containerID,
 					},
 					Mounts: []container.MountPoint{
-						{Source: "/host/workspace", Destination: "/workspace"},
+						{Source: workspacePath, Destination: "/workspace"},
 					},
 					Config: &container.Config{
 						Labels: map[string]string{
@@ -599,7 +605,7 @@ func TestHandleExistingContainer(t *testing.T) {
 				return types.HijackedResponse{}, nil
 			},
 		}
-		manager := NewManager(docker, &mockIDGenerator{}, &mockClock{}, &mockLogger{}, t.TempDir())
+		manager := NewManager(docker, &mockIDGenerator{}, &mockClock{}, &mockLogger{}, baseDir)
 
 		session, err := manager.handleExistingContainer(context.Background(), "container-123", "exited", "test-session")
 		if err != nil {
@@ -614,6 +620,8 @@ func TestHandleExistingContainer(t *testing.T) {
 	})
 
 	t.Run("returns error for paused container", func(t *testing.T) {
+		baseDir := t.TempDir()
+		workspacePath := filepath.Join(baseDir, "test-session")
 		docker := &mockDockerClient{
 			inspectFn: func(ctx context.Context, containerID string) (container.InspectResponse, error) {
 				return container.InspectResponse{
@@ -621,7 +629,7 @@ func TestHandleExistingContainer(t *testing.T) {
 						ID: containerID,
 					},
 					Mounts: []container.MountPoint{
-						{Source: "/host/workspace", Destination: "/workspace"},
+						{Source: workspacePath, Destination: "/workspace"},
 					},
 					Config: &container.Config{
 						Labels: map[string]string{
@@ -631,7 +639,7 @@ func TestHandleExistingContainer(t *testing.T) {
 				}, nil
 			},
 		}
-		manager := NewManager(docker, &mockIDGenerator{}, &mockClock{}, &mockLogger{}, t.TempDir())
+		manager := NewManager(docker, &mockIDGenerator{}, &mockClock{}, &mockLogger{}, baseDir)
 
 		_, err := manager.handleExistingContainer(context.Background(), "container-123", "paused", "test-session")
 		if err == nil {
@@ -640,6 +648,8 @@ func TestHandleExistingContainer(t *testing.T) {
 	})
 
 	t.Run("removes dead container and returns error", func(t *testing.T) {
+		baseDir := t.TempDir()
+		workspacePath := filepath.Join(baseDir, "test-session")
 		removeCalled := false
 		docker := &mockDockerClient{
 			inspectFn: func(ctx context.Context, containerID string) (container.InspectResponse, error) {
@@ -648,7 +658,7 @@ func TestHandleExistingContainer(t *testing.T) {
 						ID: containerID,
 					},
 					Mounts: []container.MountPoint{
-						{Source: "/host/workspace", Destination: "/workspace"},
+						{Source: workspacePath, Destination: "/workspace"},
 					},
 					Config: &container.Config{
 						Labels: map[string]string{
@@ -662,7 +672,7 @@ func TestHandleExistingContainer(t *testing.T) {
 				return nil
 			},
 		}
-		manager := NewManager(docker, &mockIDGenerator{}, &mockClock{}, &mockLogger{}, t.TempDir())
+		manager := NewManager(docker, &mockIDGenerator{}, &mockClock{}, &mockLogger{}, baseDir)
 
 		_, err := manager.handleExistingContainer(context.Background(), "container-123", "dead", "test-session")
 		if err == nil {
@@ -714,6 +724,8 @@ func TestHandleExistingContainer(t *testing.T) {
 
 func TestAttachContainerSession(t *testing.T) {
 	t.Run("successfully attaches to running container", func(t *testing.T) {
+		baseDir := t.TempDir()
+		workspacePath := filepath.Join(baseDir, "test-session")
 		docker := &mockDockerClient{
 			listFn: func(ctx context.Context, options container.ListOptions) ([]container.Summary, error) {
 				return []container.Summary{
@@ -726,7 +738,7 @@ func TestAttachContainerSession(t *testing.T) {
 						ID: containerID,
 					},
 					Mounts: []container.MountPoint{
-						{Source: "/host/workspace", Destination: "/workspace"},
+						{Source: workspacePath, Destination: "/workspace"},
 					},
 					Config: &container.Config{
 						Labels: map[string]string{
@@ -740,7 +752,7 @@ func TestAttachContainerSession(t *testing.T) {
 				return types.HijackedResponse{}, nil
 			},
 		}
-		manager := NewManager(docker, &mockIDGenerator{}, &mockClock{}, &mockLogger{}, t.TempDir())
+		manager := NewManager(docker, &mockIDGenerator{}, &mockClock{}, &mockLogger{}, baseDir)
 
 		session, err := manager.AttachContainerSession(context.Background(), "test-session")
 		if err != nil {
@@ -791,6 +803,8 @@ func TestAttachContainerSession(t *testing.T) {
 	})
 
 	t.Run("continues even if attach fails", func(t *testing.T) {
+		baseDir := t.TempDir()
+		workspacePath := filepath.Join(baseDir, "test-session")
 		docker := &mockDockerClient{
 			listFn: func(ctx context.Context, options container.ListOptions) ([]container.Summary, error) {
 				return []container.Summary{
@@ -803,7 +817,7 @@ func TestAttachContainerSession(t *testing.T) {
 						ID: containerID,
 					},
 					Mounts: []container.MountPoint{
-						{Source: "/host/workspace", Destination: "/workspace"},
+						{Source: workspacePath, Destination: "/workspace"},
 					},
 					Config: &container.Config{
 						Labels: map[string]string{
@@ -816,7 +830,7 @@ func TestAttachContainerSession(t *testing.T) {
 				return types.HijackedResponse{}, errors.New("attach failed")
 			},
 		}
-		manager := NewManager(docker, &mockIDGenerator{}, &mockClock{}, &mockLogger{}, t.TempDir())
+		manager := NewManager(docker, &mockIDGenerator{}, &mockClock{}, &mockLogger{}, baseDir)
 
 		session, err := manager.AttachContainerSession(context.Background(), "test-session")
 		if err != nil {
@@ -831,6 +845,8 @@ func TestAttachContainerSession(t *testing.T) {
 func TestCreateContainerSession_Reuse(t *testing.T) {
 	t.Run("reuses running container", func(t *testing.T) {
 		createCalled := false
+		baseDir := t.TempDir()
+		workspacePath := filepath.Join(baseDir, "test-session")
 		docker := &mockDockerClient{
 			listFn: func(ctx context.Context, options container.ListOptions) ([]container.Summary, error) {
 				return []container.Summary{
@@ -843,7 +859,7 @@ func TestCreateContainerSession_Reuse(t *testing.T) {
 						ID: containerID,
 					},
 					Mounts: []container.MountPoint{
-						{Source: "/host/workspace", Destination: "/workspace"},
+						{Source: workspacePath, Destination: "/workspace"},
 					},
 					Config: &container.Config{
 						Labels: map[string]string{
@@ -861,7 +877,7 @@ func TestCreateContainerSession_Reuse(t *testing.T) {
 			},
 		}
 		idGen := &mockIDGenerator{nextID: "test-123"}
-		manager := NewManager(docker, idGen, &mockClock{}, &mockLogger{}, t.TempDir())
+		manager := NewManager(docker, idGen, &mockClock{}, &mockLogger{}, baseDir)
 
 		session, err := manager.CreateContainerSession(context.Background(), "ubuntu:latest", []string{"/bin/bash"})
 		if err != nil {
@@ -902,6 +918,8 @@ func TestCreateContainerSession_Reuse(t *testing.T) {
 	})
 
 	t.Run("starts stopped container", func(t *testing.T) {
+		baseDir := t.TempDir()
+		workspacePath := filepath.Join(baseDir, "test-session")
 		startCalled := false
 		createCalled := false
 		docker := &mockDockerClient{
@@ -916,7 +934,7 @@ func TestCreateContainerSession_Reuse(t *testing.T) {
 						ID: containerID,
 					},
 					Mounts: []container.MountPoint{
-						{Source: "/host/workspace", Destination: "/workspace"},
+						{Source: workspacePath, Destination: "/workspace"},
 					},
 					Config: &container.Config{
 						Labels: map[string]string{
@@ -938,7 +956,7 @@ func TestCreateContainerSession_Reuse(t *testing.T) {
 			},
 		}
 		idGen := &mockIDGenerator{nextID: "test-123"}
-		manager := NewManager(docker, idGen, &mockClock{}, &mockLogger{}, t.TempDir())
+		manager := NewManager(docker, idGen, &mockClock{}, &mockLogger{}, baseDir)
 
 		session, err := manager.CreateContainerSession(context.Background(), "ubuntu:latest", []string{"/bin/bash"})
 		if err != nil {

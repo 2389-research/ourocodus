@@ -237,7 +237,9 @@ func runScenario1(ctx context.Context, dockerClient *client.Client, baseWorkspac
 
 	// Cleanup
 	fmt.Println("\nCleaning up...")
-	manager2.StopContainerSession(ctx, session2.ID())
+	if err := manager2.StopContainerSession(ctx, session2.ID()); err != nil {
+		printError(fmt.Sprintf("Failed to stop container: %v", err))
+	}
 	time.Sleep(500 * time.Millisecond)
 
 	waitForUser()
@@ -307,7 +309,9 @@ func runScenario2(ctx context.Context, dockerClient *client.Client, baseWorkspac
 
 	// Cleanup
 	fmt.Println("\nCleaning up...")
-	manager2.StopContainerSession(ctx, session2.ID())
+	if err := manager2.StopContainerSession(ctx, session2.ID()); err != nil {
+		printError(fmt.Sprintf("Failed to stop container: %v", err))
+	}
 	time.Sleep(500 * time.Millisecond)
 
 	waitForUser()
@@ -379,7 +383,9 @@ func runScenario3(ctx context.Context, dockerClient *client.Client, baseWorkspac
 
 	// Cleanup
 	fmt.Println("\nCleaning up...")
-	managerB.StopContainerSession(ctx, sessionB.ID())
+	if err := managerB.StopContainerSession(ctx, sessionB.ID()); err != nil {
+		printError(fmt.Sprintf("Failed to stop container: %v", err))
+	}
 	time.Sleep(500 * time.Millisecond)
 
 	waitForUser()
@@ -468,7 +474,9 @@ func runScenario4(ctx context.Context, dockerClient *client.Client, baseWorkspac
 
 	// Cleanup
 	fmt.Println("\nCleaning up...")
-	manager2.StopContainerSession(ctx, session2.ID())
+	if err := manager2.StopContainerSession(ctx, session2.ID()); err != nil {
+		printError(fmt.Sprintf("Failed to stop container: %v", err))
+	}
 	time.Sleep(500 * time.Millisecond)
 	os.RemoveAll(workspace)
 
