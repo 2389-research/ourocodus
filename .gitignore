@@ -14,7 +14,7 @@ bin/
 
 # Example binaries (top-level demos)
 examples/demo-container-reuse
-examples/demo-session-hierarchy
+examples/demo-nats-basic
 examples/demo-workspaces/
 
 # Old nested demo structure (deprecated)

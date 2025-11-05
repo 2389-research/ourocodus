@@ -4,7 +4,7 @@ Interactive demonstrations of Ourocodus features. All demos are self-contained a
 
 ## Available Demos
 
-### 1. Container Reuse Demo (START HERE)
+### 1. Container Reuse Demo
 
 **What it shows:** Phase 2 container management - intelligent reuse and cross-process attachment
 
@@ -25,28 +25,7 @@ cd examples
 
 ---
 
-### 2. Session Hierarchy Demo
-
-**What it shows:** Three-tier session architecture - UserSession → AgentSession → ContainerSession
-
-**Run it:**
-```bash
-cd examples
-./demo-session-hierarchy.sh
-```
-
-**Features demonstrated:**
-- UserSession creation backed by ContainerSession
-- Multiple AgentSessions per UserSession (multi-agent coordination)
-- Crash recovery at session level using container reuse
-- Independent agent lifecycle management
-- Resource efficiency (one container, multiple agents)
-
-**Use case:** Understanding the full session architecture and how multiple agents coordinate within a user's workspace.
-
----
-
-### 3. NATS Basic Messaging Demo
+### 2. NATS Basic Messaging Demo
 
 **What it shows:** Basic NATS publish/subscribe messaging patterns
 
@@ -76,14 +55,14 @@ docker run -d -p 4222:4222 nats:latest
 Each demo is self-contained with setup, execution, and cleanup:
 
 ```bash
-# Run demos in recommended order
-./demo-container-reuse.sh       # Start here
-./demo-session-hierarchy.sh     # Then this
-./demo-nats-basic.sh             # NATS messaging
+# Run the container reuse demo
+./demo-container-reuse.sh
+
+# Run the NATS messaging demo (requires NATS server)
+./demo-nats-basic.sh
 
 # Manual cleanup if needed
 ./demo-container-reuse-reset.sh
-./demo-session-hierarchy-reset.sh
 ```
 
 ## Prerequisites
@@ -130,30 +109,18 @@ docker ps -a --filter "label=com.ourocodus.containersession.managed-by" -q | xar
 
 ## Architecture Overview
 
-```
-┌─────────────────────────────────────────┐
-│          UserSession                    │
-│  (User's workspace container)           │
-│                                          │
-│  ├─> AgentSession (agent 1)            │
-│  ├─> AgentSession (agent 2)            │
-│  └─> AgentSession (agent N)            │
-│                                          │
-│       └─> ContainerSession              │
-│            (Docker backing with reuse)  │
-└─────────────────────────────────────────┘
-```
+**ContainerSession (Phase 2 - Complete):**
+Docker container lifecycle management with intelligent reuse and cross-process attachment.
 
-**ContainerSession (Phase 2):** Docker container lifecycle management with intelligent reuse
-
-**UserSession (Phase 3 - In Progress):** User workspace backed by a container
-
-**AgentSession (Phase 3 - In Progress):** Individual Claude agent processes within a user session
+**Future Phases:**
+- Phase 3: AgentLauncher implementation using ContainerSession (1:1 Agent:Container mapping)
+- Phase 4: NATS integration for agent coordination
+- Phase 5: PWA integration
 
 ## Development Phases
 
 - **Phase 1:** Basic container session management ✅
-- **Phase 2:** Container reuse and attachment ✅ ← *container-reuse demo*
-- **Phase 3:** Multi-agent session hierarchy 🚧 ← *session-hierarchy demo*
-- **Phase 4:** NATS integration for coordination 📋
+- **Phase 2:** Container reuse and attachment ✅ ← *demo-container-reuse shows this*
+- **Phase 3:** AgentLauncher implementation (1:1 Agent:Container) 📋
+- **Phase 4:** NATS integration for coordination 📋 ← *demo-nats-basic shows basics*
 - **Phase 5:** PWA integration 📋
