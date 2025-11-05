@@ -192,7 +192,8 @@ func (l *AgentContainerLauncher) createContainerWithMounts(
 
 	// Build labels for container
 	labels := map[string]string{
-		"agent-id": config.AgentID,
+		"ourocodus.agent": "true",
+		"agent-id":        config.AgentID,
 	}
 
 	// Create container session with custom configuration
