@@ -15,11 +15,12 @@ type CreateConfig struct {
 	Command []string
 
 	// WorkspaceDir is the workspace directory path. If empty, a default workspace
-	// will be created in baseWorkspaceDir/sessionID
+	// will be created in baseWorkspaceDir/sessionID and mounted at /workspace
 	WorkspaceDir string
 
 	// CustomMounts are additional mounts to add to the container beyond the workspace mount.
-	// The workspace mount (/workspace) will be added automatically unless WorkspaceDir is empty.
+	// The workspace mount (/workspace) is always added automatically using either the
+	// provided WorkspaceDir or a default workspace path.
 	CustomMounts []mount.Mount
 
 	// Env are environment variables to set in the container (optional)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"sync"
 	"time"
@@ -211,8 +212,10 @@ func (m *Manager) CreateContainerSessionWithConfig(ctx context.Context, config C
 	var workspacePath string
 	if config.WorkspaceDir != "" {
 		// Use provided workspace path
-		// Validation is skipped for pre-existing workspace directories
-		// (e.g., git worktrees managed by external systems)
+		// Basic validation: ensure path exists and is accessible
+		if _, err := os.Stat(config.WorkspaceDir); err != nil {
+			return nil, fmt.Errorf("workspace directory not accessible: %w", err)
+		}
 		// Resolve symlinks for Docker compatibility (e.g., macOS /tmp -> /private/tmp)
 		var err error
 		workspacePath, err = filepath.EvalSymlinks(config.WorkspaceDir)
