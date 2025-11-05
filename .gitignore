@@ -12,6 +12,10 @@ bin/
 /demo
 /interactive
 
+# Example binaries
+examples/**/containersession-demo
+examples/**/demo-workspaces/
+
 # Test binary, built with `go test -c`
 *.test
 
