@@ -164,8 +164,8 @@ func TestIntegration_CreateStartStop(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, containersession.StateRunning, session.State())
 
-	// Stop session with timeout
-	stopCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	// Stop session with timeout (must be longer than Docker's 30s stop grace period)
+	stopCtx, cancel := context.WithTimeout(ctx, 35*time.Second)
 	defer cancel()
 	err = manager.StopContainerSession(stopCtx, session.ID())
 	require.NoError(t, err)
