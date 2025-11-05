@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -339,9 +340,9 @@ func runMonitor(ctx context.Context, manager *containersession.Manager, sharedDi
 
 			for _, entry := range entries {
 				name := entry.Name()
-				if name[:5] == "task-" {
+				if strings.HasPrefix(name, "task-") {
 					taskCount++
-				} else if name[:7] == "result-" {
+				} else if strings.HasPrefix(name, "result-") {
 					resultCount++
 				} else if name == "producer-done.flag" {
 					producerDone = true

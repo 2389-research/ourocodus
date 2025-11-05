@@ -4,6 +4,7 @@ package containersession_test
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -16,6 +17,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/errgroup"
 )
 
 // Test helpers
@@ -338,27 +340,33 @@ func TestIntegration_ConcurrentSessions(t *testing.T) {
 	const numSessions = 3
 	sessions := make([]*containersession.ContainerSession, numSessions)
 	sessionIDs := make([]string, numSessions)
-	var wg sync.WaitGroup
+	
+	// Use errgroup to properly handle errors from goroutines
+	g, gctx := errgroup.WithContext(ctx)
 
 	// Create and start sessions concurrently
 	for i := 0; i < numSessions; i++ {
-		wg.Add(1)
-		go func(index int) {
-			defer wg.Done()
+		index := i // Capture loop variable
+		g.Go(func() error {
+			session, err := manager.CreateContainerSession(gctx, "ubuntu:latest", []string{"sleep", "30"})
+			if err != nil {
+				return fmt.Errorf("failed to create session %d: %w", index, err)
+			}
 
-			session, err := manager.CreateContainerSession(ctx, "ubuntu:latest", []string{"sleep", "30"})
-			require.NoError(t, err)
-
-			err = manager.StartContainerSession(ctx, session.ID())
-			require.NoError(t, err)
+			err = manager.StartContainerSession(gctx, session.ID())
+			if err != nil {
+				return fmt.Errorf("failed to start session %d: %w", index, err)
+			}
 
 			sessions[index] = session
 			sessionIDs[index] = session.ID()
 			t.Logf("Session %d started: %s", index, session.ID())
-		}(i)
+			return nil
+		})
 	}
 
-	wg.Wait()
+	// Wait for all goroutines and check for errors
+	require.NoError(t, g.Wait(), "All sessions should be created and started successfully")
 	defer cleanupContainers(t, dockerClient, sessionIDs)
 
 	// Verify all sessions are running

@@ -104,7 +104,7 @@ jobs:
 
       - name: Verify example compiles
         run: |
-          ls -lh examples/containersession/${{ matrix.example}}/example
+          ls -lh examples/containersession/${{ matrix.example }}/example
 
       - name: Cleanup
         if: always()

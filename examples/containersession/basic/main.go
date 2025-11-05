@@ -76,7 +76,7 @@ func main() {
 	ctx := context.Background()
 
 	fmt.Println("=== ContainerSession Basic Example ===")
-	fmt.Println("This demonstrates the simplest container session lifecycle:\n")
+	fmt.Println("This demonstrates the simplest container session lifecycle:")
 
 	// 1. Create Docker client
 	fmt.Println("Step 1: Connecting to Docker...")
@@ -85,7 +85,7 @@ func main() {
 		log.Fatalf("Failed to connect to Docker: %v\n", err)
 	}
 	defer dockerClient.Close()
-	fmt.Println("✓ Connected to Docker\n")
+	fmt.Println("✓ Connected to Docker")
 
 	// 2. Create Manager
 	fmt.Println("Step 2: Creating Manager...")
@@ -97,7 +97,7 @@ func main() {
 		&StdLogger{Logger: log.New(os.Stdout, "[manager] ", 0)},
 		baseWorkspace,
 	)
-	fmt.Println("✓ Manager created\n")
+	fmt.Println("✓ Manager created")
 
 	// 3. Create container session
 	fmt.Println("Step 3: Creating container session...")
@@ -151,7 +151,7 @@ func main() {
 	if err := os.RemoveAll(session.WorkspacePath()); err != nil {
 		log.Printf("Warning: Failed to cleanup workspace: %v\n", err)
 	} else {
-		fmt.Println("✓ Workspace cleaned up\n")
+		fmt.Println("✓ Workspace cleaned up")
 	}
 
 	fmt.Println("=== Example Complete ===")

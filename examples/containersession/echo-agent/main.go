@@ -76,7 +76,7 @@ func main() {
 	ctx := context.Background()
 
 	fmt.Println("=== ContainerSession Echo Agent Example ===")
-	fmt.Println("This demonstrates bidirectional I/O with a container agent.\n")
+	fmt.Println("This demonstrates bidirectional I/O with a container agent.")
 
 	// 1. Connect to Docker
 	fmt.Println("Step 1: Connecting to Docker...")
@@ -85,7 +85,7 @@ func main() {
 		log.Fatalf("Failed to connect to Docker: %v\n", err)
 	}
 	defer dockerClient.Close()
-	fmt.Println("✓ Connected\n")
+	fmt.Println("✓ Connected")
 
 	// 2. Create Manager
 	fmt.Println("Step 2: Creating Manager...")
@@ -97,7 +97,7 @@ func main() {
 		&StdLogger{Logger: log.New(os.Stdout, "[manager] ", 0)},
 		baseWorkspace,
 	)
-	fmt.Println("✓ Manager created\n")
+	fmt.Println("✓ Manager created")
 
 	// 3. Copy echo script to workspace first
 	fmt.Println("Step 3: Creating session...")
@@ -128,7 +128,7 @@ func main() {
 	if err := manager.StartContainerSession(ctx, session.ID()); err != nil {
 		log.Fatalf("Failed to start session: %v\n", err)
 	}
-	fmt.Println("✓ Container running\n")
+	fmt.Println("✓ Container running")
 
 	// Give the agent a moment to start
 	time.Sleep(500 * time.Millisecond)
@@ -137,7 +137,7 @@ func main() {
 	fmt.Println("Step 6: Attaching to container I/O streams...")
 	// Note: In a production system, you'd use ContainerAttach from the Docker client
 	// For this example, we'll demonstrate the pattern conceptually
-	fmt.Println("✓ I/O streams attached (conceptual - see README for full implementation)\n")
+	fmt.Println("✓ I/O streams attached (conceptual - see README for full implementation)")
 
 	// 6. Simulate sending messages
 	fmt.Println("Step 7: Demonstrating message exchange pattern...")
@@ -168,7 +168,7 @@ func main() {
 	if err := manager.StopContainerSession(ctx, session.ID()); err != nil {
 		log.Printf("Warning: Failed to stop session: %v\n", err)
 	} else {
-		fmt.Println("✓ Container stopped\n")
+		fmt.Println("✓ Container stopped")
 	}
 
 	// 8. Cleanup
@@ -176,7 +176,7 @@ func main() {
 	if err := os.RemoveAll(session.WorkspacePath()); err != nil {
 		log.Printf("Warning: Failed to cleanup workspace: %v\n", err)
 	} else {
-		fmt.Println("✓ Workspace cleaned up\n")
+		fmt.Println("✓ Workspace cleaned up")
 	}
 
 	fmt.Println("=== Example Complete ===")
