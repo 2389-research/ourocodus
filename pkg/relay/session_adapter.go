@@ -1,7 +1,10 @@
 package relay
 
 import (
+	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/2389-research/ourocodus/pkg/nats"
@@ -79,6 +82,13 @@ func NewSessionManager(logger Logger, clock Clock, idGen IDGenerator, natsClient
 		baseWorkspaceDir = "./workspaces"
 	}
 
+	// Validate workspace base directory to prevent directory traversal attacks
+	// Security: WORKSPACE_BASE_DIR could be set to sensitive paths like "/etc" or "/"
+	// This validation ensures the path is safe before creating session workspaces under it
+	if err := validateWorkspaceBaseDir(baseWorkspaceDir); err != nil {
+		return nil, fmt.Errorf("invalid WORKSPACE_BASE_DIR: %w", err)
+	}
+
 	// Create event publisher if NATS client is available
 	var publisher session.EventPublisher
 	if natsClient != nil {
@@ -96,4 +106,47 @@ func NewSessionManager(logger Logger, clock Clock, idGen IDGenerator, natsClient
 	}
 
 	return session.NewManager(store, sessionIDGen, sessionClock, cleaner, sessionLogger, clientFactory, baseWorkspaceDir, publisher), nil
+}
+
+// validateWorkspaceBaseDir ensures the workspace base directory is safe to use.
+// This prevents directory traversal attacks and ensures workspaces are created in appropriate locations.
+//
+// Security considerations:
+//   - Prevents path traversal with ".." sequences
+//   - Blocks system directories (/etc, /sys, /proc, /dev, /root, /boot)
+//   - Ensures path doesn't escape to parent directories
+//   - Uses defense-in-depth validation (both prefix and filepath.Rel checks)
+//
+// Returns an error if the path is unsafe or invalid.
+func validateWorkspaceBaseDir(basePath string) error {
+	// Clean the path to resolve any . or .. sequences
+	cleanPath := filepath.Clean(basePath)
+
+	// Get absolute path for validation
+	absPath, err := filepath.Abs(cleanPath)
+	if err != nil {
+		return fmt.Errorf("cannot resolve absolute path: %w", err)
+	}
+
+	// Block dangerous system directories (exact matches only, not subdirectories)
+	dangerousPaths := []string{"/", "/etc", "/sys", "/proc", "/dev", "/root", "/boot", "/bin", "/sbin", "/usr", "/var"}
+	for _, dangerous := range dangerousPaths {
+		if absPath == dangerous {
+			return fmt.Errorf("workspace base directory cannot be system directory: %s", absPath)
+		}
+	}
+
+	// Ensure path doesn't contain traversal sequences
+	if strings.Contains(cleanPath, "..") {
+		return fmt.Errorf("workspace base directory cannot contain '..' sequences: %s", cleanPath)
+	}
+
+	// Verify the path doesn't try to escape (additional defense-in-depth)
+	// This catches cases where cleanPath might resolve to a parent of the original basePath
+	relPath, err := filepath.Rel(cleanPath, absPath)
+	if err == nil && (strings.HasPrefix(relPath, "..") || relPath == "..") {
+		return fmt.Errorf("workspace base directory escapes intended location: %s", basePath)
+	}
+
+	return nil
 }

@@ -41,3 +41,53 @@ type Clock interface {
 type Logger interface {
 	Printf(format string, v ...interface{})
 }
+
+// LogLevel defines verbosity levels for logging
+type LogLevel int
+
+const (
+	// LogLevelError logs only errors
+	LogLevelError LogLevel = iota
+	// LogLevelInfo logs errors and informational messages (default)
+	LogLevelInfo
+	// LogLevelDebug logs errors, info, and debug messages (verbose)
+	LogLevelDebug
+)
+
+// LeveledLogger wraps a Logger with level-aware logging
+type LeveledLogger struct {
+	logger Logger
+	level  LogLevel
+}
+
+// NewLeveledLogger creates a level-aware logger wrapper
+func NewLeveledLogger(logger Logger, level LogLevel) *LeveledLogger {
+	return &LeveledLogger{
+		logger: logger,
+		level:  level,
+	}
+}
+
+// Printf implements Logger interface (acts as Info)
+func (l *LeveledLogger) Printf(format string, v ...interface{}) {
+	l.Info(format, v...)
+}
+
+// Error logs error messages (always logged)
+func (l *LeveledLogger) Error(format string, v ...interface{}) {
+	l.logger.Printf("[ERROR] "+format, v...)
+}
+
+// Info logs informational messages (logged at Info and Debug levels)
+func (l *LeveledLogger) Info(format string, v ...interface{}) {
+	if l.level >= LogLevelInfo {
+		l.logger.Printf("[INFO] "+format, v...)
+	}
+}
+
+// Debug logs debug messages (only logged at Debug level)
+func (l *LeveledLogger) Debug(format string, v ...interface{}) {
+	if l.level >= LogLevelDebug {
+		l.logger.Printf("[DEBUG] "+format, v...)
+	}
+}

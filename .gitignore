@@ -71,3 +71,5 @@ node_modules/
 *.db
 *.sqlite
 *.sqlite3
+container-reuse
+nats-basic

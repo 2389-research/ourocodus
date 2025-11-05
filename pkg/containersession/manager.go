@@ -19,10 +19,18 @@ type Manager struct {
 	logger           Logger
 	baseWorkspaceDir string
 
+	// Timeout configuration (in seconds)
+	stopTimeout int
+
 	// In-memory session tracking
 	sessions map[string]*ContainerSession
 	mu       sync.RWMutex
 }
+
+const (
+	// DefaultStopTimeout is the default graceful shutdown timeout for containers (seconds)
+	DefaultStopTimeout = 30
+)
 
 // NewManager creates a container session manager with injected dependencies
 //
@@ -56,8 +64,19 @@ func NewManager(dockerClient DockerClient, idGen IDGenerator, clock Clock, logge
 		clock:            clock,
 		logger:           logger,
 		baseWorkspaceDir: baseWorkspaceDir,
+		stopTimeout:      DefaultStopTimeout,
 		sessions:         make(map[string]*ContainerSession),
 	}
+}
+
+// SetStopTimeout configures the graceful shutdown timeout for containers (in seconds).
+// This timeout is used when stopping containers to allow them to shut down gracefully
+// before being forcefully killed. Default is 30 seconds.
+func (m *Manager) SetStopTimeout(seconds int) {
+	if seconds < 1 {
+		seconds = DefaultStopTimeout
+	}
+	m.stopTimeout = seconds
 }
 
 // CreateContainerSession creates a new container session with workspace and Docker container
@@ -532,8 +551,8 @@ func (m *Manager) StopContainerSession(ctx context.Context, sessionID string) er
 		return nil
 	}
 
-	// Stop container with timeout (graceful shutdown)
-	timeout := 30 // seconds
+	// Stop container with configured timeout (graceful shutdown)
+	timeout := m.stopTimeout
 	err := m.dockerClient.ContainerStop(ctx, containerID, container.StopOptions{
 		Timeout: &timeout,
 	})
