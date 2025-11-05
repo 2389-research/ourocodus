@@ -1,0 +1,113 @@
+name: ContainerSession Tests
+
+on:
+  pull_request:
+    paths:
+      - 'pkg/containersession/**'
+      - 'examples/containersession/**'
+      - '.github/workflows/containersession-tests.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'pkg/containersession/**'
+      - 'examples/containersession/**'
+      - '.github/workflows/containersession-tests.yml'
+
+jobs:
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache: true
+
+      - name: Run unit tests
+        run: |
+          go test ./pkg/containersession -v -race -coverprofile=coverage.out
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v4
+        if: always()
+        with:
+          files: ./coverage.out
+          flags: containersession
+          fail_ci_if_error: false
+
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache: true
+
+      - name: Pull Ubuntu image
+        run: |
+          docker pull ubuntu:latest
+
+      - name: Verify Docker
+        run: |
+          docker version
+          docker ps
+
+      - name: Run integration tests
+        run: |
+          go test -tags=integration ./pkg/containersession -v -timeout=10m
+
+      - name: Cleanup containers
+        if: always()
+        run: |
+          # Stop and remove any test containers that might be left over
+          docker ps -aq --filter "label=com.ourocodus.containersession.managed-by=ourocodus-containersession" | xargs -r docker stop || true
+          docker ps -aq --filter "label=com.ourocodus.containersession.managed-by=ourocodus-containersession" | xargs -r docker rm || true
+
+  examples:
+    name: Example Tests
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        example: [basic, echo-agent, multi]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache: true
+
+      - name: Pull Ubuntu image
+        run: |
+          docker pull ubuntu:latest
+
+      - name: Build example
+        run: |
+          cd examples/containersession/${{ matrix.example }}
+          go build -o example main.go
+
+      - name: Verify example compiles
+        run: |
+          ls -lh examples/containersession/${{ matrix.example}}/example
+
+      - name: Cleanup
+        if: always()
+        run: |
+          docker ps -aq --filter "label=com.ourocodus.containersession.managed-by=ourocodus-containersession" | xargs -r docker stop || true
+          docker ps -aq --filter "label=com.ourocodus.containersession.managed-by=ourocodus-containersession" | xargs -r docker rm || true
