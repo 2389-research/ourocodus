@@ -31,6 +31,42 @@ func TestSpawnAgent_WithContainerLauncher(t *testing.T) {
 	// This will fail until we implement the integration
 }
 
+func TestTerminateAgent_WithContainerLauncher(t *testing.T) {
+	manager, _, _, _, _, _ := setupManagerWithMockFactory()
+	ctx := context.Background()
+
+	// Create session and spawn agent
+	ws := &mockWebSocket{}
+	userSession, err := manager.CreateUserSession(ctx, ws)
+	if err != nil {
+		t.Fatalf("CreateUserSession failed: %v", err)
+	}
+
+	err = manager.SpawnAgent(ctx, userSession.GetID(), "test-agent", "/tmp/test-workspaces/agent1")
+	if err != nil {
+		t.Fatalf("SpawnAgent failed: %v", err)
+	}
+
+	// Terminate agent - should stop container
+	err = manager.TerminateAgent(ctx, userSession.GetID(), "test-agent")
+	if err != nil {
+		t.Fatalf("TerminateAgent failed: %v", err)
+	}
+
+	// Verify launcher and handle were cleaned up
+	manager.launchersMu.RLock()
+	launcher := manager.launchers["test-agent"]
+	handle := manager.handles["test-agent"]
+	manager.launchersMu.RUnlock()
+
+	if launcher != nil {
+		t.Error("Expected launcher to be removed from map")
+	}
+	if handle != nil {
+		t.Error("Expected handle to be removed from map")
+	}
+}
+
 func setupManagerWithMockFactory() (*Manager, *mockIDGenerator, *mockClock, *mockCleaner, *mockLogger, *mockClientFactory) {
 	// Same as setupManager but exposed for this test
 	store := NewMemoryStore()

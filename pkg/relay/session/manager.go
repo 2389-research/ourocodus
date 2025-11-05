@@ -386,6 +386,25 @@ func (m *Manager) TerminateAgent(ctx context.Context, userSessionID, agentID str
 
 	m.logger.Printf("Terminating agent: session=%s agentID=%s", userSessionID, agentID)
 
+	// NEW: Stop container if launcher exists
+	m.launchersMu.RLock()
+	launcher := m.launchers[agentID]
+	handle := m.handles[agentID]
+	m.launchersMu.RUnlock()
+
+	if launcher != nil && handle != nil {
+		if err := launcher.Stop(ctx, handle); err != nil {
+			m.logger.Printf("WARN: Failed to stop container for agent %s: %v", agentID, err)
+			// Continue cleanup despite error
+		}
+	}
+
+	// NEW: Remove from launcher maps
+	m.launchersMu.Lock()
+	delete(m.launchers, agentID)
+	delete(m.handles, agentID)
+	m.launchersMu.Unlock()
+
 	// Close ACP client if present (with double-close protection)
 	agent.mu.Lock()
 	acpClient := agent.acpClient
