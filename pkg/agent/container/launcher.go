@@ -241,21 +241,22 @@ func (l *AgentContainerLauncher) Stop(ctx context.Context, agentID string) error
 	}
 
 	// Stop container (idempotent)
+	// Use context.Background() to ensure cleanup completes even if ctx is cancelled
 	if handle.containerSess != nil {
-		if err := l.containerMgr.StopContainerSession(ctx, handle.containerSess.ID()); err != nil {
+		if err := l.containerMgr.StopContainerSession(context.Background(), handle.containerSess.ID()); err != nil {
 			return fmt.Errorf("failed to stop container: %w", err)
 		}
 	}
 
 	// Remove worktree (idempotent)
 	if handle.worktree != nil {
-		if err := l.worktreeMgr.Remove(ctx, handle.worktree.Path()); err != nil {
+		if err := l.worktreeMgr.Remove(context.Background(), handle.worktree.Path()); err != nil {
 			return fmt.Errorf("failed to remove worktree: %w", err)
 		}
 	}
 
 	// Cleanup credentials (idempotent)
-	if err := l.credMounter.Cleanup(ctx, agentID); err != nil {
+	if err := l.credMounter.Cleanup(context.Background(), agentID); err != nil {
 		return fmt.Errorf("failed to cleanup credentials: %w", err)
 	}
 
