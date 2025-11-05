@@ -114,7 +114,8 @@ func (l *AgentContainerLauncher) Spawn(ctx context.Context, config SpawnConfig) 
 	cleanupWorktree := true
 	defer func() {
 		if cleanupWorktree {
-			_ = l.worktreeMgr.Remove(ctx, wt.Path())
+			// Use context.Background() for cleanup to ensure it completes even if ctx is cancelled
+			_ = l.worktreeMgr.Remove(context.Background(), wt.Path())
 		}
 	}()
 
@@ -128,7 +129,8 @@ func (l *AgentContainerLauncher) Spawn(ctx context.Context, config SpawnConfig) 
 	cleanupCreds := true
 	defer func() {
 		if cleanupCreds {
-			_ = l.credMounter.Cleanup(ctx, config.AgentID)
+			// Use context.Background() for cleanup to ensure it completes even if ctx is cancelled
+			_ = l.credMounter.Cleanup(context.Background(), config.AgentID)
 		}
 	}()
 
@@ -191,23 +193,27 @@ func (l *AgentContainerLauncher) Spawn(ctx context.Context, config SpawnConfig) 
 func (l *AgentContainerLauncher) createContainerWithMounts(
 	ctx context.Context,
 	config SpawnConfig,
-	_ *worktree.AgentWorktree,
-	_ *CredentialFiles,
+	wt *worktree.AgentWorktree,
+	credFiles *CredentialFiles,
 ) (*containersession.ContainerSession, error) {
-	// TODO: This needs to be enhanced to support custom mounts
-	// For now, just create a standard container session
-	//
-	// The full implementation would:
-	// 1. Build container config with custom mounts
-	// 2. Create container using Docker API
-	// 3. Wrap in ContainerSession
-	//
-	// Since containersession.Manager doesn't expose this capability yet,
-	// we'll need to either extend it or duplicate some of its logic.
+	// Get credential mounts
+	credMounts := l.credMounter.GetMounts(credFiles)
 
-	// Create a basic container session first
-	// This will need to be replaced with custom mount logic
-	sess, err := l.containerMgr.CreateContainerSession(ctx, config.ImageName, config.Command)
+	// Build labels for container
+	labels := map[string]string{
+		"agent-id": config.AgentID,
+	}
+
+	// Create container session with custom configuration
+	// Pass the worktree path as WorkspaceDir so the Manager uses it instead of creating its own
+	sess, err := l.containerMgr.CreateContainerSessionWithConfig(ctx, containersession.CreateConfig{
+		ImageName:    config.ImageName,
+		Command:      config.Command,
+		WorkspaceDir: wt.Path(), // Use the AgentWorktree path
+		CustomMounts: credMounts, // Add credential mounts
+		Env:          config.Env,
+		Labels:       labels,
+	})
 	if err != nil {
 		return nil, err
 	}

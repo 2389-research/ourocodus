@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"path/filepath"
 	"sync"
 	"time"
 
 	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/pkg/stdcopy"
 )
 
@@ -151,6 +153,139 @@ func (m *Manager) CreateContainerSession(ctx context.Context, imageName string, 
 
 	session.SetContainerID(resp.ID)
 	m.logger.Printf("Container session created: id=%s container=%s state=PENDING", sessionID, resp.ID)
+
+	return session, nil
+}
+
+// CreateContainerSessionWithConfig creates a new container session with custom configuration.
+// This method provides more control than CreateContainerSession, allowing custom mounts,
+// environment variables, and workspace paths.
+//
+// The method automatically:
+//   - Generates a unique session ID
+//   - Adds default session labels (plus any custom labels from config)
+//   - Creates or validates the workspace directory
+//   - Adds the workspace mount (unless WorkspaceDir is empty)
+//   - Merges custom mounts with the workspace mount
+//   - Creates and tracks the container session
+//
+// Use this method when you need to:
+//   - Mount additional volumes (credentials, config files, etc.)
+//   - Use a pre-existing workspace directory
+//   - Set custom environment variables
+//   - Add custom labels beyond the defaults
+//
+// For simple cases, use CreateContainerSession instead.
+func (m *Manager) CreateContainerSessionWithConfig(ctx context.Context, config CreateConfig) (*ContainerSession, error) {
+	// Validate required fields
+	if config.ImageName == "" {
+		return nil, fmt.Errorf("image name is required")
+	}
+	if len(config.Command) == 0 {
+		return nil, fmt.Errorf("command is required")
+	}
+
+	// Generate unique session ID
+	sessionID := m.idGen.Generate()
+	now := m.clock.Now()
+
+	// Check for existing container with this session ID (for reuse scenarios)
+	existingID, state, err := m.findContainer(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check for existing container: %w", err)
+	}
+
+	// If container exists, handle it based on state
+	if existingID != "" {
+		return m.handleExistingContainer(ctx, existingID, state, sessionID)
+	}
+
+	// No existing container - proceed with creation
+	// Build labels (merge defaults with custom labels)
+	labels := BuildLabels(sessionID, now)
+	for k, v := range config.Labels {
+		labels[k] = v
+	}
+
+	// Determine workspace path
+	var workspacePath string
+	if config.WorkspaceDir != "" {
+		// Use provided workspace path
+		// Validation is skipped for pre-existing workspace directories
+		// (e.g., git worktrees managed by external systems)
+		// Resolve symlinks for Docker compatibility (e.g., macOS /tmp -> /private/tmp)
+		var err error
+		workspacePath, err = filepath.EvalSymlinks(config.WorkspaceDir)
+		if err != nil {
+			// If symlink resolution fails, use the original path
+			workspacePath = config.WorkspaceDir
+		}
+	} else {
+		// Create default workspace
+		workspacePath, err = PrepareWorkspace(m.baseWorkspaceDir, sessionID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to prepare workspace: %w", err)
+		}
+	}
+
+	// Create session in PENDING state
+	session := NewContainerSession(sessionID, workspacePath, labels, now)
+
+	// Store session (with TOCTOU prevention)
+	m.mu.Lock()
+	if _, exists := m.sessions[sessionID]; exists {
+		m.mu.Unlock()
+		return nil, fmt.Errorf("%w: %s", ErrSessionAlreadyExists, sessionID)
+	}
+	m.sessions[sessionID] = session
+	m.mu.Unlock()
+
+	// Build container config
+	containerConfig := &container.Config{
+		Image:  config.ImageName,
+		Cmd:    config.Command,
+		Labels: labels,
+		Env:    config.Env,
+	}
+
+	// Build host config with mounts
+	mounts := []mount.Mount{
+		{
+			Type:   mount.TypeBind,
+			Source: workspacePath,
+			Target: "/workspace",
+		},
+	}
+	// Add custom mounts
+	mounts = append(mounts, config.CustomMounts...)
+
+	hostConfig := &container.HostConfig{
+		Mounts: mounts,
+	}
+
+	resp, err := m.dockerClient.ContainerCreate(ctx, containerConfig, hostConfig, nil, nil, "")
+	if err != nil {
+		// Remove session from map on failure
+		m.mu.Lock()
+		delete(m.sessions, sessionID)
+		m.mu.Unlock()
+
+		// Clean up workspace directory if we created it
+		if config.WorkspaceDir == "" {
+			if cleanupErr := CleanupWorkspace(workspacePath, m.logger); cleanupErr != nil {
+				m.logger.Printf("Workspace cleanup failed: session=%s path=%s error=%v",
+					sessionID, workspacePath, cleanupErr)
+			}
+		}
+
+		session.SetError(err.Error())
+		m.logger.Printf("Container creation failed: session=%s error=%v", sessionID, err)
+		return nil, fmt.Errorf("failed to create container: %w", err)
+	}
+
+	session.SetContainerID(resp.ID)
+	m.logger.Printf("Container session created: id=%s container=%s state=PENDING mounts=%d",
+		sessionID, resp.ID, len(mounts))
 
 	return session, nil
 }

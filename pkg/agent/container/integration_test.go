@@ -46,7 +46,15 @@ func (l *testLogger) Printf(format string, v ...interface{}) {
 func setupTestRepo(t *testing.T) string {
 	t.Helper()
 
-	tmpDir, err := os.MkdirTemp("", "agent-container-integration-*")
+	// Create temp directory under $HOME for Colima compatibility
+	// Colima only mounts $HOME by default, not /var/folders
+	homeDir, err := os.UserHomeDir()
+	require.NoError(t, err)
+	baseTmpDir := filepath.Join(homeDir, ".tmp-test")
+	err = os.MkdirAll(baseTmpDir, 0o750)
+	require.NoError(t, err)
+
+	tmpDir, err := os.MkdirTemp(baseTmpDir, "agent-container-integration-*")
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
