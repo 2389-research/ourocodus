@@ -117,7 +117,7 @@ func main() {
 		log.Fatalf("Failed to read script: %v\n", err)
 	}
 
-	if err := os.WriteFile(scriptDst, srcData, 0755); err != nil {
+	if err := os.WriteFile(scriptDst, srcData, 0o755); err != nil {
 		log.Fatalf("Failed to copy script: %v\n", err)
 	}
 	fmt.Printf("✓ Script copied to %s\n\n", scriptDst)

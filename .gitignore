@@ -17,6 +17,10 @@ examples/demo-container-reuse
 examples/demo-nats-basic
 examples/demo-workspaces/
 
+# Example binaries built in root from examples/
+/basic
+/multi
+
 # Old nested demo structure (deprecated)
 examples/**/containersession-demo
 examples/**/sessions-demo
