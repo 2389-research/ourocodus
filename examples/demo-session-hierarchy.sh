@@ -24,13 +24,22 @@ echo
 echo -e "${BLUE}Checking Docker...${NC}"
 if ! command -v docker &> /dev/null; then
     echo -e "${RED}✗ Docker not found${NC}"
-    echo "Please install Docker Desktop: https://www.docker.com/products/docker-desktop"
+    echo "Please install Docker Desktop or Colima"
     exit 1
+fi
+
+# Auto-detect Colima and set DOCKER_HOST if needed
+if docker context ls 2>/dev/null | grep -q 'colima \*'; then
+    COLIMA_SOCKET=$(docker context inspect colima -f '{{.Endpoints.docker.Host}}' 2>/dev/null || echo "")
+    if [ -n "$COLIMA_SOCKET" ] && [ -z "$DOCKER_HOST" ]; then
+        export DOCKER_HOST="$COLIMA_SOCKET"
+        echo -e "${GREEN}✓ Detected Colima, using $DOCKER_HOST${NC}"
+    fi
 fi
 
 if ! docker info &> /dev/null; then
     echo -e "${RED}✗ Docker daemon not running${NC}"
-    echo "Please start Docker Desktop"
+    echo "Please start Docker Desktop or Colima (colima start)"
     exit 1
 fi
 echo -e "${GREEN}✓ Docker is ready${NC}"
