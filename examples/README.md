@@ -4,7 +4,7 @@ Interactive demonstrations of Ourocodus features. All demos are self-contained a
 
 ## Available Demos
 
-### 1. Container Reuse Demo
+### 1. Container Reuse Demo (START HERE)
 
 **What it shows:** Phase 2 container management - intelligent reuse and cross-process attachment
 
@@ -46,14 +46,40 @@ cd examples
 
 ---
 
+### 3. NATS Basic Messaging Demo
+
+**What it shows:** Basic NATS publish/subscribe messaging patterns
+
+**Run it:**
+```bash
+cd examples
+./demo-nats-basic.sh
+```
+
+**Prerequisites:** NATS server running on localhost:4222
+```bash
+docker run -d -p 4222:4222 nats:latest
+```
+
+**Features demonstrated:**
+- Simple publish to NATS subjects
+- Subscribe to receive messages
+- Message delivery with correlation IDs
+- Basic NATS client usage
+
+**Use case:** Understanding NATS messaging fundamentals used for agent coordination.
+
+---
+
 ## Quick Start
 
 Each demo is self-contained with setup, execution, and cleanup:
 
 ```bash
-# Run any demo (includes setup + execution)
-./demo-container-reuse.sh
-./demo-session-hierarchy.sh
+# Run demos in recommended order
+./demo-container-reuse.sh       # Start here
+./demo-session-hierarchy.sh     # Then this
+./demo-nats-basic.sh             # NATS messaging
 
 # Manual cleanup if needed
 ./demo-container-reuse-reset.sh
@@ -71,13 +97,15 @@ Each demo is self-contained with setup, execution, and cleanup:
 Each demo consists of:
 - `demo-{name}.sh` - Main script (setup + run)
 - `demo-{name}.go` - Demo implementation
-- `demo-{name}-reset.sh` - Cleanup script
+- `demo-{name}-reset.sh` - Cleanup script (where applicable)
 
 All demos:
+- Are self-contained at top level (no nested directories)
 - Build binaries on first run
-- Clean up containers automatically
+- Clean up resources automatically
 - Use color-coded output for clarity
 - Support pause-driven presentation flow
+- Have explicit names describing what they demonstrate
 
 ## Troubleshooting
 
