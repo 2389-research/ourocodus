@@ -12,10 +12,14 @@ bin/
 /demo
 /interactive
 
-# Example binaries
+# Example binaries (top-level demos)
+examples/demo-container-reuse
+examples/demo-session-hierarchy
+examples/demo-workspaces/
+
+# Old nested demo structure (deprecated)
 examples/**/containersession-demo
 examples/**/sessions-demo
-examples/**/demo-workspaces/
 
 # Test binary, built with `go test -c`
 *.test
