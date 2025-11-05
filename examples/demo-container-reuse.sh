@@ -132,8 +132,12 @@ cleanup() {
 
 trap cleanup EXIT
 
-# Run the demo
-./"${BINARY_NAME}"
+# Run the demo (pass DOCKER_HOST to binary)
+if [ -n "$DOCKER_HOST" ]; then
+    DOCKER_HOST="$DOCKER_HOST" ./"${BINARY_NAME}"
+else
+    ./"${BINARY_NAME}"
+fi
 
 echo
 echo "==========================================="

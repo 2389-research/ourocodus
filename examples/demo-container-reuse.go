@@ -99,21 +99,29 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Run demos
+	// Run demos - stop on first failure
 	if err := runScenario1(ctx, dockerClient, baseWorkspace); err != nil {
 		printError(fmt.Sprintf("Scenario 1 failed: %v", err))
+		printError("Demo stopped due to failure")
+		os.Exit(1)
 	}
 
 	if err := runScenario2(ctx, dockerClient, baseWorkspace); err != nil {
 		printError(fmt.Sprintf("Scenario 2 failed: %v", err))
+		printError("Demo stopped due to failure")
+		os.Exit(1)
 	}
 
 	if err := runScenario3(ctx, dockerClient, baseWorkspace); err != nil {
 		printError(fmt.Sprintf("Scenario 3 failed: %v", err))
+		printError("Demo stopped due to failure")
+		os.Exit(1)
 	}
 
 	if err := runScenario4(ctx, dockerClient, baseWorkspace); err != nil {
 		printError(fmt.Sprintf("Scenario 4 failed: %v", err))
+		printError("Demo stopped due to failure")
+		os.Exit(1)
 	}
 
 	// Cleanup
