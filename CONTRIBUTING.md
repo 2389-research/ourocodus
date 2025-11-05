@@ -345,8 +345,18 @@ Removes build artifacts.
    make test
    ```
 
-5. **Push and create a PR**
-6. **Address review feedback**
+5. **Verify documentation** (see [DOCUMENTATION.md](DOCUMENTATION.md) for full guide):
+
+   - [ ] **Public API Changes**: Exported functions/types have godoc comments
+   - [ ] **User-Facing Changes**: README.md features/usage sections updated
+   - [ ] **Security Changes**: Threat model documented in docs/SECURITY.md
+   - [ ] **Examples Updated**: Behavior changes reflected in examples/
+   - [ ] **Architecture Changes**: docs/ARCHITECTURE.md updated if structure changed
+   - [ ] **Configuration Changes**: README.md environment variables updated
+   - [ ] **Breaking Changes**: Migration guide added to PR description
+
+6. **Push and create a PR**
+7. **Address review feedback**
 
 ## Project Structure
 

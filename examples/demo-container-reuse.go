@@ -365,6 +365,14 @@ func runScenario3(ctx context.Context, dockerClient *client.Client, baseWorkspac
 	printSuccess("Process B: New Manager created")
 
 	printStep(4, "Process B: Attach to existing session using AttachContainerSession")
+	// SECURITY: AttachContainerSession validates the container's workspace mount
+	// before allowing attachment. This prevents a malicious actor from creating
+	// a container with our session labels but mounting an arbitrary host path
+	// (e.g., /etc, /root) at /workspace.
+	//
+	// The manager inspects the container and calls ValidateWorkspacePath() to ensure
+	// the workspace mount is under the configured base directory. If validation fails,
+	// AttachContainerSession returns ErrInvalidWorkspacePath.
 	sessionB, err := managerB.AttachContainerSession(ctx, persistedSessionID)
 	if err != nil {
 		return fmt.Errorf("Process B failed to attach: %w", err)
