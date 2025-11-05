@@ -1,16 +1,15 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"fmt"
-	"io"
 	"log"
 	"os"
 	"path/filepath"
 	"time"
 
 	"github.com/2389-research/ourocodus/pkg/containersession"
+	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
 	"github.com/google/uuid"
 )
@@ -171,8 +170,16 @@ func main() {
 		fmt.Println("✓ Container stopped")
 	}
 
-	// 8. Cleanup
-	fmt.Println("Step 9: Cleaning up workspace...")
+	// 8. Remove the container
+	fmt.Println("Step 9: Removing container...")
+	if err := dockerClient.ContainerRemove(ctx, session.ContainerID(), container.RemoveOptions{}); err != nil {
+		log.Printf("Warning: Failed to remove container: %v\n", err)
+	} else {
+		fmt.Println("✓ Container removed")
+	}
+
+	// 9. Cleanup workspace
+	fmt.Println("Step 10: Cleaning up workspace...")
 	if err := os.RemoveAll(session.WorkspacePath()); err != nil {
 		log.Printf("Warning: Failed to cleanup workspace: %v\n", err)
 	} else {
@@ -199,39 +206,4 @@ func toUpperSimple(s string) string {
 		}
 	}
 	return string(result)
-}
-
-// demonstrateRealIO shows how to actually use container I/O (not called in this example)
-func demonstrateRealIO(ctx context.Context, dockerClient *client.Client, containerID string) error {
-	// This is commented out but shows the real pattern
-	//
-	// resp, err := dockerClient.ContainerAttach(ctx, containerID, types.ContainerAttachOptions{
-	// 	Stream: true,
-	// 	Stdin:  true,
-	// 	Stdout: true,
-	// 	Stderr: true,
-	// })
-	// if err != nil {
-	// 	return err
-	// }
-	// defer resp.Close()
-	//
-	// // Write to stdin
-	// go func() {
-	// 	writer := resp.Conn
-	// 	fmt.Fprintln(writer, "hello world")
-	// 	fmt.Fprintln(writer, "exit")
-	// }()
-	//
-	// // Read from stdout
-	// scanner := bufio.NewScanner(resp.Reader)
-	// for scanner.Scan() {
-	// 	fmt.Println("Agent:", scanner.Text())
-	// }
-
-	// Placeholder to avoid unused import errors
-	_ = bufio.NewScanner(nil)
-	_ = io.Discard
-
-	return nil
 }

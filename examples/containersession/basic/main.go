@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/2389-research/ourocodus/pkg/containersession"
+	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
 	"github.com/google/uuid"
 )
@@ -36,7 +37,9 @@ func (l *StdLogger) Printf(format string, v ...interface{}) {
 	l.Logger.Printf(format, v...)
 }
 
-// createDockerClient tries to connect to Docker: Colima first, then Docker Desktop
+// createDockerClient tries to connect to Docker: Colima first, then Docker Desktop.
+// Note: This function assumes a Unix-like environment (macOS/Linux) and will not
+// work on Windows without modification to use named pipes.
 func createDockerClient() (*client.Client, error) {
 	// Try Colima socket first
 	colimaSocket := filepath.Join(os.Getenv("HOME"), ".colima", "default", "docker.sock")
@@ -146,8 +149,16 @@ func main() {
 	fmt.Printf("✓ Container stopped\n")
 	fmt.Printf("  State: %s\n\n", session.State())
 
-	// 8. Cleanup workspace
-	fmt.Println("Step 8: Cleaning up workspace...")
+	// 8. Remove the container
+	fmt.Println("Step 8: Removing container...")
+	if err := dockerClient.ContainerRemove(ctx, session.ContainerID(), container.RemoveOptions{}); err != nil {
+		log.Printf("Warning: Failed to remove container: %v\n", err)
+	} else {
+		fmt.Println("✓ Container removed")
+	}
+
+	// 9. Cleanup workspace
+	fmt.Println("Step 9: Cleaning up workspace...")
 	if err := os.RemoveAll(session.WorkspacePath()); err != nil {
 		log.Printf("Warning: Failed to cleanup workspace: %v\n", err)
 	} else {

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/2389-research/ourocodus/pkg/containersession"
+	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
 	"github.com/google/uuid"
 )
@@ -116,21 +117,21 @@ func main() {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		runProducer(ctx, manager, sharedDir)
+		runProducer(ctx, dockerClient, manager, sharedDir)
 	}()
 
 	// Session B: Consumer (reads and processes tasks)
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		runConsumer(ctx, manager, sharedDir)
+		runConsumer(ctx, dockerClient, manager, sharedDir)
 	}()
 
 	// Session C: Monitor (watches progress)
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		runMonitor(ctx, manager, sharedDir)
+		runMonitor(ctx, dockerClient, manager, sharedDir)
 	}()
 
 	fmt.Println("✓ All sessions launched")
@@ -153,7 +154,7 @@ func main() {
 }
 
 // runProducer creates tasks for the consumer to process
-func runProducer(ctx context.Context, manager *containersession.Manager, sharedDir string) {
+func runProducer(ctx context.Context, dockerClient *client.Client, manager *containersession.Manager, sharedDir string) {
 	fmt.Println("[Producer] Starting...")
 
 	// Create session
@@ -207,10 +208,17 @@ func runProducer(ctx context.Context, manager *containersession.Manager, sharedD
 		log.Printf("[Producer] Failed to stop session: %v\n", err)
 	}
 	fmt.Println("[Producer] Session stopped")
+
+	// Remove container
+	if err := dockerClient.ContainerRemove(ctx, session.ContainerID(), container.RemoveOptions{}); err != nil {
+		log.Printf("[Producer] Warning: Failed to remove container: %v\n", err)
+	} else {
+		fmt.Println("[Producer] Container removed")
+	}
 }
 
 // runConsumer processes tasks created by the producer
-func runConsumer(ctx context.Context, manager *containersession.Manager, sharedDir string) {
+func runConsumer(ctx context.Context, dockerClient *client.Client, manager *containersession.Manager, sharedDir string) {
 	fmt.Println("[Consumer] Starting...")
 
 	// Create session
@@ -289,10 +297,17 @@ cleanup:
 		log.Printf("[Consumer] Failed to stop session: %v\n", err)
 	}
 	fmt.Println("[Consumer] Session stopped")
+
+	// Remove container
+	if err := dockerClient.ContainerRemove(ctx, session.ContainerID(), container.RemoveOptions{}); err != nil {
+		log.Printf("[Consumer] Warning: Failed to remove container: %v\n", err)
+	} else {
+		fmt.Println("[Consumer] Container removed")
+	}
 }
 
 // runMonitor watches the shared workspace and reports progress
-func runMonitor(ctx context.Context, manager *containersession.Manager, sharedDir string) {
+func runMonitor(ctx context.Context, dockerClient *client.Client, manager *containersession.Manager, sharedDir string) {
 	fmt.Println("[Monitor] Starting...")
 
 	// Create session
@@ -376,6 +391,13 @@ cleanup:
 		log.Printf("[Monitor] Failed to stop session: %v\n", err)
 	}
 	fmt.Println("[Monitor] Session stopped")
+
+	// Remove container
+	if err := dockerClient.ContainerRemove(ctx, session.ContainerID(), container.RemoveOptions{}); err != nil {
+		log.Printf("[Monitor] Warning: Failed to remove container: %v\n", err)
+	} else {
+		fmt.Println("[Monitor] Container removed")
+	}
 }
 
 // showWorkspaceContents displays files in the shared workspace
