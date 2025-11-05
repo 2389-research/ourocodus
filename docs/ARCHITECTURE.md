@@ -2,20 +2,34 @@
 
 ## Phase 1: Proof of Concept (Current)
 
-**Goal:** Validate multi-agent communication and concurrent work
+**Goal:** Validate multi-agent communication and concurrent work with proper isolation
 
 ```mermaid
 flowchart TD
     Client["WebSocket Client<br/>(PWA planned, currently demos)<br/>scripts/demo/, scripts/interactive/"]
-    Relay["Relay (Go)<br/>- UserSession (container)<br/>- Routes messages<br/>- Spawns agent processes<br/>- In-memory state"]
-    AgentA["Agent: agent-1<br/>Claude Code ACP<br/>(process)"]
-    AgentB["Agent: agent-2<br/>Claude Code ACP<br/>(process)"]
-    AgentC["Agent: agent-N<br/>Claude Code ACP<br/>(process)"]
+    Relay["Relay (Go)<br/>- UserSession (WebSocket)<br/>- Routes messages<br/>- Spawns AgentSessions<br/>- In-memory state"]
+    Launcher["AgentContainerLauncher<br/>- Orchestrates isolation layers<br/>- Manages lifecycle"]
+
+    subgraph "AgentSession: coder-1"
+        WT1["AgentWorktree<br/>Branch: agent-coder-1-{timestamp}<br/>Path: /workspaces/agent-coder-1/"]
+        Cred1["Credentials (read-only)<br/>SSH: /root/.ssh/id_ed25519<br/>Token: /root/.github-token"]
+        Container1["ContainerSession<br/>Docker container<br/>Workspace: /workspace"]
+    end
+
+    subgraph "AgentSession: analyzer"
+        WT2["AgentWorktree<br/>Branch: agent-analyzer-{timestamp}<br/>Path: /workspaces/agent-analyzer/"]
+        Cred2["Credentials (read-only)<br/>SSH: /root/.ssh/id_ed25519<br/>Token: /root/.github-token"]
+        Container2["ContainerSession<br/>Docker container<br/>Workspace: /workspace"]
+    end
 
     Client -->|"WebSocket"| Relay
-    Relay -->|"stdio"| AgentA
-    Relay -->|"stdio"| AgentB
-    Relay -->|"stdio (0-N)"| AgentC
+    Relay -->|"Spawn/Stop"| Launcher
+    Launcher -->|"Manages"| WT1
+    Launcher -->|"Manages"| Cred1
+    Launcher -->|"Manages"| Container1
+    Launcher -->|"Manages"| WT2
+    Launcher -->|"Manages"| Cred2
+    Launcher -->|"Manages"| Container2
 ```
 
 **Example:** User spawns agents with identifiers: "coder-1", "analyzer", "task-bot"
@@ -27,35 +41,81 @@ _(Users can spawn 1-N agents with any identifiers they choose)_
 - Agent failure doesn't terminate session
 - Agents can be spawned/terminated independently
 
+**Isolation Architecture:**
+
+Each AgentSession has three isolation layers orchestrated by `AgentContainerLauncher`:
+
+1. **Git Isolation (AgentWorktree)**
+   - Unique git worktree per agent
+   - Separate branch: `agent-{agentID}-{timestamp}`
+   - Path: `/workspaces/agent-{agentID}/`
+   - Prevents git conflicts between concurrent agents
+   - Managed by `pkg/worktree.AgentWorktreeManager`
+
+2. **Filesystem & Process Isolation (ContainerSession)**
+   - Docker container per agent
+   - Isolated process namespace
+   - Workspace mounted at `/workspace`
+   - Resource limits (CPU, memory)
+   - Managed by `pkg/containersession.Manager`
+
+3. **Credential Isolation (AgentCredentialMounter)**
+   - Read-only credential mounts
+   - SSH key at `/root/.ssh/id_ed25519`
+   - GitHub token at `/root/.github-token`
+   - Separate credentials per agent
+   - Automatic cleanup on stop
+   - Managed by `pkg/agent/container.AgentCredentialMounter`
+
+**Package Organization:**
+- `pkg/worktree` - Git worktree management
+- `pkg/containersession` - Docker container lifecycle
+- `pkg/agent/container` - Agent-specific orchestration layer
+
 **Operational Requirements:**
 
-- **Workspace Paths**: Each agent requires its own workspace directory path
-  - Paths must be under the configured base workspace directory
-  - Paths are constrained for security (no directory traversal attacks)
-  - Example: `workspaces/session-123/coder-1`, `workspaces/session-123/analyzer`
+- **Workspace Paths**: Each agent gets its own worktree
+  - Created via `git worktree add -b agent-{id}-{timestamp}`
+  - Base directory configurable (default: `./workspaces`)
+  - Paths validated for security (no directory traversal)
+  - Example: `/workspaces/agent-coder-1/`, `/workspaces/agent-analyzer/`
+
+- **Credentials**: Each agent gets isolated credentials
+  - Created in `/credentials/agent-{id}/`
+  - Mounted read-only into container
+  - Automatic cleanup on agent stop
 
 - **API Key**: `ANTHROPIC_API_KEY` environment variable must be set
   - Required for spawning Claude Code ACP processes
   - Shared across all agents in the relay process
   - Can be overridden via `OUROCODUS_ACP_BINARY` for testing (see `pkg/relay/session/client_factory.go`)
 
+- **Docker**: Docker daemon must be running
+  - Required for container isolation
+  - Agents run in containers (not bare processes)
+  - Supports Colima or Docker Desktop on macOS
+
 **Key Characteristics:**
 
 - No NATS (direct WebSocket + stdio)
 - No Coordinator (user drives manually)
-- Processes not containers
+- **Containers for agent isolation** (Docker-based)
+- **Git worktrees for workspace isolation** (concurrent work without conflicts)
+- **Read-only credential mounts** (secure credential access)
 - In-memory session state
 - Variable agent count (0-N agents per session)
 - Dynamic agent identifiers (user-chosen, no predefined types)
 - Independent agent lifecycles (agents can fail without affecting session)
+- Automatic resource cleanup (containers, worktrees, credentials)
 
 **Limitations:**
 
-- Not fault-tolerant (process crash = lost state)
-- Not scalable (in-memory only)
-- No workflow automation
-- Manual git operations
-- No approval gates
+- Not fault-tolerant (relay crash = lost state, but containers can be reattached)
+- Not scalable (in-memory session tracking, single relay process)
+- No workflow automation (user manually orchestrates agents)
+- Manual git merge operations (branches are isolated but not auto-merged)
+- No approval gates (all agent actions are immediate)
+- Container attach not yet implemented (Phase 3 feature)
 
 ---
 
