@@ -409,7 +409,7 @@ func TestIntegration_WorkspacePersistence(t *testing.T) {
 
 	testFile := filepath.Join(session1.WorkspacePath(), "test-data.txt")
 	testContent := "persistent data test"
-	err = os.WriteFile(testFile, []byte(testContent), 0644)
+	err = os.WriteFile(testFile, []byte(testContent), 0o644)
 	require.NoError(t, err)
 
 	err = manager.StopContainerSession(ctx, session1.ID())

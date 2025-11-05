@@ -126,7 +126,7 @@ func main() {
 	fmt.Println("Step 5: Writing data to workspace...")
 	testFile := filepath.Join(session.WorkspacePath(), "example.txt")
 	testContent := "Hello from containersession basic example!"
-	if err := os.WriteFile(testFile, []byte(testContent), 0644); err != nil {
+	if err := os.WriteFile(testFile, []byte(testContent), 0o644); err != nil {
 		log.Fatalf("Failed to write to workspace: %v\n", err)
 	}
 	fmt.Printf("✓ Wrote file: %s\n", testFile)

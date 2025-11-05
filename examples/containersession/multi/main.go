@@ -91,7 +91,7 @@ func main() {
 	// 2. Create shared workspace base
 	baseWorkspace := "./workspaces/multi-session"
 	sharedDir := filepath.Join(baseWorkspace, "shared")
-	if err := os.MkdirAll(sharedDir, 0755); err != nil {
+	if err := os.MkdirAll(sharedDir, 0o755); err != nil {
 		log.Fatalf("Failed to create shared directory: %v\n", err)
 	}
 	defer os.RemoveAll(baseWorkspace)
@@ -187,7 +187,7 @@ func runProducer(ctx context.Context, dockerClient *client.Client, manager *cont
 
 	for i, task := range tasks {
 		taskFile := filepath.Join(sharedDir, fmt.Sprintf("task-%d.txt", i+1))
-		if err := os.WriteFile(taskFile, []byte(task), 0644); err != nil {
+		if err := os.WriteFile(taskFile, []byte(task), 0o644); err != nil {
 			log.Printf("[Producer] Failed to write task %d: %v\n", i+1, err)
 			continue
 		}
@@ -197,7 +197,7 @@ func runProducer(ctx context.Context, dockerClient *client.Client, manager *cont
 
 	// Signal completion
 	doneFile := filepath.Join(sharedDir, "producer-done.flag")
-	if err := os.WriteFile(doneFile, []byte("complete"), 0644); err != nil {
+	if err := os.WriteFile(doneFile, []byte("complete"), 0o644); err != nil {
 		log.Printf("[Producer] Failed to write done flag: %v\n", err)
 	}
 
@@ -274,7 +274,7 @@ func runConsumer(ctx context.Context, dockerClient *client.Client, manager *cont
 
 				// Write result
 				result := fmt.Sprintf("Completed: %s (at %s)", string(taskData), time.Now().Format("15:04:05"))
-				if err := os.WriteFile(resultFile, []byte(result), 0644); err != nil {
+				if err := os.WriteFile(resultFile, []byte(result), 0o644); err != nil {
 					log.Printf("[Consumer] Failed to write result: %v\n", err)
 					continue
 				}
@@ -290,7 +290,7 @@ func runConsumer(ctx context.Context, dockerClient *client.Client, manager *cont
 cleanup:
 	// Signal completion
 	doneFile := filepath.Join(sharedDir, "consumer-done.flag")
-	os.WriteFile(doneFile, []byte("complete"), 0644)
+	os.WriteFile(doneFile, []byte("complete"), 0o644)
 
 	// Cleanup
 	if err := manager.StopContainerSession(ctx, session.ID()); err != nil {
@@ -377,7 +377,7 @@ func runMonitor(ctx context.Context, dockerClient *client.Client, manager *conta
 				summary := fmt.Sprintf("Summary: %d tasks processed successfully\nCompleted at: %s\n",
 					resultCount, time.Now().Format("15:04:05"))
 				summaryFile := filepath.Join(sharedDir, "summary.txt")
-				os.WriteFile(summaryFile, []byte(summary), 0644)
+				os.WriteFile(summaryFile, []byte(summary), 0o644)
 				fmt.Println("[Monitor] Wrote summary.txt")
 
 				goto cleanup
