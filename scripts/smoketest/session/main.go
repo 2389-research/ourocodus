@@ -48,7 +48,7 @@ func runSessionSmokeTest(verbose bool) error {
 		return &fakeACPClient{workspace: workspace}, nil
 	})
 
-	mockFactory := agent.NewMockLauncherFactory() // NEW
+	mockFactory := agent.NewMockLauncherFactory()                                                            // NEW
 	manager := session.NewManager(store, idGen, clock, cleaner, logger, clientFactory, "", nil, mockFactory) // nil publisher for smoketest
 
 	announce("🧪", "Test 1: Create UserSession")
@@ -216,7 +216,7 @@ func testAgentSpawnFailureIsolation(ctx context.Context, verbose bool) error {
 		return &fakeACPClient{workspace: workspace}, nil
 	})
 
-	manager := session.NewManager(store, idGen, clock, cleaner, logger, failingFactory, "", nil) // nil publisher for smoketest
+	manager := session.NewManager(store, idGen, clock, cleaner, logger, failingFactory, "", nil, nil) // nil publisher and launcher factory for smoketest
 
 	ws := &fakeWebSocket{}
 	userSession, err := manager.CreateUserSession(ctx, ws)
@@ -402,7 +402,7 @@ func testListAndFilter(ctx context.Context, verbose bool) error {
 		return &fakeACPClient{workspace: workspace}, nil
 	})
 
-	freshManager := session.NewManager(store, idGen, clock, cleaner, logger, clientFactory, "", nil) // nil publisher for smoketest
+	freshManager := session.NewManager(store, idGen, clock, cleaner, logger, clientFactory, "", nil, nil) // nil publisher and launcher factory for smoketest
 
 	// Verify initial state has 0 sessions
 	if initialCount := freshManager.Count(); initialCount != 0 {

@@ -44,8 +44,8 @@ func main() {
 		log.Printf("NATS_URL not set, event publishing disabled")
 	}
 
-	// Create session manager (with optional NATS client)
-	sessionManager, err := relay.NewSessionManager(logger, clock, idGen, natsClient)
+	// Create session manager (with optional NATS client, nil launcher factory for now)
+	sessionManager, err := relay.NewSessionManager(logger, clock, idGen, natsClient, nil)
 	if err != nil {
 		log.Fatalf("Failed to create session manager: %v", err)
 	}

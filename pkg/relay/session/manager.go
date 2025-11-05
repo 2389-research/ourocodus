@@ -103,7 +103,7 @@ func NewManager(store Store, idGen IDGenerator, clock Clock, cleaner Cleaner, lo
 		clientFactory:    clientFactory,
 		baseWorkspaceDir: baseWorkspaceDir,
 		publisher:        publisher,
-		launcherFactory:  launcherFactory, // NEW
+		launcherFactory:  launcherFactory,                      // NEW
 		launchers:        make(map[string]agent.AgentLauncher), // NEW
 		handles:          make(map[string]agent.AgentHandle),   // NEW
 	}
@@ -214,7 +214,7 @@ func (m *Manager) SpawnAgent(ctx context.Context, userSessionID, agentID, worksp
 
 	// Create agent session in SPAWNING state
 	now := m.clock.Now()
-	agent := NewAgentSession(agentID, absPath, now)
+	agentSession := NewAgentSession(agentID, absPath, now)
 
 	// Re-check and add agent atomically (prevents TOCTOU race)
 	userSession.mu.Lock()
@@ -232,29 +232,94 @@ func (m *Manager) SpawnAgent(ctx context.Context, userSessionID, agentID, worksp
 	}
 
 	// Add agent to session in SPAWNING state
-	userSession.addAgent(agent)
+	userSession.addAgent(agentSession)
 	userSession.setLastActive(now)
 	userSession.mu.Unlock()
+
+	// NEW: Create launcher via factory if available
+	if m.launcherFactory != nil {
+		launcherConfig := agent.LauncherConfig{
+			AgentID:   agentID,
+			ImageName: "ourocodus/agent:latest", // TODO: make configurable
+			Command:   []string{"/bin/bash"},    // TODO: make configurable
+			Workspace: absPath,
+			// Credentials will be added in next task
+		}
+
+		launcher, err := m.launcherFactory.CreateLauncher(ctx, agentID, launcherConfig)
+		if err != nil {
+			// Mark agent as FAILED and cleanup
+			agentSession.mu.Lock()
+			agentSession.setAgentState(AgentFailed)
+			agentSession.setError(err.Error())
+			agentSession.mu.Unlock()
+
+			m.logger.Printf("Failed to create launcher: session=%s agentID=%s error=%v", userSessionID, agentID, err)
+			return fmt.Errorf("failed to create launcher: %w", err)
+		}
+
+		// NEW: Spawn agent container
+		spawnConfig := &agent.SpawnConfig{
+			Role:      agentID,
+			Image:     launcherConfig.ImageName,
+			Command:   launcherConfig.Command,
+			Workspace: absPath,
+		}
+
+		handle, err := launcher.Spawn(ctx, spawnConfig)
+		if err != nil {
+			// Mark agent as FAILED and cleanup
+			agentSession.mu.Lock()
+			agentSession.setAgentState(AgentFailed)
+			agentSession.setError(err.Error())
+			agentSession.mu.Unlock()
+
+			m.logger.Printf("Failed to spawn container: session=%s agentID=%s error=%v", userSessionID, agentID, err)
+			return fmt.Errorf("failed to spawn agent: %w", err)
+		}
+
+		// NEW: Store launcher and handle
+		m.launchersMu.Lock()
+		m.launchers[agentID] = launcher
+		m.handles[agentID] = handle
+		m.launchersMu.Unlock()
+
+		m.logger.Printf("Agent container spawned: session=%s agentID=%s container=%s", userSessionID, agentID, handle.ContainerID())
+	}
 
 	// Spawn ACP client (I/O - no lock held)
 	acpClient, err := m.clientFactory.NewClient(absPath)
 	if err != nil {
+		// Cleanup launcher on client creation failure
+		if m.launcherFactory != nil {
+			m.launchersMu.Lock()
+			launcher := m.launchers[agentID]
+			handle := m.handles[agentID]
+			delete(m.launchers, agentID)
+			delete(m.handles, agentID)
+			m.launchersMu.Unlock()
+
+			if launcher != nil && handle != nil {
+				_ = launcher.Stop(ctx, handle)
+			}
+		}
+
 		// Mark agent as FAILED
-		agent.mu.Lock()
-		agent.setAgentState(AgentFailed)
-		agent.setError(err.Error())
-		agent.mu.Unlock()
+		agentSession.mu.Lock()
+		agentSession.setAgentState(AgentFailed)
+		agentSession.setError(err.Error())
+		agentSession.mu.Unlock()
 
 		m.logger.Printf("Agent spawn failed: session=%s agentID=%s error=%v", userSessionID, agentID, err)
 		return fmt.Errorf("failed to spawn ACP client: %w", err)
 	}
 
 	// Transition agent to ACTIVE
-	agent.mu.Lock()
-	agent.setACPClient(acpClient)
-	agent.setAgentState(AgentActive)
-	agent.setAgentLastActive(m.clock.Now())
-	agent.mu.Unlock()
+	agentSession.mu.Lock()
+	agentSession.setACPClient(acpClient)
+	agentSession.setAgentState(AgentActive)
+	agentSession.setAgentLastActive(m.clock.Now())
+	agentSession.mu.Unlock()
 
 	// Publish agent.spawned event (synchronous, errors logged but non-fatal)
 	if m.publisher != nil {
