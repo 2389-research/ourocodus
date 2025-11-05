@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"time"
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/pkg/stdcopy"
@@ -59,12 +60,24 @@ func NewManager(dockerClient DockerClient, idGen IDGenerator, clock Clock, logge
 	}
 }
 
-// CreateSession creates a new container session with workspace and Docker container
-func (m *Manager) CreateSession(ctx context.Context, imageName string, cmd []string) (*ContainerSession, error) {
+// CreateContainerSession creates a new container session with workspace and Docker container
+func (m *Manager) CreateContainerSession(ctx context.Context, imageName string, cmd []string) (*ContainerSession, error) {
 	// Generate unique session ID
 	sessionID := m.idGen.Generate()
 	now := m.clock.Now()
 
+	// Check for existing container with this session ID (for reuse scenarios)
+	existingID, state, err := m.findContainer(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check for existing container: %w", err)
+	}
+
+	// If container exists, handle it based on state
+	if existingID != "" {
+		return m.handleExistingContainer(ctx, existingID, state, sessionID)
+	}
+
+	// No existing container - proceed with normal creation
 	// Build labels
 	labels := BuildLabels(sessionID, now)
 
@@ -123,9 +136,304 @@ func (m *Manager) CreateSession(ctx context.Context, imageName string, cmd []str
 	return session, nil
 }
 
-// StartSession starts a container and attaches I/O streams
-func (m *Manager) StartSession(ctx context.Context, sessionID string) error {
-	session := m.GetSession(sessionID)
+// findContainer searches for an existing container by session ID using label-based filtering.
+//
+// Returns:
+//   - containerID: Docker container ID if found, empty string if not found
+//   - state: Container state ("running", "created", "exited", "paused", "dead")
+//   - error: Non-nil if Docker API call fails
+//
+// If multiple containers are found with the same session ID (which shouldn't happen),
+// returns the first one and logs a warning.
+//
+// This is an internal helper used by CreateContainerSession and AttachContainerSession
+// to check for existing containers before creating new ones or validating attach requests.
+func (m *Manager) findContainer(ctx context.Context, sessionID string) (string, string, error) {
+	// Build label filters for this session
+	filterArgs := BuildLabelFilters(sessionID)
+
+	// List containers with matching labels (include stopped containers)
+	listOptions := container.ListOptions{
+		All:     true, // Include stopped containers
+		Filters: filterArgs,
+	}
+
+	containers, err := m.dockerClient.ContainerList(ctx, listOptions)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to list containers: %w", err)
+	}
+
+	// No containers found
+	if len(containers) == 0 {
+		return "", "", nil
+	}
+
+	// Multiple containers found - this shouldn't happen but handle gracefully
+	if len(containers) > 1 {
+		m.logger.Printf("WARNING: Multiple containers found for session %s, using first one", sessionID)
+	}
+
+	// Return first container's ID and state
+	c := containers[0]
+	return c.ID, c.State, nil
+}
+
+// extractAndValidateWorkspace extracts the workspace mount from a container
+// and validates it's under baseWorkspaceDir.
+//
+// This prevents directory traversal attacks where a malicious container with
+// our session labels mounts an arbitrary host path at /workspace.
+func (m *Manager) extractAndValidateWorkspace(inspectData container.InspectResponse, containerID string) (string, error) {
+	// Extract workspace path from volume mounts
+	workspacePath := ""
+	for _, mount := range inspectData.Mounts {
+		if mount.Destination == "/workspace" {
+			workspacePath = mount.Source
+			break
+		}
+	}
+	if workspacePath == "" {
+		return "", fmt.Errorf("container %s has no /workspace mount", containerID)
+	}
+
+	// Validate workspace path to prevent directory traversal attacks
+	if err := ValidateWorkspacePath(m.baseWorkspaceDir, workspacePath); err != nil {
+		return "", fmt.Errorf("invalid workspace mount for container %s: %w", containerID, err)
+	}
+
+	return workspacePath, nil
+}
+
+// handleExistingContainer processes an existing container based on its state.
+//
+// This is an internal helper used by CreateContainerSession when findContainer()
+// discovers an existing container with the same session ID.
+//
+// Behavior by container state:
+//   - "running": Reattaches I/O streams without restarting the container
+//   - "created", "exited": Starts the container, then attaches I/O streams
+//   - "paused": Returns error (unpause not yet supported)
+//   - "dead", "removing": Removes the bad container and returns error (caller should retry)
+//
+// The method extracts the workspace path from the container's volume mounts,
+// validates it, and creates or retrieves the ContainerSession object.
+//
+// Returns the ContainerSession with proper state, or an error if the container
+// cannot be reused.
+func (m *Manager) handleExistingContainer(ctx context.Context, containerID, state, sessionID string) (*ContainerSession, error) {
+	m.logger.Printf("Found existing container: session=%s container=%s state=%s", sessionID, containerID, state)
+
+	// Inspect container to get full details
+	inspectData, err := m.dockerClient.ContainerInspect(ctx, containerID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to inspect container %s: %w", containerID, err)
+	}
+
+	// Extract and validate workspace path
+	workspacePath, err := m.extractAndValidateWorkspace(inspectData, containerID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Get labels and creation time
+	labels := inspectData.Config.Labels
+	createdAt := m.clock.Now() // Use current time if we can't parse original
+	if createdStr, ok := labels[LabelCreatedAt]; ok {
+		if t, err := time.Parse(time.RFC3339, createdStr); err == nil {
+			createdAt = t
+		}
+	}
+
+	// Create or retrieve session object
+	m.mu.Lock()
+	session, exists := m.sessions[sessionID]
+	if !exists {
+		session = NewContainerSession(sessionID, workspacePath, labels, createdAt)
+		m.sessions[sessionID] = session
+	}
+	// Always update container ID (even for existing sessions) to handle container replacement
+	session.SetContainerID(containerID)
+	m.mu.Unlock()
+
+	// Handle based on container state
+	switch state {
+	case "running":
+		// Container is already running - just attach I/O
+		attachResp, err := m.dockerClient.ContainerAttach(ctx, containerID, container.AttachOptions{
+			Stream: true,
+			Stdin:  false,
+			Stdout: true,
+			Stderr: true,
+			Logs:   true,
+		})
+		if err != nil {
+			m.logger.Printf("Container attach failed: session=%s container=%s error=%v", sessionID, containerID, err)
+			// Continue even if attach fails - container is still usable
+		} else {
+			go m.handleContainerOutput(sessionID, containerID, attachResp.Reader)
+		}
+		session.MarkStarted(m.clock.Now())
+		m.logger.Printf("Reattached to running container: session=%s container=%s", sessionID, containerID)
+
+	case "created", "exited":
+		// Container exists but is stopped - start it
+		err := m.dockerClient.ContainerStart(ctx, containerID, container.StartOptions{})
+		if err != nil {
+			return nil, fmt.Errorf("failed to start existing container: %w", err)
+		}
+
+		// Attach to I/O
+		attachResp, err := m.dockerClient.ContainerAttach(ctx, containerID, container.AttachOptions{
+			Stream: true,
+			Stdin:  false,
+			Stdout: true,
+			Stderr: true,
+			Logs:   true,
+		})
+		if err != nil {
+			m.logger.Printf("Container attach failed: session=%s container=%s error=%v", sessionID, containerID, err)
+		} else {
+			go m.handleContainerOutput(sessionID, containerID, attachResp.Reader)
+		}
+		session.MarkStarted(m.clock.Now())
+		m.logger.Printf("Started and attached to existing container: session=%s container=%s", sessionID, containerID)
+
+	case "paused":
+		// Container is paused - unpause it
+		// Note: Docker SDK doesn't have Unpause in our interface yet, so we'll treat as error for now
+		return nil, fmt.Errorf("container %s is paused - unpause not yet supported", containerID)
+
+	case "dead", "removing":
+		// Container is in a bad state - remove it and let caller create new one
+		m.logger.Printf("Container in bad state (%s), removing: session=%s container=%s", state, sessionID, containerID)
+		_ = m.dockerClient.ContainerRemove(ctx, containerID, container.RemoveOptions{Force: true})
+
+		// Remove from session map so CreateContainerSession can create new one
+		m.mu.Lock()
+		delete(m.sessions, sessionID)
+		m.mu.Unlock()
+
+		return nil, fmt.Errorf("container %s in bad state (%s), removed - retry CreateContainerSession", containerID, state)
+
+	default:
+		return nil, fmt.Errorf("unknown container state: %s", state)
+	}
+
+	return session, nil
+}
+
+// AttachContainerSession reconnects to an existing container session by session ID.
+//
+// This method is useful for:
+//   - Reconnecting to a session after process restart
+//   - Attaching from a different process or Manager instance
+//   - Monitoring or debugging existing sessions
+//
+// Requirements:
+//   - Container must exist (returns ErrSessionNotFound if not found)
+//   - Container must be in "running" state (returns error for stopped/dead containers)
+//   - Container must have /workspace mount (returns error if missing)
+//
+// The method automatically:
+//   - Locates the container using label-based filtering
+//   - Extracts workspace path from volume mounts
+//   - Attaches I/O streams for output monitoring
+//   - Creates or updates the in-memory ContainerSession object
+//
+// I/O attachment failures are logged but do not fail the operation, as the
+// container is still accessible even if stream attachment fails.
+//
+// Example:
+//
+//	// Process A creates and stores session ID
+//	session, _ := manager.CreateContainerSession(ctx, "ubuntu:latest", []string{"/bin/bash"})
+//	sessionID := session.ID()
+//	saveSessionID(sessionID) // persist to database/file
+//
+//	// Process B reconnects to the same session
+//	sessionID := loadSessionID()
+//	manager2 := NewManager(...) // new Manager instance
+//	reattached, err := manager2.AttachContainerSession(ctx, sessionID)
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//	// reattached is now connected to the same running container
+func (m *Manager) AttachContainerSession(ctx context.Context, sessionID string) (*ContainerSession, error) {
+	m.logger.Printf("Attempting to attach to session: %s", sessionID)
+
+	// Find the container
+	containerID, state, err := m.findContainer(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find container: %w", err)
+	}
+
+	if containerID == "" {
+		return nil, fmt.Errorf("%w: %s", ErrSessionNotFound, sessionID)
+	}
+
+	// Only allow attaching to running containers
+	if state != "running" {
+		return nil, fmt.Errorf("cannot attach to container in state %s (must be running)", state)
+	}
+
+	// Inspect container to get full details
+	inspectData, err := m.dockerClient.ContainerInspect(ctx, containerID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to inspect container %s: %w", containerID, err)
+	}
+
+	// Extract and validate workspace path
+	workspacePath, err := m.extractAndValidateWorkspace(inspectData, containerID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Get labels and creation time
+	labels := inspectData.Config.Labels
+	createdAt := m.clock.Now()
+	if createdStr, ok := labels[LabelCreatedAt]; ok {
+		if t, err := time.Parse(time.RFC3339, createdStr); err == nil {
+			createdAt = t
+		}
+	}
+
+	// Create or retrieve session object
+	m.mu.Lock()
+	session, exists := m.sessions[sessionID]
+	if !exists {
+		session = NewContainerSession(sessionID, workspacePath, labels, createdAt)
+		m.sessions[sessionID] = session
+	}
+	// Always update container ID when reattaching, even if session exists
+	// This handles the case where a container was restarted externally
+	session.SetContainerID(containerID)
+	m.mu.Unlock()
+
+	// Mark session as started (after releasing lock, consistent with handleExistingContainer)
+	session.MarkStarted(m.clock.Now())
+
+	// Attach to container I/O
+	attachResp, err := m.dockerClient.ContainerAttach(ctx, containerID, container.AttachOptions{
+		Stream: true,
+		Stdin:  false,
+		Stdout: true,
+		Stderr: true,
+		Logs:   true,
+	})
+	if err != nil {
+		m.logger.Printf("Container attach failed: session=%s container=%s error=%v", sessionID, containerID, err)
+		// Return session anyway - container is still accessible even if I/O attach failed
+	} else {
+		go m.handleContainerOutput(sessionID, containerID, attachResp.Reader)
+	}
+
+	m.logger.Printf("Successfully attached to session: id=%s container=%s", sessionID, containerID)
+	return session, nil
+}
+
+// StartContainerSession starts a container and attaches I/O streams
+func (m *Manager) StartContainerSession(ctx context.Context, sessionID string) error {
+	session := m.GetContainerSession(sessionID)
 	if session == nil {
 		return fmt.Errorf("%w: %s", ErrSessionNotFound, sessionID)
 	}
@@ -202,9 +510,9 @@ func (w *logWriter) Write(p []byte) (n int, err error) {
 	return len(p), nil
 }
 
-// StopSession stops a running container gracefully
-func (m *Manager) StopSession(ctx context.Context, sessionID string) error {
-	session := m.GetSession(sessionID)
+// StopContainerSession stops a running container gracefully
+func (m *Manager) StopContainerSession(ctx context.Context, sessionID string) error {
+	session := m.GetContainerSession(sessionID)
 	if session == nil {
 		// Idempotent - already removed
 		m.logger.Printf("Session not found during stop: %s (already removed?)", sessionID)
@@ -241,15 +549,15 @@ func (m *Manager) StopSession(ctx context.Context, sessionID string) error {
 	return nil
 }
 
-// GetSession retrieves a session by ID
-func (m *Manager) GetSession(sessionID string) *ContainerSession {
+// GetContainerSession retrieves a session by ID
+func (m *Manager) GetContainerSession(sessionID string) *ContainerSession {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.sessions[sessionID]
 }
 
-// ListSessions returns all tracked sessions
-func (m *Manager) ListSessions() []*ContainerSession {
+// ListContainerSessions returns all tracked sessions
+func (m *Manager) ListContainerSessions() []*ContainerSession {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 

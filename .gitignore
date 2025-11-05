@@ -9,6 +9,17 @@ bin/
 /relay
 /cli
 /echo-agent
+/demo
+/interactive
+
+# Example binaries (top-level demos)
+examples/demo-container-reuse
+examples/demo-nats-basic
+examples/demo-workspaces/
+
+# Old nested demo structure (deprecated)
+examples/**/containersession-demo
+examples/**/sessions-demo
 
 # Test binary, built with `go test -c`
 *.test

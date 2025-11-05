@@ -3,6 +3,10 @@ package containersession
 import (
 	"context"
 	"errors"
+	"fmt"
+	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -15,12 +19,13 @@ import (
 // Mock implementations for testing
 
 type mockDockerClient struct {
-	createFn func(ctx context.Context, config *container.Config, hostConfig *container.HostConfig, networkingConfig *network.NetworkingConfig, platform *ocispec.Platform, containerName string) (container.CreateResponse, error)
-	startFn  func(ctx context.Context, containerID string, options container.StartOptions) error
-	stopFn   func(ctx context.Context, containerID string, options container.StopOptions) error
-	attachFn func(ctx context.Context, containerID string, options container.AttachOptions) (types.HijackedResponse, error)
-	listFn   func(ctx context.Context, options container.ListOptions) ([]container.Summary, error)
-	removeFn func(ctx context.Context, containerID string, options container.RemoveOptions) error
+	createFn  func(ctx context.Context, config *container.Config, hostConfig *container.HostConfig, networkingConfig *network.NetworkingConfig, platform *ocispec.Platform, containerName string) (container.CreateResponse, error)
+	startFn   func(ctx context.Context, containerID string, options container.StartOptions) error
+	stopFn    func(ctx context.Context, containerID string, options container.StopOptions) error
+	attachFn  func(ctx context.Context, containerID string, options container.AttachOptions) (types.HijackedResponse, error)
+	listFn    func(ctx context.Context, options container.ListOptions) ([]container.Summary, error)
+	removeFn  func(ctx context.Context, containerID string, options container.RemoveOptions) error
+	inspectFn func(ctx context.Context, containerID string) (container.InspectResponse, error)
 }
 
 func (m *mockDockerClient) ContainerCreate(ctx context.Context, config *container.Config, hostConfig *container.HostConfig, networkingConfig *network.NetworkingConfig, platform *ocispec.Platform, containerName string) (container.CreateResponse, error) {
@@ -65,6 +70,13 @@ func (m *mockDockerClient) ContainerRemove(ctx context.Context, containerID stri
 	return nil
 }
 
+func (m *mockDockerClient) ContainerInspect(ctx context.Context, containerID string) (container.InspectResponse, error) {
+	if m.inspectFn != nil {
+		return m.inspectFn(ctx, containerID)
+	}
+	return container.InspectResponse{}, nil
+}
+
 type mockIDGenerator struct {
 	nextID string
 }
@@ -89,11 +101,14 @@ func (m *mockClock) Now() time.Time {
 
 type mockLogger struct {
 	logs []string
+	mu   sync.Mutex
 }
 
 func (m *mockLogger) Printf(format string, v ...interface{}) {
-	// Store logs for verification
-	m.logs = append(m.logs, format)
+	// Store logs for verification (thread-safe)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.logs = append(m.logs, fmt.Sprintf(format, v...))
 }
 
 // Tests
@@ -153,7 +168,7 @@ func TestNewManager(t *testing.T) {
 	})
 }
 
-func TestCreateSession(t *testing.T) {
+func TestCreateContainerSession(t *testing.T) {
 	t.Run("creates session successfully", func(t *testing.T) {
 		docker := &mockDockerClient{}
 		idGen := &mockIDGenerator{nextID: "test-123"}
@@ -162,7 +177,7 @@ func TestCreateSession(t *testing.T) {
 
 		manager := NewManager(docker, idGen, clock, logger, t.TempDir())
 
-		session, err := manager.CreateSession(context.Background(), "ubuntu:latest", []string{"/bin/bash"})
+		session, err := manager.CreateContainerSession(context.Background(), "ubuntu:latest", []string{"/bin/bash"})
 		if err != nil {
 			t.Fatalf("Expected no error, got %v", err)
 		}
@@ -196,7 +211,7 @@ func TestCreateSession(t *testing.T) {
 
 		manager := NewManager(docker, idGen, clock, logger, t.TempDir())
 
-		session, err := manager.CreateSession(context.Background(), "ubuntu:latest", []string{"/bin/bash"})
+		session, err := manager.CreateContainerSession(context.Background(), "ubuntu:latest", []string{"/bin/bash"})
 		if err == nil {
 			t.Error("Expected error, got nil")
 		}
@@ -206,13 +221,13 @@ func TestCreateSession(t *testing.T) {
 		}
 
 		// Session should not be in manager's map
-		if manager.GetSession("test-session-id") != nil {
+		if manager.GetContainerSession("test-session-id") != nil {
 			t.Error("Session should not be stored after creation failure")
 		}
 	})
 }
 
-func TestStartSession(t *testing.T) {
+func TestStartContainerSession(t *testing.T) {
 	t.Run("starts session successfully", func(t *testing.T) {
 		docker := &mockDockerClient{}
 		idGen := &mockIDGenerator{}
@@ -221,9 +236,9 @@ func TestStartSession(t *testing.T) {
 
 		manager := NewManager(docker, idGen, clock, logger, t.TempDir())
 
-		session, _ := manager.CreateSession(context.Background(), "ubuntu:latest", []string{"/bin/bash"})
+		session, _ := manager.CreateContainerSession(context.Background(), "ubuntu:latest", []string{"/bin/bash"})
 
-		err := manager.StartSession(context.Background(), session.ID())
+		err := manager.StartContainerSession(context.Background(), session.ID())
 		if err != nil {
 			t.Fatalf("Expected no error, got %v", err)
 		}
@@ -237,7 +252,7 @@ func TestStartSession(t *testing.T) {
 		docker := &mockDockerClient{}
 		manager := NewManager(docker, &mockIDGenerator{}, &mockClock{}, &mockLogger{}, t.TempDir())
 
-		err := manager.StartSession(context.Background(), "non-existent")
+		err := manager.StartContainerSession(context.Background(), "non-existent")
 		if err == nil {
 			t.Error("Expected error for non-existent session")
 		}
@@ -247,10 +262,10 @@ func TestStartSession(t *testing.T) {
 		docker := &mockDockerClient{}
 		manager := NewManager(docker, &mockIDGenerator{}, &mockClock{}, &mockLogger{}, t.TempDir())
 
-		session, _ := manager.CreateSession(context.Background(), "ubuntu:latest", []string{"/bin/bash"})
+		session, _ := manager.CreateContainerSession(context.Background(), "ubuntu:latest", []string{"/bin/bash"})
 		session.SetState(StateRunning) // Already running
 
-		err := manager.StartSession(context.Background(), session.ID())
+		err := manager.StartContainerSession(context.Background(), session.ID())
 		if err == nil {
 			t.Error("Expected error when starting already-running session")
 		}
@@ -264,9 +279,9 @@ func TestStartSession(t *testing.T) {
 		}
 		manager := NewManager(docker, &mockIDGenerator{}, &mockClock{}, &mockLogger{}, t.TempDir())
 
-		session, _ := manager.CreateSession(context.Background(), "ubuntu:latest", []string{"/bin/bash"})
+		session, _ := manager.CreateContainerSession(context.Background(), "ubuntu:latest", []string{"/bin/bash"})
 
-		err := manager.StartSession(context.Background(), session.ID())
+		err := manager.StartContainerSession(context.Background(), session.ID())
 		if err == nil {
 			t.Error("Expected error when container start fails")
 		}
@@ -277,15 +292,15 @@ func TestStartSession(t *testing.T) {
 	})
 }
 
-func TestStopSession(t *testing.T) {
+func TestStopContainerSession(t *testing.T) {
 	t.Run("stops session successfully", func(t *testing.T) {
 		docker := &mockDockerClient{}
 		manager := NewManager(docker, &mockIDGenerator{}, &mockClock{}, &mockLogger{}, t.TempDir())
 
-		session, _ := manager.CreateSession(context.Background(), "ubuntu:latest", []string{"/bin/bash"})
-		_ = manager.StartSession(context.Background(), session.ID())
+		session, _ := manager.CreateContainerSession(context.Background(), "ubuntu:latest", []string{"/bin/bash"})
+		_ = manager.StartContainerSession(context.Background(), session.ID())
 
-		err := manager.StopSession(context.Background(), session.ID())
+		err := manager.StopContainerSession(context.Background(), session.ID())
 		if err != nil {
 			t.Fatalf("Expected no error, got %v", err)
 		}
@@ -299,12 +314,12 @@ func TestStopSession(t *testing.T) {
 		docker := &mockDockerClient{}
 		manager := NewManager(docker, &mockIDGenerator{}, &mockClock{}, &mockLogger{}, t.TempDir())
 
-		session, _ := manager.CreateSession(context.Background(), "ubuntu:latest", []string{"/bin/bash"})
-		_ = manager.StartSession(context.Background(), session.ID())
-		_ = manager.StopSession(context.Background(), session.ID())
+		session, _ := manager.CreateContainerSession(context.Background(), "ubuntu:latest", []string{"/bin/bash"})
+		_ = manager.StartContainerSession(context.Background(), session.ID())
+		_ = manager.StopContainerSession(context.Background(), session.ID())
 
 		// Stop again - should be idempotent
-		err := manager.StopSession(context.Background(), session.ID())
+		err := manager.StopContainerSession(context.Background(), session.ID())
 		if err != nil {
 			t.Errorf("Expected no error for idempotent stop, got %v", err)
 		}
@@ -315,7 +330,7 @@ func TestStopSession(t *testing.T) {
 		manager := NewManager(docker, &mockIDGenerator{}, &mockClock{}, &mockLogger{}, t.TempDir())
 
 		// Should not error
-		err := manager.StopSession(context.Background(), "non-existent")
+		err := manager.StopContainerSession(context.Background(), "non-existent")
 		if err != nil {
 			t.Errorf("Expected no error for non-existent session, got %v", err)
 		}
@@ -329,24 +344,24 @@ func TestStopSession(t *testing.T) {
 		}
 		manager := NewManager(docker, &mockIDGenerator{}, &mockClock{}, &mockLogger{}, t.TempDir())
 
-		session, _ := manager.CreateSession(context.Background(), "ubuntu:latest", []string{"/bin/bash"})
-		_ = manager.StartSession(context.Background(), session.ID())
+		session, _ := manager.CreateContainerSession(context.Background(), "ubuntu:latest", []string{"/bin/bash"})
+		_ = manager.StartContainerSession(context.Background(), session.ID())
 
-		err := manager.StopSession(context.Background(), session.ID())
+		err := manager.StopContainerSession(context.Background(), session.ID())
 		if err == nil {
 			t.Error("Expected error when container stop fails")
 		}
 	})
 }
 
-func TestGetSession(t *testing.T) {
+func TestGetContainerSession(t *testing.T) {
 	t.Run("returns session when found", func(t *testing.T) {
 		docker := &mockDockerClient{}
 		manager := NewManager(docker, &mockIDGenerator{}, &mockClock{}, &mockLogger{}, t.TempDir())
 
-		created, _ := manager.CreateSession(context.Background(), "ubuntu:latest", []string{"/bin/bash"})
+		created, _ := manager.CreateContainerSession(context.Background(), "ubuntu:latest", []string{"/bin/bash"})
 
-		retrieved := manager.GetSession(created.ID())
+		retrieved := manager.GetContainerSession(created.ID())
 		if retrieved == nil {
 			t.Error("Expected non-nil session")
 		}
@@ -360,19 +375,19 @@ func TestGetSession(t *testing.T) {
 		docker := &mockDockerClient{}
 		manager := NewManager(docker, &mockIDGenerator{}, &mockClock{}, &mockLogger{}, t.TempDir())
 
-		session := manager.GetSession("non-existent")
+		session := manager.GetContainerSession("non-existent")
 		if session != nil {
 			t.Error("Expected nil session")
 		}
 	})
 }
 
-func TestListSessions(t *testing.T) {
+func TestListContainerSessions(t *testing.T) {
 	t.Run("returns empty list when no sessions", func(t *testing.T) {
 		docker := &mockDockerClient{}
 		manager := NewManager(docker, &mockIDGenerator{}, &mockClock{}, &mockLogger{}, t.TempDir())
 
-		sessions := manager.ListSessions()
+		sessions := manager.ListContainerSessions()
 		if len(sessions) != 0 {
 			t.Errorf("Expected 0 sessions, got %d", len(sessions))
 		}
@@ -385,14 +400,576 @@ func TestListSessions(t *testing.T) {
 
 		// Create multiple sessions
 		idGen.nextID = "session-1"
-		_, _ = manager.CreateSession(context.Background(), "ubuntu:latest", []string{"/bin/bash"})
+		_, _ = manager.CreateContainerSession(context.Background(), "ubuntu:latest", []string{"/bin/bash"})
 
 		idGen.nextID = "session-2"
-		_, _ = manager.CreateSession(context.Background(), "ubuntu:latest", []string{"/bin/bash"})
+		_, _ = manager.CreateContainerSession(context.Background(), "ubuntu:latest", []string{"/bin/bash"})
 
-		sessions := manager.ListSessions()
+		sessions := manager.ListContainerSessions()
 		if len(sessions) != 2 {
 			t.Errorf("Expected 2 sessions, got %d", len(sessions))
+		}
+	})
+}
+
+// Phase 2: Container Reuse & Attach Tests
+
+func TestFindContainer(t *testing.T) {
+	t.Run("returns container ID and state when found", func(t *testing.T) {
+		docker := &mockDockerClient{
+			listFn: func(ctx context.Context, options container.ListOptions) ([]container.Summary, error) {
+				return []container.Summary{
+					{ID: "found-container-123", State: "running"},
+				}, nil
+			},
+		}
+		manager := NewManager(docker, &mockIDGenerator{}, &mockClock{}, &mockLogger{}, t.TempDir())
+
+		containerID, state, err := manager.findContainer(context.Background(), "test-session")
+		if err != nil {
+			t.Fatalf("Expected no error, got %v", err)
+		}
+		if containerID != "found-container-123" {
+			t.Errorf("Expected container ID 'found-container-123', got %s", containerID)
+		}
+		if state != "running" {
+			t.Errorf("Expected state 'running', got %s", state)
+		}
+	})
+
+	t.Run("returns empty when no container found", func(t *testing.T) {
+		docker := &mockDockerClient{
+			listFn: func(ctx context.Context, options container.ListOptions) ([]container.Summary, error) {
+				return []container.Summary{}, nil
+			},
+		}
+		manager := NewManager(docker, &mockIDGenerator{}, &mockClock{}, &mockLogger{}, t.TempDir())
+
+		containerID, state, err := manager.findContainer(context.Background(), "test-session")
+		if err != nil {
+			t.Fatalf("Expected no error, got %v", err)
+		}
+		if containerID != "" {
+			t.Errorf("Expected empty container ID, got %s", containerID)
+		}
+		if state != "" {
+			t.Errorf("Expected empty state, got %s", state)
+		}
+	})
+
+	t.Run("handles multiple containers - returns first", func(t *testing.T) {
+		logger := &mockLogger{}
+		docker := &mockDockerClient{
+			listFn: func(ctx context.Context, options container.ListOptions) ([]container.Summary, error) {
+				return []container.Summary{
+					{ID: "container-1", State: "running"},
+					{ID: "container-2", State: "running"},
+				}, nil
+			},
+		}
+		manager := NewManager(docker, &mockIDGenerator{}, &mockClock{}, logger, t.TempDir())
+
+		containerID, state, err := manager.findContainer(context.Background(), "test-session")
+		if err != nil {
+			t.Fatalf("Expected no error, got %v", err)
+		}
+		if containerID != "container-1" {
+			t.Errorf("Expected first container 'container-1', got %s", containerID)
+		}
+		if state != "running" {
+			t.Errorf("Expected state 'running', got %s", state)
+		}
+
+		// Verify warning was logged
+		logger.mu.Lock()
+		foundWarning := false
+		for _, log := range logger.logs {
+			if strings.HasPrefix(log, "WARNING") {
+				foundWarning = true
+				break
+			}
+		}
+		logger.mu.Unlock()
+		if !foundWarning {
+			t.Error("Expected warning log for multiple containers")
+		}
+	})
+
+	t.Run("returns different states correctly", func(t *testing.T) {
+		states := []string{"running", "created", "exited", "paused", "dead"}
+		for _, expectedState := range states {
+			docker := &mockDockerClient{
+				listFn: func(ctx context.Context, options container.ListOptions) ([]container.Summary, error) {
+					return []container.Summary{
+						{ID: "test-container", State: expectedState},
+					}, nil
+				},
+			}
+			manager := NewManager(docker, &mockIDGenerator{}, &mockClock{}, &mockLogger{}, t.TempDir())
+
+			_, state, err := manager.findContainer(context.Background(), "test-session")
+			if err != nil {
+				t.Fatalf("Expected no error for state %s, got %v", expectedState, err)
+			}
+			if state != expectedState {
+				t.Errorf("Expected state '%s', got '%s'", expectedState, state)
+			}
+		}
+	})
+
+	t.Run("returns error when ContainerList fails", func(t *testing.T) {
+		docker := &mockDockerClient{
+			listFn: func(ctx context.Context, options container.ListOptions) ([]container.Summary, error) {
+				return nil, errors.New("docker API error")
+			},
+		}
+		manager := NewManager(docker, &mockIDGenerator{}, &mockClock{}, &mockLogger{}, t.TempDir())
+
+		_, _, err := manager.findContainer(context.Background(), "test-session")
+		if err == nil {
+			t.Fatal("Expected error, got nil")
+		}
+		if !errors.Is(err, errors.New("docker API error")) && err.Error() != "failed to list containers: docker API error" {
+			t.Errorf("Expected wrapped error, got %v", err)
+		}
+	})
+}
+
+func TestHandleExistingContainer(t *testing.T) {
+	t.Run("reattaches to running container", func(t *testing.T) {
+		baseDir := t.TempDir()
+		workspacePath := filepath.Join(baseDir, "test-session")
+		docker := &mockDockerClient{
+			inspectFn: func(ctx context.Context, containerID string) (container.InspectResponse, error) {
+				return container.InspectResponse{
+					ContainerJSONBase: &container.ContainerJSONBase{
+						ID: containerID,
+					},
+					Mounts: []container.MountPoint{
+						{Source: workspacePath, Destination: "/workspace"},
+					},
+					Config: &container.Config{
+						Labels: map[string]string{
+							LabelSessionID: "test-session",
+							LabelCreatedAt: "2024-01-01T12:00:00Z",
+						},
+					},
+				}, nil
+			},
+			attachFn: func(ctx context.Context, containerID string, options container.AttachOptions) (types.HijackedResponse, error) {
+				return types.HijackedResponse{}, nil
+			},
+		}
+		manager := NewManager(docker, &mockIDGenerator{}, &mockClock{}, &mockLogger{}, baseDir)
+
+		session, err := manager.handleExistingContainer(context.Background(), "container-123", "running", "test-session")
+		if err != nil {
+			t.Fatalf("Expected no error, got %v", err)
+		}
+		if session == nil {
+			t.Fatal("Expected non-nil session")
+		}
+		if session.ContainerID() != "container-123" {
+			t.Errorf("Expected container ID 'container-123', got %s", session.ContainerID())
+		}
+		if session.State() != StateRunning {
+			t.Errorf("Expected state RUNNING, got %s", session.State())
+		}
+	})
+
+	t.Run("starts and attaches to stopped container", func(t *testing.T) {
+		baseDir := t.TempDir()
+		workspacePath := filepath.Join(baseDir, "test-session")
+		startCalled := false
+		docker := &mockDockerClient{
+			inspectFn: func(ctx context.Context, containerID string) (container.InspectResponse, error) {
+				return container.InspectResponse{
+					ContainerJSONBase: &container.ContainerJSONBase{
+						ID: containerID,
+					},
+					Mounts: []container.MountPoint{
+						{Source: workspacePath, Destination: "/workspace"},
+					},
+					Config: &container.Config{
+						Labels: map[string]string{
+							LabelSessionID: "test-session",
+						},
+					},
+				}, nil
+			},
+			startFn: func(ctx context.Context, containerID string, options container.StartOptions) error {
+				startCalled = true
+				return nil
+			},
+			attachFn: func(ctx context.Context, containerID string, options container.AttachOptions) (types.HijackedResponse, error) {
+				return types.HijackedResponse{}, nil
+			},
+		}
+		manager := NewManager(docker, &mockIDGenerator{}, &mockClock{}, &mockLogger{}, baseDir)
+
+		session, err := manager.handleExistingContainer(context.Background(), "container-123", "exited", "test-session")
+		if err != nil {
+			t.Fatalf("Expected no error, got %v", err)
+		}
+		if !startCalled {
+			t.Error("Expected ContainerStart to be called")
+		}
+		if session.State() != StateRunning {
+			t.Errorf("Expected state RUNNING after start, got %s", session.State())
+		}
+	})
+
+	t.Run("returns error for paused container", func(t *testing.T) {
+		baseDir := t.TempDir()
+		workspacePath := filepath.Join(baseDir, "test-session")
+		docker := &mockDockerClient{
+			inspectFn: func(ctx context.Context, containerID string) (container.InspectResponse, error) {
+				return container.InspectResponse{
+					ContainerJSONBase: &container.ContainerJSONBase{
+						ID: containerID,
+					},
+					Mounts: []container.MountPoint{
+						{Source: workspacePath, Destination: "/workspace"},
+					},
+					Config: &container.Config{
+						Labels: map[string]string{
+							LabelSessionID: "test-session",
+						},
+					},
+				}, nil
+			},
+		}
+		manager := NewManager(docker, &mockIDGenerator{}, &mockClock{}, &mockLogger{}, baseDir)
+
+		_, err := manager.handleExistingContainer(context.Background(), "container-123", "paused", "test-session")
+		if err == nil {
+			t.Fatal("Expected error for paused container, got nil")
+		}
+	})
+
+	t.Run("removes dead container and returns error", func(t *testing.T) {
+		baseDir := t.TempDir()
+		workspacePath := filepath.Join(baseDir, "test-session")
+		removeCalled := false
+		docker := &mockDockerClient{
+			inspectFn: func(ctx context.Context, containerID string) (container.InspectResponse, error) {
+				return container.InspectResponse{
+					ContainerJSONBase: &container.ContainerJSONBase{
+						ID: containerID,
+					},
+					Mounts: []container.MountPoint{
+						{Source: workspacePath, Destination: "/workspace"},
+					},
+					Config: &container.Config{
+						Labels: map[string]string{
+							LabelSessionID: "test-session",
+						},
+					},
+				}, nil
+			},
+			removeFn: func(ctx context.Context, containerID string, options container.RemoveOptions) error {
+				removeCalled = true
+				return nil
+			},
+		}
+		manager := NewManager(docker, &mockIDGenerator{}, &mockClock{}, &mockLogger{}, baseDir)
+
+		_, err := manager.handleExistingContainer(context.Background(), "container-123", "dead", "test-session")
+		if err == nil {
+			t.Fatal("Expected error for dead container, got nil")
+		}
+		if !removeCalled {
+			t.Error("Expected ContainerRemove to be called for dead container")
+		}
+	})
+
+	t.Run("returns error when no workspace mount found", func(t *testing.T) {
+		docker := &mockDockerClient{
+			inspectFn: func(ctx context.Context, containerID string) (container.InspectResponse, error) {
+				return container.InspectResponse{
+					ContainerJSONBase: &container.ContainerJSONBase{
+						ID: containerID,
+					},
+					Mounts: []container.MountPoint{
+						{Source: "/host/other", Destination: "/other"},
+					},
+					Config: &container.Config{
+						Labels: map[string]string{},
+					},
+				}, nil
+			},
+		}
+		manager := NewManager(docker, &mockIDGenerator{}, &mockClock{}, &mockLogger{}, t.TempDir())
+
+		_, err := manager.handleExistingContainer(context.Background(), "container-123", "running", "test-session")
+		if err == nil {
+			t.Fatal("Expected error for missing workspace mount, got nil")
+		}
+	})
+
+	t.Run("returns error when inspect fails", func(t *testing.T) {
+		docker := &mockDockerClient{
+			inspectFn: func(ctx context.Context, containerID string) (container.InspectResponse, error) {
+				return container.InspectResponse{}, errors.New("inspect failed")
+			},
+		}
+		manager := NewManager(docker, &mockIDGenerator{}, &mockClock{}, &mockLogger{}, t.TempDir())
+
+		_, err := manager.handleExistingContainer(context.Background(), "container-123", "running", "test-session")
+		if err == nil {
+			t.Fatal("Expected error, got nil")
+		}
+	})
+}
+
+func TestAttachContainerSession(t *testing.T) {
+	t.Run("successfully attaches to running container", func(t *testing.T) {
+		baseDir := t.TempDir()
+		workspacePath := filepath.Join(baseDir, "test-session")
+		docker := &mockDockerClient{
+			listFn: func(ctx context.Context, options container.ListOptions) ([]container.Summary, error) {
+				return []container.Summary{
+					{ID: "container-123", State: "running"},
+				}, nil
+			},
+			inspectFn: func(ctx context.Context, containerID string) (container.InspectResponse, error) {
+				return container.InspectResponse{
+					ContainerJSONBase: &container.ContainerJSONBase{
+						ID: containerID,
+					},
+					Mounts: []container.MountPoint{
+						{Source: workspacePath, Destination: "/workspace"},
+					},
+					Config: &container.Config{
+						Labels: map[string]string{
+							LabelSessionID: "test-session",
+							LabelCreatedAt: "2024-01-01T12:00:00Z",
+						},
+					},
+				}, nil
+			},
+			attachFn: func(ctx context.Context, containerID string, options container.AttachOptions) (types.HijackedResponse, error) {
+				return types.HijackedResponse{}, nil
+			},
+		}
+		manager := NewManager(docker, &mockIDGenerator{}, &mockClock{}, &mockLogger{}, baseDir)
+
+		session, err := manager.AttachContainerSession(context.Background(), "test-session")
+		if err != nil {
+			t.Fatalf("Expected no error, got %v", err)
+		}
+		if session == nil {
+			t.Fatal("Expected non-nil session")
+		}
+		if session.ID() != "test-session" {
+			t.Errorf("Expected session ID 'test-session', got %s", session.ID())
+		}
+		if session.ContainerID() != "container-123" {
+			t.Errorf("Expected container ID 'container-123', got %s", session.ContainerID())
+		}
+	})
+
+	t.Run("returns error when container not found", func(t *testing.T) {
+		docker := &mockDockerClient{
+			listFn: func(ctx context.Context, options container.ListOptions) ([]container.Summary, error) {
+				return []container.Summary{}, nil
+			},
+		}
+		manager := NewManager(docker, &mockIDGenerator{}, &mockClock{}, &mockLogger{}, t.TempDir())
+
+		_, err := manager.AttachContainerSession(context.Background(), "test-session")
+		if err == nil {
+			t.Fatal("Expected error for not found, got nil")
+		}
+		if !errors.Is(err, ErrSessionNotFound) && err.Error() != "session not found: test-session" {
+			t.Errorf("Expected ErrSessionNotFound, got %v", err)
+		}
+	})
+
+	t.Run("returns error when container not running", func(t *testing.T) {
+		docker := &mockDockerClient{
+			listFn: func(ctx context.Context, options container.ListOptions) ([]container.Summary, error) {
+				return []container.Summary{
+					{ID: "container-123", State: "exited"},
+				}, nil
+			},
+		}
+		manager := NewManager(docker, &mockIDGenerator{}, &mockClock{}, &mockLogger{}, t.TempDir())
+
+		_, err := manager.AttachContainerSession(context.Background(), "test-session")
+		if err == nil {
+			t.Fatal("Expected error for non-running container, got nil")
+		}
+	})
+
+	t.Run("continues even if attach fails", func(t *testing.T) {
+		baseDir := t.TempDir()
+		workspacePath := filepath.Join(baseDir, "test-session")
+		docker := &mockDockerClient{
+			listFn: func(ctx context.Context, options container.ListOptions) ([]container.Summary, error) {
+				return []container.Summary{
+					{ID: "container-123", State: "running"},
+				}, nil
+			},
+			inspectFn: func(ctx context.Context, containerID string) (container.InspectResponse, error) {
+				return container.InspectResponse{
+					ContainerJSONBase: &container.ContainerJSONBase{
+						ID: containerID,
+					},
+					Mounts: []container.MountPoint{
+						{Source: workspacePath, Destination: "/workspace"},
+					},
+					Config: &container.Config{
+						Labels: map[string]string{
+							LabelSessionID: "test-session",
+						},
+					},
+				}, nil
+			},
+			attachFn: func(ctx context.Context, containerID string, options container.AttachOptions) (types.HijackedResponse, error) {
+				return types.HijackedResponse{}, errors.New("attach failed")
+			},
+		}
+		manager := NewManager(docker, &mockIDGenerator{}, &mockClock{}, &mockLogger{}, baseDir)
+
+		session, err := manager.AttachContainerSession(context.Background(), "test-session")
+		if err != nil {
+			t.Fatalf("Expected no error (attach failure is logged but not fatal), got %v", err)
+		}
+		if session == nil {
+			t.Fatal("Expected non-nil session even with attach failure")
+		}
+	})
+}
+
+func TestCreateContainerSession_Reuse(t *testing.T) {
+	t.Run("reuses running container", func(t *testing.T) {
+		createCalled := false
+		baseDir := t.TempDir()
+		workspacePath := filepath.Join(baseDir, "test-session")
+		docker := &mockDockerClient{
+			listFn: func(ctx context.Context, options container.ListOptions) ([]container.Summary, error) {
+				return []container.Summary{
+					{ID: "existing-container", State: "running"},
+				}, nil
+			},
+			inspectFn: func(ctx context.Context, containerID string) (container.InspectResponse, error) {
+				return container.InspectResponse{
+					ContainerJSONBase: &container.ContainerJSONBase{
+						ID: containerID,
+					},
+					Mounts: []container.MountPoint{
+						{Source: workspacePath, Destination: "/workspace"},
+					},
+					Config: &container.Config{
+						Labels: map[string]string{
+							LabelSessionID: "test-123",
+						},
+					},
+				}, nil
+			},
+			attachFn: func(ctx context.Context, containerID string, options container.AttachOptions) (types.HijackedResponse, error) {
+				return types.HijackedResponse{}, nil
+			},
+			createFn: func(ctx context.Context, config *container.Config, hostConfig *container.HostConfig, networkingConfig *network.NetworkingConfig, platform *ocispec.Platform, containerName string) (container.CreateResponse, error) {
+				createCalled = true
+				return container.CreateResponse{ID: "new-container"}, nil
+			},
+		}
+		idGen := &mockIDGenerator{nextID: "test-123"}
+		manager := NewManager(docker, idGen, &mockClock{}, &mockLogger{}, baseDir)
+
+		session, err := manager.CreateContainerSession(context.Background(), "ubuntu:latest", []string{"/bin/bash"})
+		if err != nil {
+			t.Fatalf("Expected no error, got %v", err)
+		}
+		if createCalled {
+			t.Error("Expected ContainerCreate to NOT be called (should reuse existing)")
+		}
+		if session.ContainerID() != "existing-container" {
+			t.Errorf("Expected existing container ID 'existing-container', got %s", session.ContainerID())
+		}
+	})
+
+	t.Run("creates new when no existing container", func(t *testing.T) {
+		createCalled := false
+		docker := &mockDockerClient{
+			listFn: func(ctx context.Context, options container.ListOptions) ([]container.Summary, error) {
+				return []container.Summary{}, nil
+			},
+			createFn: func(ctx context.Context, config *container.Config, hostConfig *container.HostConfig, networkingConfig *network.NetworkingConfig, platform *ocispec.Platform, containerName string) (container.CreateResponse, error) {
+				createCalled = true
+				return container.CreateResponse{ID: "new-container"}, nil
+			},
+		}
+		idGen := &mockIDGenerator{nextID: "test-123"}
+		manager := NewManager(docker, idGen, &mockClock{}, &mockLogger{}, t.TempDir())
+
+		session, err := manager.CreateContainerSession(context.Background(), "ubuntu:latest", []string{"/bin/bash"})
+		if err != nil {
+			t.Fatalf("Expected no error, got %v", err)
+		}
+		if !createCalled {
+			t.Error("Expected ContainerCreate to be called")
+		}
+		if session.ContainerID() != "new-container" {
+			t.Errorf("Expected new container ID 'new-container', got %s", session.ContainerID())
+		}
+	})
+
+	t.Run("starts stopped container", func(t *testing.T) {
+		baseDir := t.TempDir()
+		workspacePath := filepath.Join(baseDir, "test-session")
+		startCalled := false
+		createCalled := false
+		docker := &mockDockerClient{
+			listFn: func(ctx context.Context, options container.ListOptions) ([]container.Summary, error) {
+				return []container.Summary{
+					{ID: "stopped-container", State: "exited"},
+				}, nil
+			},
+			inspectFn: func(ctx context.Context, containerID string) (container.InspectResponse, error) {
+				return container.InspectResponse{
+					ContainerJSONBase: &container.ContainerJSONBase{
+						ID: containerID,
+					},
+					Mounts: []container.MountPoint{
+						{Source: workspacePath, Destination: "/workspace"},
+					},
+					Config: &container.Config{
+						Labels: map[string]string{
+							LabelSessionID: "test-123",
+						},
+					},
+				}, nil
+			},
+			startFn: func(ctx context.Context, containerID string, options container.StartOptions) error {
+				startCalled = true
+				return nil
+			},
+			attachFn: func(ctx context.Context, containerID string, options container.AttachOptions) (types.HijackedResponse, error) {
+				return types.HijackedResponse{}, nil
+			},
+			createFn: func(ctx context.Context, config *container.Config, hostConfig *container.HostConfig, networkingConfig *network.NetworkingConfig, platform *ocispec.Platform, containerName string) (container.CreateResponse, error) {
+				createCalled = true
+				return container.CreateResponse{ID: "new-container"}, nil
+			},
+		}
+		idGen := &mockIDGenerator{nextID: "test-123"}
+		manager := NewManager(docker, idGen, &mockClock{}, &mockLogger{}, baseDir)
+
+		session, err := manager.CreateContainerSession(context.Background(), "ubuntu:latest", []string{"/bin/bash"})
+		if err != nil {
+			t.Fatalf("Expected no error, got %v", err)
+		}
+		if createCalled {
+			t.Error("Expected ContainerCreate to NOT be called (should reuse existing)")
+		}
+		if !startCalled {
+			t.Error("Expected ContainerStart to be called for stopped container")
+		}
+		if session.ContainerID() != "stopped-container" {
+			t.Errorf("Expected stopped container ID 'stopped-container', got %s", session.ContainerID())
 		}
 	})
 }

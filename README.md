@@ -54,6 +54,12 @@ PWA (Browser) ←WebSocket→ Relay (Go) ←stdio→ N× Claude Code ACP process
 
 The system supports multiple concurrent agents (no hard limit).
 
+## Security
+
+**Workspace Isolation:** Container sessions validate workspace mount points to prevent directory traversal attacks. When reusing or attaching to existing containers, the system ensures workspace paths are under the configured base directory, preventing malicious containers from exposing arbitrary host directories.
+
+See [docs/SECURITY.md](docs/SECURITY.md) for threat models and mitigation strategies.
+
 ## Dependencies
 
 ### Core Dependencies
