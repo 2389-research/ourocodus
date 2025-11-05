@@ -20,29 +20,54 @@ echo "  Three-Tier Architecture"
 echo "==========================================="
 echo
 
-# Check Docker
-echo -e "${BLUE}Checking Docker...${NC}"
+# Check Docker/Colima
+echo -e "${BLUE}Checking Docker/Colima...${NC}"
+
+# Check if docker command exists
 if ! command -v docker &> /dev/null; then
-    echo -e "${RED}✗ Docker not found${NC}"
-    echo "Please install Docker Desktop or Colima"
+    echo -e "${RED}✗ Docker command not found${NC}"
+    echo
+    echo "Please install one of:"
+    echo "  • Docker Desktop: https://www.docker.com/products/docker-desktop"
+    echo "  • Colima: brew install colima"
+    echo
     exit 1
 fi
 
 # Auto-detect Colima and set DOCKER_HOST if needed
+USING_COLIMA=false
 if docker context ls 2>/dev/null | grep -q 'colima \*'; then
     COLIMA_SOCKET=$(docker context inspect colima -f '{{.Endpoints.docker.Host}}' 2>/dev/null || echo "")
-    if [ -n "$COLIMA_SOCKET" ] && [ -z "$DOCKER_HOST" ]; then
+    if [ -n "$COLIMA_SOCKET" ]; then
         export DOCKER_HOST="$COLIMA_SOCKET"
-        echo -e "${GREEN}✓ Detected Colima, using $DOCKER_HOST${NC}"
+        USING_COLIMA=true
+        echo -e "${GREEN}✓ Detected Colima${NC}"
     fi
 fi
 
+# Test connection to Docker daemon
 if ! docker info &> /dev/null; then
-    echo -e "${RED}✗ Docker daemon not running${NC}"
-    echo "Please start Docker Desktop or Colima (colima start)"
+    echo -e "${RED}✗ Cannot connect to Docker daemon${NC}"
+    echo
+    if [ "$USING_COLIMA" = true ]; then
+        echo "Colima detected but not running. Start it with:"
+        echo "  colima start"
+    else
+        echo "Docker Desktop detected but not running. Start it with:"
+        echo "  • Open Docker Desktop application"
+        echo "  • Or use Colima: brew install colima && colima start"
+    fi
+    echo
+    echo "Current DOCKER_HOST: ${DOCKER_HOST:-unix:///var/run/docker.sock}"
+    echo
     exit 1
 fi
-echo -e "${GREEN}✓ Docker is ready${NC}"
+
+if [ "$USING_COLIMA" = true ]; then
+    echo -e "${GREEN}✓ Connected to Colima at $DOCKER_HOST${NC}"
+else
+    echo -e "${GREEN}✓ Connected to Docker Desktop${NC}"
+fi
 
 # Check Go
 echo -e "${BLUE}Checking Go...${NC}"
