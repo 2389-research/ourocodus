@@ -2,15 +2,31 @@
 
 Interactive demonstrations of Ourocodus features. All demos are self-contained at the top level of this directory.
 
+## Directory Structure
+
+Examples are organized by feature area, with each demo in its own subdirectory:
+
+```
+examples/
+├── container-reuse/    # Container reuse patterns (Phase 2 demo)
+│   ├── main.go
+│   └── *.sh           # Runner scripts
+└── nats-basic/         # NATS pub/sub demo
+    ├── main.go
+    └── *.sh           # Runner scripts
+```
+
+Note: Additional `containersession/` examples (basic, echo-agent, multi) are available in PR #148.
+
 ## Available Demos
 
-### 1. Container Reuse Demo
+### Container Reuse Demo (`container-reuse/`)
 
 **What it shows:** Phase 2 container management - intelligent reuse and cross-process attachment
 
 **Run it:**
 ```bash
-cd examples
+cd examples/container-reuse
 ./demo-container-reuse.sh
 ```
 
@@ -23,15 +39,13 @@ cd examples
 
 **Use case:** Understanding how Ourocodus minimizes container churn and enables relay server crash recovery.
 
----
-
-### 2. NATS Basic Messaging Demo
+### NATS Basic Messaging Demo (`nats-basic/`)
 
 **What it shows:** Basic NATS publish/subscribe messaging patterns
 
 **Run it:**
 ```bash
-cd examples
+cd examples/nats-basic
 ./demo-nats-basic.sh
 ```
 
@@ -52,17 +66,17 @@ docker run -d -p 4222:4222 nats:latest
 
 ## Quick Start
 
-Each demo is self-contained with setup, execution, and cleanup:
+Navigate to the demo directory and run its script:
 
 ```bash
-# Run the container reuse demo
-./demo-container-reuse.sh
+# Container reuse demo
+cd examples/container-reuse && ./demo-container-reuse.sh
 
-# Run the NATS messaging demo (requires NATS server)
-./demo-nats-basic.sh
+# NATS messaging demo (requires NATS server)
+cd examples/nats-basic && ./demo-nats-basic.sh
 
 # Manual cleanup if needed
-./demo-container-reuse-reset.sh
+cd examples/container-reuse && ./demo-container-reuse-reset.sh
 ```
 
 ## Prerequisites
@@ -73,17 +87,17 @@ Each demo is self-contained with setup, execution, and cleanup:
 
 ## Demo Structure
 
-Each demo consists of:
-- `demo-{name}.sh` - Main script (setup + run)
-- `demo-{name}.go` - Demo implementation
-- `demo-{name}-reset.sh` - Cleanup script (where applicable)
+Each demo is in its own subdirectory with:
+- `main.go` - Demo implementation
+- `*.sh` - Runner scripts (where applicable)
+- `README.md` - Documentation (for containersession/)
 
 All demos:
-- Are self-contained at top level (no nested directories)
-- Build binaries on first run
+- Are self-contained in subdirectories
+- Build and run independently
 - Clean up resources automatically
 - Use color-coded output for clarity
-- Support pause-driven presentation flow
+- Support pause-driven presentation flow (where applicable)
 - Have explicit names describing what they demonstrate
 
 ## Troubleshooting

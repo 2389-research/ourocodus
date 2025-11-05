@@ -131,3 +131,28 @@ func (s *ContainerSession) MarkStopped(t time.Time) {
 	s.stoppedAt = &t
 	s.state = StateStopped
 }
+
+// CreatedAt returns the session creation timestamp
+func (s *ContainerSession) CreatedAt() time.Time {
+	return s.createdAt
+}
+
+// StartedAt returns the session start timestamp (zero value if not started)
+func (s *ContainerSession) StartedAt() time.Time {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.startedAt == nil {
+		return time.Time{}
+	}
+	return *s.startedAt
+}
+
+// StoppedAt returns the session stop timestamp (zero value if not stopped)
+func (s *ContainerSession) StoppedAt() time.Time {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.stoppedAt == nil {
+		return time.Time{}
+	}
+	return *s.stoppedAt
+}
