@@ -177,19 +177,10 @@ func (l *AgentContainerLauncher) Spawn(ctx context.Context, config SpawnConfig) 
 	return handle, nil
 }
 
-// createContainerWithMounts is a helper that creates a container with custom mounts.
+// createContainerWithMounts creates a container session with workspace and credential mounts.
 //
-// This is needed because containersession.Manager.CreateContainerSession doesn't
-// support custom mounts. We need to integrate with the Docker API directly while
-// still using the containersession package for session management.
-//
-// For now, this is a simplified implementation. In a full implementation, we would
-// need to either:
-// 1. Extend containersession.Manager to support custom mounts
-// 2. Use Docker API directly and track our own sessions
-//
-// This placeholder implementation delegates to the standard CreateContainerSession
-// and would need enhancement to support custom mounts.
+// The worktree path is mounted at /workspace (read-write) and credentials are mounted
+// read-only via the paths returned by the credential mounter.
 func (l *AgentContainerLauncher) createContainerWithMounts(
 	ctx context.Context,
 	config SpawnConfig,
