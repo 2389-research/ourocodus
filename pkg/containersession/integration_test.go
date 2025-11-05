@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sync"
 	"testing"
 	"time"
 
@@ -340,7 +339,7 @@ func TestIntegration_ConcurrentSessions(t *testing.T) {
 	const numSessions = 3
 	sessions := make([]*containersession.ContainerSession, numSessions)
 	sessionIDs := make([]string, numSessions)
-	
+
 	// Use errgroup to properly handle errors from goroutines
 	g, gctx := errgroup.WithContext(ctx)
 

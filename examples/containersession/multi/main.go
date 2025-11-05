@@ -76,7 +76,7 @@ func main() {
 	ctx := context.Background()
 
 	fmt.Println("=== ContainerSession Multi-Session Example ===")
-	fmt.Println("Demonstrates concurrent sessions coordinating via shared workspace.\n")
+	fmt.Println("Demonstrates concurrent sessions coordinating via shared workspace.")
 
 	// 1. Connect to Docker
 	fmt.Println("Step 1: Connecting to Docker...")
@@ -85,7 +85,7 @@ func main() {
 		log.Fatalf("Failed to connect to Docker: %v\n", err)
 	}
 	defer dockerClient.Close()
-	fmt.Println("✓ Connected\n")
+	fmt.Println("✓ Connected")
 
 	// 2. Create shared workspace base
 	baseWorkspace := "./workspaces/multi-session"
@@ -106,7 +106,7 @@ func main() {
 		&StdLogger{prefix: "manager"},
 		baseWorkspace,
 	)
-	fmt.Println("✓ Manager created\n")
+	fmt.Println("✓ Manager created")
 
 	// 4. Launch 3 concurrent sessions
 	fmt.Println("Step 4: Launching 3 concurrent container sessions...")
@@ -133,12 +133,12 @@ func main() {
 		runMonitor(ctx, manager, sharedDir)
 	}()
 
-	fmt.Println("✓ All sessions launched\n")
+	fmt.Println("✓ All sessions launched")
 
 	// Wait for all sessions to complete
 	fmt.Println("Step 5: Waiting for sessions to complete...")
 	wg.Wait()
-	fmt.Println("✓ All sessions completed\n")
+	fmt.Println("✓ All sessions completed")
 
 	// 6. Show final results
 	fmt.Println("Step 6: Final workspace state...")
