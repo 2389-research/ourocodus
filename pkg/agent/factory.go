@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"sort"
 	"sync"
 
 	"github.com/2389-research/ourocodus/pkg/agent/container"
@@ -14,6 +15,9 @@ import (
 
 // ErrFactoryNotReady is returned when the factory is missing required dependencies
 var ErrFactoryNotReady = errors.New("launcher factory not ready: missing required dependencies")
+
+// ErrEmptyAgentID is returned when agentID is empty
+var ErrEmptyAgentID = errors.New("agentID cannot be empty")
 
 // LauncherFactory creates AgentLauncher instances based on agent type and configuration.
 type LauncherFactory interface {
@@ -65,6 +69,10 @@ func NewDefaultLauncherFactory(config LauncherFactoryConfig) *DefaultLauncherFac
 
 // CreateLauncher creates an AgentContainerLauncher for the specified agent.
 func (f *DefaultLauncherFactory) CreateLauncher(ctx context.Context, agentID string, config LauncherConfig) (AgentLauncher, error) {
+	if agentID == "" {
+		return nil, ErrEmptyAgentID
+	}
+
 	// Wrap the factory config to satisfy AgentLauncher interface
 	// The actual container launcher is created lazily to avoid panics on nil dependencies during testing
 	launcher := &containerLauncherAdapter{
@@ -157,7 +165,7 @@ func (a *containerLauncherAdapter) Stop(ctx context.Context, handle AgentHandle)
 		agentID := adapter.handle.AgentID()
 		return launcher.Stop(ctx, agentID)
 	}
-	return nil
+	return errors.New("invalid handle type: expected containerHandleAdapter")
 }
 
 // containerHandleAdapter wraps AgentContainerHandle to implement AgentHandle interface
@@ -184,28 +192,28 @@ func (a *containerHandleAdapter) ContainerID() string {
 func (a *containerHandleAdapter) Stdin() io.WriteCloser {
 	// ContainerSession doesn't provide direct I/O access in this implementation
 	// TODO: Implement I/O forwarding from container exec streams
-	return &nilWriteCloser{}
+	return nil
 }
 
 // Stdout implements AgentHandle.Stdout
 func (a *containerHandleAdapter) Stdout() io.ReadCloser {
 	// ContainerSession doesn't provide direct I/O access in this implementation
 	// TODO: Implement I/O forwarding from container exec streams
-	return &nilReadCloser{}
+	return nil
 }
 
 // Stderr implements AgentHandle.Stderr
 func (a *containerHandleAdapter) Stderr() io.ReadCloser {
 	// ContainerSession doesn't provide direct I/O access in this implementation
 	// TODO: Implement I/O forwarding from container exec streams
-	return &nilReadCloser{}
+	return nil
 }
 
 // Wait implements AgentHandle.Wait
 func (a *containerHandleAdapter) Wait(ctx context.Context) error {
 	// ContainerSession doesn't provide wait in this implementation
 	// TODO: Implement by polling container state
-	return nil
+	return errors.New("wait not implemented for container handles")
 }
 
 // Close implements AgentHandle.Close
@@ -214,37 +222,22 @@ func (a *containerHandleAdapter) Close() error {
 	return nil
 }
 
-// nilWriteCloser is a no-op WriteCloser for I/O stubs
-type nilWriteCloser struct{}
-
-func (nwc *nilWriteCloser) Write(p []byte) (int, error) {
-	return len(p), nil
-}
-
-func (nwc *nilWriteCloser) Close() error {
-	return nil
-}
-
-// nilReadCloser is a no-op ReadCloser for I/O stubs
-type nilReadCloser struct{}
-
-func (nrc *nilReadCloser) Read(p []byte) (int, error) {
-	return 0, io.EOF
-}
-
-func (nrc *nilReadCloser) Close() error {
-	return nil
-}
-
 // convertMapToSlice converts environment map to []string format (KEY=value)
+// Keys are sorted for deterministic output
 func convertMapToSlice(env map[string]string) []string {
 	if len(env) == 0 {
 		return nil
 	}
 
-	var result []string
-	for k, v := range env {
-		result = append(result, k+"="+v)
+	keys := make([]string, 0, len(env))
+	for k := range env {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	result := make([]string, 0, len(env))
+	for _, k := range keys {
+		result = append(result, k+"="+env[k])
 	}
 	return result
 }
