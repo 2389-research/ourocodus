@@ -20,7 +20,7 @@ func TestList(t *testing.T) {
 
 	// Create another active session
 	idGen := &mockIDGenerator{nextID: "session-2"}
-	mockFactory := agent.NewMockLauncherFactory() // NEW
+	mockFactory := agent.NewMockLauncherFactory()                                                                                             // NEW
 	manager2 := NewManager(NewMemoryStore(), idGen, &mockClock{}, &mockCleaner{}, &mockLogger{}, &mockClientFactory{}, ".", nil, mockFactory) // nil publisher for tests
 	session2, _ := manager2.CreateUserSession(ctx, &mockWebSocket{})
 

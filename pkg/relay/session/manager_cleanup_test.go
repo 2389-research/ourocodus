@@ -26,7 +26,7 @@ func TestTerminateAgent_CloseError(t *testing.T) {
 			}, nil
 		},
 	}
-	mockFactory := agent.NewMockLauncherFactory() // NEW
+	mockFactory := agent.NewMockLauncherFactory()                                                      // NEW
 	manager := NewManager(store, idGen, clock, cleaner, logger, failingFactory, ".", nil, mockFactory) // nil publisher for tests
 
 	ctx := context.Background()

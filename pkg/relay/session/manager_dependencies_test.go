@@ -40,7 +40,7 @@ func TestNewManager_PanicsOnNilDependencies(t *testing.T) {
 					t.Errorf("Expected panic for %s, but didn't panic", tt.name)
 				}
 			}()
-			mockFactory := agent.NewMockLauncherFactory() // NEW
+			mockFactory := agent.NewMockLauncherFactory()                                                            // NEW
 			NewManager(tt.store, tt.idGen, tt.clock, tt.cleaner, tt.logger, tt.clientFactory, ".", nil, mockFactory) // nil publisher for tests
 		})
 	}
