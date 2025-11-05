@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/2389-research/ourocodus/pkg/agent"
 	"github.com/2389-research/ourocodus/pkg/relay/session"
 )
 
@@ -47,7 +48,8 @@ func runSessionSmokeTest(verbose bool) error {
 		return &fakeACPClient{workspace: workspace}, nil
 	})
 
-	manager := session.NewManager(store, idGen, clock, cleaner, logger, clientFactory, "", nil) // nil publisher for smoketest
+	mockFactory := agent.NewMockLauncherFactory() // NEW
+	manager := session.NewManager(store, idGen, clock, cleaner, logger, clientFactory, "", nil, mockFactory) // nil publisher for smoketest
 
 	announce("🧪", "Test 1: Create UserSession")
 	if err := testCreateUserSession(ctx, manager, verbose); err != nil {
@@ -562,7 +564,8 @@ func testEventPublishing(ctx context.Context, verbose bool) error {
 		return &fakeACPClient{workspace: workspace}, nil
 	})
 
-	manager := session.NewManager(store, idGen, clock, cleaner, logger, clientFactory, "", mockPublisher)
+	mockFactory := agent.NewMockLauncherFactory() // NEW
+	manager := session.NewManager(store, idGen, clock, cleaner, logger, clientFactory, "", mockPublisher, mockFactory)
 
 	// Test 1: Session created event
 	ws := &fakeWebSocket{}

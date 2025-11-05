@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"testing"
 	"time"
+
+	"github.com/2389-research/ourocodus/pkg/agent"
 )
 
 // TestTerminateAgent_CloseError tests agent termination when Close() fails
@@ -24,7 +26,8 @@ func TestTerminateAgent_CloseError(t *testing.T) {
 			}, nil
 		},
 	}
-	manager := NewManager(store, idGen, clock, cleaner, logger, failingFactory, ".", nil) // nil publisher for tests
+	mockFactory := agent.NewMockLauncherFactory() // NEW
+	manager := NewManager(store, idGen, clock, cleaner, logger, failingFactory, ".", nil, mockFactory) // nil publisher for tests
 
 	ctx := context.Background()
 	ws := &mockWebSocket{}

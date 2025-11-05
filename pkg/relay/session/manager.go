@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/2389-research/ourocodus/pkg/agent"
 )
 
 const (
@@ -49,19 +51,26 @@ type Manager struct {
 	clientFactory    ClientFactory
 	baseWorkspaceDir string
 	publisher        EventPublisher // Optional: publishes lifecycle events to NATS
+
+	// NEW: Launcher management
+	launcherFactory agent.LauncherFactory
+	launchers       map[string]agent.AgentLauncher // agentID → launcher
+	handles         map[string]agent.AgentHandle   // agentID → handle
+	launchersMu     sync.RWMutex                   // protects launchers/handles
 }
 
 // NewManager creates a session manager with injected dependencies.
 //
-// All dependencies are required and must be non-nil (except publisher). This constructor
-// panics on nil collaborators because missing dependencies indicate programmer configuration
-// bugs, not runtime failures.
+// All dependencies are required and must be non-nil (except publisher and launcherFactory).
+// This constructor panics on nil collaborators because missing dependencies indicate
+// programmer configuration bugs, not runtime failures.
 //
 // baseWorkspaceDir specifies the base directory under which all workspace paths
 // must be constrained. If empty, defaults to "./workspaces".
 //
 // publisher is optional and can be nil. If nil, event publishing is disabled.
-func NewManager(store Store, idGen IDGenerator, clock Clock, cleaner Cleaner, logger Logger, clientFactory ClientFactory, baseWorkspaceDir string, publisher EventPublisher) *Manager {
+// launcherFactory is optional and can be nil. If nil, container spawning is disabled.
+func NewManager(store Store, idGen IDGenerator, clock Clock, cleaner Cleaner, logger Logger, clientFactory ClientFactory, baseWorkspaceDir string, publisher EventPublisher, launcherFactory agent.LauncherFactory) *Manager {
 	if store == nil {
 		panic("store cannot be nil")
 	}
@@ -94,6 +103,9 @@ func NewManager(store Store, idGen IDGenerator, clock Clock, cleaner Cleaner, lo
 		clientFactory:    clientFactory,
 		baseWorkspaceDir: baseWorkspaceDir,
 		publisher:        publisher,
+		launcherFactory:  launcherFactory, // NEW
+		launchers:        make(map[string]agent.AgentLauncher), // NEW
+		handles:          make(map[string]agent.AgentHandle),   // NEW
 	}
 }
 

@@ -7,6 +7,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/2389-research/ourocodus/pkg/agent"
 )
 
 // --- Test Mocks ---
@@ -142,9 +144,10 @@ func setupManager() (*Manager, *mockIDGenerator, *mockClock, *mockCleaner, *mock
 	cleaner := &mockCleaner{}
 	logger := &mockLogger{}
 	clientFactory := &mockClientFactory{}
+	mockFactory := agent.NewMockLauncherFactory() // NEW
 
 	// Use current directory as base for tests (allows testdata/ paths)
-	manager := NewManager(store, idGen, clock, cleaner, logger, clientFactory, ".", nil) // nil publisher for tests
+	manager := NewManager(store, idGen, clock, cleaner, logger, clientFactory, ".", nil, mockFactory) // nil publisher for tests, mockFactory for launcher tests
 	return manager, idGen, clock, cleaner, logger, clientFactory
 }
 
@@ -682,9 +685,10 @@ func TestSpawnAgent_RejectsPathTraversal(t *testing.T) {
 	cleaner := &mockCleaner{}
 	logger := &mockLogger{}
 	clientFactory := &mockClientFactory{}
+	mockFactory := agent.NewMockLauncherFactory() // NEW
 
 	// Use "./workspaces" as base to test directory name bypass
-	manager := NewManager(store, idGen, clock, cleaner, logger, clientFactory, "./workspaces", nil) // nil publisher for tests
+	manager := NewManager(store, idGen, clock, cleaner, logger, clientFactory, "./workspaces", nil, mockFactory) // nil publisher for tests
 
 	ctx := context.Background()
 	ws := &mockWebSocket{}

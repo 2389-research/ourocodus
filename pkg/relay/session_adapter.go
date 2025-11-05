@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/2389-research/ourocodus/pkg/agent"
 	"github.com/2389-research/ourocodus/pkg/nats"
 	"github.com/2389-research/ourocodus/pkg/relay/session"
 )
@@ -58,8 +59,9 @@ func (a *SessionLoggerAdapter) Printf(format string, v ...interface{}) {
 // Example of how to wire session management into the relay server
 //
 // natsClient is optional - if nil, event publishing is disabled.
+// launcherFactory is optional - if nil, container spawning is disabled.
 // Caller is responsible for managing NATS client lifecycle (including graceful drain on shutdown).
-func NewSessionManager(logger Logger, clock Clock, idGen IDGenerator, natsClient nats.Client) (*session.Manager, error) {
+func NewSessionManager(logger Logger, clock Clock, idGen IDGenerator, natsClient nats.Client, launcherFactory agent.LauncherFactory) (*session.Manager, error) {
 	store := session.NewMemoryStore()
 
 	// Adapt relay dependencies to session interfaces
@@ -105,7 +107,7 @@ func NewSessionManager(logger Logger, clock Clock, idGen IDGenerator, natsClient
 		logger.Printf("NATS event publishing disabled (no NATS_URL configured)")
 	}
 
-	return session.NewManager(store, sessionIDGen, sessionClock, cleaner, sessionLogger, clientFactory, baseWorkspaceDir, publisher), nil
+	return session.NewManager(store, sessionIDGen, sessionClock, cleaner, sessionLogger, clientFactory, baseWorkspaceDir, publisher, launcherFactory), nil
 }
 
 // validateWorkspaceBaseDir ensures the workspace base directory is safe to use.
