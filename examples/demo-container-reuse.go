@@ -44,7 +44,11 @@ type demoLogger struct {
 
 func (l *demoLogger) Printf(format string, v ...interface{}) {
 	msg := fmt.Sprintf(format, v...)
-	log.Printf("%s[MANAGER]%s %s", colorCyan, colorReset, msg)
+	label := l.prefix
+	if label == "" {
+		label = "MANAGER"
+	}
+	log.Printf("%s[%s]%s %s", colorCyan, label, colorReset, msg)
 }
 
 func printHeader(title string) {
@@ -131,7 +135,7 @@ func main() {
 
 	// Setup workspace
 	baseWorkspace := "./demo-workspaces"
-	if err := os.MkdirAll(baseWorkspace, 0755); err != nil {
+	if err := os.MkdirAll(baseWorkspace, 0o755); err != nil {
 		printError(fmt.Sprintf("Failed to create workspace dir: %v", err))
 		os.Exit(1)
 	}
@@ -429,7 +433,7 @@ func runScenario4(ctx context.Context, dockerClient *client.Client, baseWorkspac
 	printStep(2, "Write test file to workspace")
 	testFile := filepath.Join(workspace, "test.txt")
 	testContent := "Container session data persists!"
-	if err := os.WriteFile(testFile, []byte(testContent), 0644); err != nil {
+	if err := os.WriteFile(testFile, []byte(testContent), 0o644); err != nil {
 		return fmt.Errorf("failed to write test file: %w", err)
 	}
 	printSuccess("Wrote: " + testContent)

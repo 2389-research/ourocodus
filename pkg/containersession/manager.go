@@ -178,6 +178,32 @@ func (m *Manager) findContainer(ctx context.Context, sessionID string) (string, 
 	return c.ID, c.State, nil
 }
 
+// extractAndValidateWorkspace extracts the workspace mount from a container
+// and validates it's under baseWorkspaceDir.
+//
+// This prevents directory traversal attacks where a malicious container with
+// our session labels mounts an arbitrary host path at /workspace.
+func (m *Manager) extractAndValidateWorkspace(inspectData container.InspectResponse, containerID string) (string, error) {
+	// Extract workspace path from volume mounts
+	workspacePath := ""
+	for _, mount := range inspectData.Mounts {
+		if mount.Destination == "/workspace" {
+			workspacePath = mount.Source
+			break
+		}
+	}
+	if workspacePath == "" {
+		return "", fmt.Errorf("container %s has no /workspace mount", containerID)
+	}
+
+	// Validate workspace path to prevent directory traversal attacks
+	if err := ValidateWorkspacePath(m.baseWorkspaceDir, workspacePath); err != nil {
+		return "", fmt.Errorf("invalid workspace mount for container %s: %w", containerID, err)
+	}
+
+	return workspacePath, nil
+}
+
 // handleExistingContainer processes an existing container based on its state.
 //
 // This is an internal helper used by CreateContainerSession when findContainer()
@@ -203,21 +229,10 @@ func (m *Manager) handleExistingContainer(ctx context.Context, containerID, stat
 		return nil, fmt.Errorf("failed to inspect container %s: %w", containerID, err)
 	}
 
-	// Extract workspace path from volume mounts
-	workspacePath := ""
-	for _, mount := range inspectData.Mounts {
-		if mount.Destination == "/workspace" {
-			workspacePath = mount.Source
-			break
-		}
-	}
-	if workspacePath == "" {
-		return nil, fmt.Errorf("container %s has no /workspace mount", containerID)
-	}
-
-	// Validate workspace path to prevent directory traversal attacks
-	if err := ValidateWorkspacePath(m.baseWorkspaceDir, workspacePath); err != nil {
-		return nil, fmt.Errorf("invalid workspace mount for container %s: %w", containerID, err)
+	// Extract and validate workspace path
+	workspacePath, err := m.extractAndValidateWorkspace(inspectData, containerID)
+	if err != nil {
+		return nil, err
 	}
 
 	// Get labels and creation time
@@ -367,21 +382,10 @@ func (m *Manager) AttachContainerSession(ctx context.Context, sessionID string) 
 		return nil, fmt.Errorf("failed to inspect container %s: %w", containerID, err)
 	}
 
-	// Extract workspace path from volume mounts
-	workspacePath := ""
-	for _, mount := range inspectData.Mounts {
-		if mount.Destination == "/workspace" {
-			workspacePath = mount.Source
-			break
-		}
-	}
-	if workspacePath == "" {
-		return nil, fmt.Errorf("container %s has no /workspace mount", containerID)
-	}
-
-	// Validate workspace path to prevent directory traversal attacks
-	if err := ValidateWorkspacePath(m.baseWorkspaceDir, workspacePath); err != nil {
-		return nil, fmt.Errorf("invalid workspace mount for container %s: %w", containerID, err)
+	// Extract and validate workspace path
+	workspacePath, err := m.extractAndValidateWorkspace(inspectData, containerID)
+	if err != nil {
+		return nil, err
 	}
 
 	// Get labels and creation time
@@ -400,11 +404,13 @@ func (m *Manager) AttachContainerSession(ctx context.Context, sessionID string) 
 		session = NewContainerSession(sessionID, workspacePath, labels, createdAt)
 		m.sessions[sessionID] = session
 	}
-	// Always update container ID and state when reattaching, even if session exists
+	// Always update container ID when reattaching, even if session exists
 	// This handles the case where a container was restarted externally
 	session.SetContainerID(containerID)
-	session.MarkStarted(m.clock.Now())
 	m.mu.Unlock()
+
+	// Mark session as started (after releasing lock, consistent with handleExistingContainer)
+	session.MarkStarted(m.clock.Now())
 
 	// Attach to container I/O
 	attachResp, err := m.dockerClient.ContainerAttach(ctx, containerID, container.AttachOptions{
