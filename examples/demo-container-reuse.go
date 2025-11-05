@@ -74,6 +74,43 @@ func waitForUser() {
 	fmt.Scanln()
 }
 
+// createDockerClient tries to connect to Docker in order: Colima, then Docker Desktop
+func createDockerClient() (*client.Client, error) {
+	// Try Colima socket first (most common on macOS with Colima)
+	colimaSocket := filepath.Join(os.Getenv("HOME"), ".colima", "default", "docker.sock")
+	if _, err := os.Stat(colimaSocket); err == nil {
+		if err := os.Setenv("DOCKER_HOST", "unix://"+colimaSocket); err == nil {
+			dockerClient, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+			if err == nil {
+				// Test connection
+				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				defer cancel()
+				if _, err := dockerClient.Ping(ctx); err == nil {
+					fmt.Printf("%sℹ%s Using Colima at %s\n", colorCyan, colorReset, colimaSocket)
+					return dockerClient, nil
+				}
+				dockerClient.Close()
+			}
+		}
+	}
+
+	// Try standard Docker Desktop socket
+	if err := os.Setenv("DOCKER_HOST", "unix:///var/run/docker.sock"); err == nil {
+		dockerClient, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+		if err == nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			if _, err := dockerClient.Ping(ctx); err == nil {
+				fmt.Printf("%sℹ%s Using Docker Desktop\n", colorCyan, colorReset)
+				return dockerClient, nil
+			}
+			dockerClient.Close()
+		}
+	}
+
+	return nil, fmt.Errorf("cannot connect to Docker - tried Colima (%s) and Docker Desktop (/var/run/docker.sock)", colimaSocket)
+}
+
 func main() {
 	ctx := context.Background()
 
@@ -83,11 +120,11 @@ func main() {
 	fmt.Println("Watch how containers are reused instead of recreated!")
 	waitForUser()
 
-	// Create Docker client
-	dockerClient, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	// Create Docker client - try Colima first, then standard Docker socket
+	dockerClient, err := createDockerClient()
 	if err != nil {
-		printError(fmt.Sprintf("Failed to create Docker client: %v", err))
-		printInfo("Solution", "Ensure Docker daemon is running")
+		printError(fmt.Sprintf("Failed to connect to Docker: %v", err))
+		printInfo("Solution", "Start Docker Desktop or Colima (colima start)")
 		os.Exit(1)
 	}
 	defer dockerClient.Close()
