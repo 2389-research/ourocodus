@@ -1,26 +1,108 @@
-# Ourocodus Demos
+# Ourocodus Examples
 
-Interactive demonstrations of Ourocodus features. All demos are self-contained at the top level of this directory.
+Interactive demonstrations and educational resources for the Ourocodus system. Examples range from basic introductions to advanced performance testing.
 
 ## Directory Structure
 
-Examples are organized by feature area, with each demo in its own subdirectory:
+Examples are organized by purpose and difficulty level:
 
 ```
 examples/
-├── container-reuse/    # Container reuse patterns (Phase 2 demo)
-│   ├── main.go
-│   └── *.sh           # Runner scripts
-└── nats-basic/         # NATS pub/sub demo
-    ├── main.go
-    └── *.sh           # Runner scripts
+├── basic-demo/           # 🎬 Basic relay and agent interaction
+├── interactive-repl/     # 🎮 Interactive testing and exploration
+├── smoke-tests/          # 🧪 Manual verification tests
+├── container-reuse/      # 🐳 Container reuse patterns (Phase 2)
+└── nats-basic/           # 📡 NATS pub/sub demo
 ```
 
 Note: Additional `containersession/` examples (basic, echo-agent, multi) are available in PR #148.
 
-## Available Demos
+## Available Examples
 
-### Container Reuse Demo (`container-reuse/`)
+### Getting Started Examples
+
+#### 🎬 Basic Demo (`basic-demo/`)
+
+**Difficulty:** Beginner | **Duration:** 2-3 minutes
+
+**What it shows:** Fundamental relay and agent interaction - the best starting point for understanding Ourocodus.
+
+**Run it:**
+```bash
+cd examples/basic-demo
+go run main.go
+```
+
+**Features demonstrated:**
+- Session lifecycle (create, use, terminate)
+- Agent spawning and communication
+- Message routing through relay
+- Error handling and recoverability
+
+**Use case:** Learning the core concepts of how Ourocodus routes messages between clients and agents.
+
+[📖 Full guide](./basic-demo/README.md)
+
+---
+
+#### 🎮 Interactive REPL (`interactive-repl/`)
+
+**Difficulty:** Intermediate | **Duration:** Open-ended
+
+**What it shows:** Interactive command-line interface for manual testing and exploration.
+
+**Run it:**
+```bash
+cd examples/interactive-repl
+go run main.go
+```
+
+**Prerequisites:** Understanding of basic demo concepts
+
+**Features demonstrated:**
+- Manual session and agent management
+- Custom message sending
+- System state inspection
+- WebSocket protocol exploration
+
+**Use case:** Experimenting with the system, debugging, learning by doing.
+
+[📖 Full guide](./interactive-repl/README.md)
+
+---
+
+### Testing Examples
+
+#### 🧪 Smoke Tests (`smoke-tests/`)
+
+**Difficulty:** Intermediate | **Duration:** 1-2 minutes per test
+
+**What it shows:** Quick verification tests for core functionality.
+
+**Run it:**
+```bash
+# Test relay server
+cd examples/smoke-tests/relay && go run main.go
+
+# Test session management
+cd examples/smoke-tests/session && go run main.go
+```
+
+**Features demonstrated:**
+- Component-level testing
+- Relay server validation
+- Session management verification
+- Integration testing patterns
+
+**Use case:** Quick checks after code changes to ensure nothing broke.
+
+[📖 Full guide](./smoke-tests/README.md)
+
+---
+
+### Container and Infrastructure Examples
+
+#### 🐳 Container Reuse Demo (`container-reuse/`)
 
 **What it shows:** Phase 2 container management - intelligent reuse and cross-process attachment
 
@@ -66,17 +148,43 @@ docker run -d -p 4222:4222 nats:latest
 
 ## Quick Start
 
-Navigate to the demo directory and run its script:
+### First-Time Setup
+
+All examples require building the project first:
 
 ```bash
-# Container reuse demo
+make build
+```
+
+### Running Examples
+
+Navigate to the example directory and follow its instructions:
+
+```bash
+# 🎬 Basic demo - Best starting point!
+cd examples/basic-demo && go run main.go
+
+# 🎮 Interactive REPL - Manual exploration
+cd examples/interactive-repl && go run main.go
+
+# 🧪 Smoke tests - Quick verification
+cd examples/smoke-tests/relay && go run main.go
+
+# 🐳 Container reuse - Infrastructure demo
 cd examples/container-reuse && ./demo-container-reuse.sh
 
-# NATS messaging demo (requires NATS server)
+# 📡 NATS messaging - Requires NATS server
 cd examples/nats-basic && ./demo-nats-basic.sh
+```
 
-# Manual cleanup if needed
-cd examples/container-reuse && ./demo-container-reuse-reset.sh
+### Recommended Learning Path
+
+```
+1. basic-demo       → Understand fundamentals
+   ↓
+2. interactive-repl → Explore and experiment
+   ↓
+3. smoke-tests      → Learn testing approaches
 ```
 
 ## Prerequisites

@@ -101,4 +101,3 @@ jobs:
       with:
         scandir: './scripts'
         severity: warning
-        ignore_paths: 'demo-performance'

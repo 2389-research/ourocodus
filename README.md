@@ -384,7 +384,7 @@ make interactive
 - Error handling (shows error codes and recoverability)
 - Auto-starts and stops relay server
 
-**Source code:** `scripts/interactive/main.go`
+**Source code:** `examples/interactive-repl/main.go`
 
 ### Option 2: Automated Demo (For Quick Overview)
 
@@ -438,7 +438,7 @@ Example output:
    Recoverable: false
 ```text
 
-**Source code:** `scripts/demo/main.go`
+**Source code:** `examples/basic-demo/main.go`
 
 ### For Automated Testing
 
