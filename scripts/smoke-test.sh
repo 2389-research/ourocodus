@@ -59,7 +59,7 @@ run_relay_test() {
     (cd "${REPO_ROOT}" && ${MISE_EXEC} make build) || die "💥" "Build failed"
   fi
 
-  if ${MISE_EXEC} go run "${REPO_ROOT}/scripts/smoketest/relay" $verbose_flag $fuzz_flag; then
+  if ${MISE_EXEC} go run "${REPO_ROOT}/examples/smoke-tests/smoketest/relay" $verbose_flag $fuzz_flag; then
     yay "✅" "Relay integration test passed"
     return 0
   else
@@ -73,7 +73,7 @@ run_session_test() {
 
   say "🧪" "Running session management layer test..."
 
-  if ${MISE_EXEC} go run "${REPO_ROOT}/scripts/smoketest/session" $verbose_flag; then
+  if ${MISE_EXEC} go run "${REPO_ROOT}/examples/smoke-tests/smoketest/session" $verbose_flag; then
     yay "✅" "Session management test passed"
     return 0
   else

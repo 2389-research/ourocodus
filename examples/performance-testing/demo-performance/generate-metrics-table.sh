@@ -124,7 +124,7 @@ NEW VERSION (With Connection Pooling + Query Batching)
 To see the performance improvement in action:
 
 \`\`\`bash
-cd scripts/demo-performance
+cd examples/performance-testing/demo-performance
 ./demo-run.sh
 # Open browser to http://localhost:9090
 \`\`\`

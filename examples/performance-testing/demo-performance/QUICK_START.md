@@ -3,7 +3,7 @@
 ## First Time Setup
 
 ```bash
-cd scripts/demo-performance
+cd examples/performance-testing/demo-performance
 ./demo-setup.sh
 ```
 

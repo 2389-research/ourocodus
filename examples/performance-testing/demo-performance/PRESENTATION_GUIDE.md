@@ -10,7 +10,7 @@
 
 ### Setup (do this 10 minutes before)
 ```bash
-cd scripts/demo-performance
+cd examples/performance-testing/demo-performance
 ./demo-setup.sh
 ```
 
@@ -189,7 +189,7 @@ Thanks for attending the performance demo. Here's a quick summary:
 3. Monitor for 24 hours
 4. Production deployment
 
-The demo is repeatable - run ./demo-run.sh in scripts/demo-performance/ anytime.
+The demo is repeatable - run ./demo-run.sh in examples/performance-testing/demo-performance/ anytime.
 
 Questions? Let me know!
 ```

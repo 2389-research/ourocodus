@@ -280,7 +280,7 @@ Examples:
 [browser_improvement_banner.png]
 
 60% faster response times, 3x more capacity!
-Full demo: ./scripts/demo-performance/demo-run.sh
+Full demo: ./examples/performance-testing/demo-performance/demo-run.sh
 ```
 
 ### Documentation Wiki
