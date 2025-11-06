@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"sort"
 	"sync"
@@ -76,9 +77,10 @@ func (f *DefaultLauncherFactory) CreateLauncher(ctx context.Context, agentID str
 	// Wrap the factory config to satisfy AgentLauncher interface
 	// The actual container launcher is created lazily to avoid panics on nil dependencies during testing
 	launcher := &containerLauncherAdapter{
-		factory:  f,
-		lazyInit: sync.Once{},
-		agentID:  agentID,
+		factory:        f,
+		lazyInit:       sync.Once{},
+		agentID:        agentID,
+		launcherConfig: config, // Store config for use in Spawn()
 	}
 
 	return launcher, nil
@@ -90,12 +92,18 @@ type containerLauncherAdapter struct {
 	containerLauncher *container.AgentContainerLauncher
 	lazyInit          sync.Once
 	agentID           string
+	launcherConfig    LauncherConfig // Store config from CreateLauncher
 	lazyInitErr       error
 }
 
 // getContainerLauncher lazily initializes the container launcher
 func (a *containerLauncherAdapter) getContainerLauncher() (*container.AgentContainerLauncher, error) {
 	a.lazyInit.Do(func() {
+		// Validate all required dependencies
+		if a.factory.config.DockerClient == nil {
+			a.lazyInitErr = fmt.Errorf("DockerClient is nil")
+			return
+		}
 		if a.factory.config.ContainerManager == nil ||
 			a.factory.config.WorktreeManager == nil ||
 			a.factory.config.CredMounter == nil {
@@ -122,11 +130,11 @@ func (a *containerLauncherAdapter) Spawn(ctx context.Context, config *SpawnConfi
 	}
 
 	spawnConfig := container.SpawnConfig{
-		AgentID:     config.Role, // Use Role as AgentID
-		ImageName:   config.Image,
-		Command:     config.Command,
-		GitSSHKey:   nil, // Credentials will be handled separately
-		GitHubToken: nil,
+		AgentID:     a.agentID,                  // Use the unique agentID provided in CreateLauncher
+		ImageName:   config.Image,               // Image from SpawnConfig (runtime decision)
+		Command:     config.Command,             // Command from SpawnConfig (runtime decision)
+		GitSSHKey:   a.launcherConfig.GitSSHKey, // Use credentials from LauncherConfig
+		GitHubToken: a.launcherConfig.GitHubToken,
 		Env:         convertMapToSlice(config.Environment),
 	}
 

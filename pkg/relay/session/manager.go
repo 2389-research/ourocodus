@@ -54,8 +54,8 @@ type Manager struct {
 
 	// NEW: Launcher management
 	launcherFactory agent.LauncherFactory
-	launchers       map[string]agent.AgentLauncher // agentID → launcher
-	handles         map[string]agent.AgentHandle   // agentID → handle
+	launchers       map[string]agent.AgentLauncher // "sessionID:agentID" → launcher
+	handles         map[string]agent.AgentHandle   // "sessionID:agentID" → handle
 	launchersMu     sync.RWMutex                   // protects launchers/handles
 }
 
@@ -107,6 +107,12 @@ func NewManager(store Store, idGen IDGenerator, clock Clock, cleaner Cleaner, lo
 		launchers:        make(map[string]agent.AgentLauncher), // NEW
 		handles:          make(map[string]agent.AgentHandle),   // NEW
 	}
+}
+
+// launcherKey generates a composite key for session-scoped launcher/handle maps.
+// This prevents collisions when multiple sessions use the same agentID.
+func launcherKey(sessionID, agentID string) string {
+	return sessionID + ":" + agentID
 }
 
 // CreateUserSession creates a new user session in ACTIVE state with no agents
@@ -279,9 +285,10 @@ func (m *Manager) SpawnAgent(ctx context.Context, userSessionID, agentID, worksp
 		}
 
 		// NEW: Store launcher and handle
+		key := launcherKey(userSessionID, agentID)
 		m.launchersMu.Lock()
-		m.launchers[agentID] = launcher
-		m.handles[agentID] = handle
+		m.launchers[key] = launcher
+		m.handles[key] = handle
 		m.launchersMu.Unlock()
 
 		m.logger.Printf("Agent container spawned: session=%s agentID=%s container=%s", userSessionID, agentID, handle.ContainerID())
@@ -292,11 +299,12 @@ func (m *Manager) SpawnAgent(ctx context.Context, userSessionID, agentID, worksp
 	if err != nil {
 		// Cleanup launcher on client creation failure
 		if m.launcherFactory != nil {
+			key := launcherKey(userSessionID, agentID)
 			m.launchersMu.Lock()
-			launcher := m.launchers[agentID]
-			handle := m.handles[agentID]
-			delete(m.launchers, agentID)
-			delete(m.handles, agentID)
+			launcher := m.launchers[key]
+			handle := m.handles[key]
+			delete(m.launchers, key)
+			delete(m.handles, key)
 			m.launchersMu.Unlock()
 
 			if launcher != nil && handle != nil {
@@ -387,9 +395,10 @@ func (m *Manager) TerminateAgent(ctx context.Context, userSessionID, agentID str
 	m.logger.Printf("Terminating agent: session=%s agentID=%s", userSessionID, agentID)
 
 	// NEW: Stop container if launcher exists
+	key := launcherKey(userSessionID, agentID)
 	m.launchersMu.RLock()
-	launcher := m.launchers[agentID]
-	handle := m.handles[agentID]
+	launcher := m.launchers[key]
+	handle := m.handles[key]
 	m.launchersMu.RUnlock()
 
 	if launcher != nil && handle != nil {
@@ -401,8 +410,8 @@ func (m *Manager) TerminateAgent(ctx context.Context, userSessionID, agentID str
 
 	// NEW: Remove from launcher maps
 	m.launchersMu.Lock()
-	delete(m.launchers, agentID)
-	delete(m.handles, agentID)
+	delete(m.launchers, key)
+	delete(m.handles, key)
 	m.launchersMu.Unlock()
 
 	// Close ACP client if present (with double-close protection)
@@ -499,6 +508,28 @@ func (m *Manager) TerminateUserSession(ctx context.Context, userSessionID string
 					case <-agentCtx.Done():
 						m.logger.Printf("Agent close timeout: userSession=%s agentID=%s", userSessionID, id)
 					}
+				}
+
+				// NEW: Stop container if launcher exists
+				if m.launcherFactory != nil {
+					key := launcherKey(userSessionID, id)
+					m.launchersMu.RLock()
+					launcher := m.launchers[key]
+					handle := m.handles[key]
+					m.launchersMu.RUnlock()
+
+					if launcher != nil && handle != nil {
+						if err := launcher.Stop(agentCtx, handle); err != nil {
+							m.logger.Printf("WARN: Failed to stop container for agent %s: %v", id, err)
+							// Continue cleanup despite error
+						}
+					}
+
+					// Remove from launcher maps
+					m.launchersMu.Lock()
+					delete(m.launchers, key)
+					delete(m.handles, key)
+					m.launchersMu.Unlock()
 				}
 			}(agentID, agent)
 		}

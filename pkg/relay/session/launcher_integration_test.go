@@ -28,7 +28,18 @@ func TestSpawnAgent_WithContainerLauncher(t *testing.T) {
 	}
 
 	// Verify launcher was created and stored
-	// This will fail until we implement the integration
+	key := launcherKey(userSession.GetID(), "test-agent")
+	manager.launchersMu.RLock()
+	launcher := manager.launchers[key]
+	handle := manager.handles[key]
+	manager.launchersMu.RUnlock()
+
+	if launcher == nil {
+		t.Error("Expected launcher to be stored in map after SpawnAgent")
+	}
+	if handle == nil {
+		t.Error("Expected handle to be stored in map after SpawnAgent")
+	}
 }
 
 func TestTerminateAgent_WithContainerLauncher(t *testing.T) {
@@ -54,9 +65,10 @@ func TestTerminateAgent_WithContainerLauncher(t *testing.T) {
 	}
 
 	// Verify launcher and handle were cleaned up
+	key := launcherKey(userSession.GetID(), "test-agent")
 	manager.launchersMu.RLock()
-	launcher := manager.launchers["test-agent"]
-	handle := manager.handles["test-agent"]
+	launcher := manager.launchers[key]
+	handle := manager.handles[key]
 	manager.launchersMu.RUnlock()
 
 	if launcher != nil {

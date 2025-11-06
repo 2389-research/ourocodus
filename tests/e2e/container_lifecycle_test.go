@@ -375,8 +375,10 @@ func TestContainerLifecycle_StopWithTimeout(t *testing.T) {
 	spawnConfig := container.SpawnConfig{
 		AgentID:   agentID,
 		ImageName: "alpine:latest",
-		Command: []string{"sh", "-c",
-			"trap 'echo Ignoring SIGTERM' TERM; while true; do sleep 1; done"},
+		Command: []string{
+			"sh", "-c",
+			"trap 'echo Ignoring SIGTERM' TERM; while true; do sleep 1; done",
+		},
 		Env: []string{"TEST=timeout"},
 	}
 

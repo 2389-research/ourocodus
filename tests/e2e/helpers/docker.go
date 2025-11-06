@@ -6,7 +6,7 @@ import (
 	"io"
 	"time"
 
-	"github.com/containerd/errdefs"
+	cerrdefs "github.com/containerd/errdefs"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/client"
@@ -111,7 +111,7 @@ func VerifyContainerCleanup(ctx context.Context, containerID string) error {
 	}
 
 	// Check if error is "not found" (expected)
-	if errdefs.IsNotFound(err) {
+	if cerrdefs.IsNotFound(err) {
 		return nil // Success - container was cleaned up
 	}
 
