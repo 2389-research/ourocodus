@@ -3,6 +3,8 @@ package session
 import (
 	"testing"
 	"time"
+
+	"github.com/2389-research/ourocodus/pkg/agent"
 )
 
 // TestNewManager_PanicsOnNilDependencies tests that NewManager panics with nil dependencies
@@ -38,7 +40,8 @@ func TestNewManager_PanicsOnNilDependencies(t *testing.T) {
 					t.Errorf("Expected panic for %s, but didn't panic", tt.name)
 				}
 			}()
-			NewManager(tt.store, tt.idGen, tt.clock, tt.cleaner, tt.logger, tt.clientFactory, ".", nil) // nil publisher for tests
+			mockFactory := agent.NewMockLauncherFactory()                                                            // NEW
+			NewManager(tt.store, tt.idGen, tt.clock, tt.cleaner, tt.logger, tt.clientFactory, ".", nil, mockFactory) // nil publisher for tests
 		})
 	}
 }

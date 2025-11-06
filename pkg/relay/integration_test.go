@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/2389-research/ourocodus/pkg/acp"
+	"github.com/2389-research/ourocodus/pkg/agent"
 	"github.com/2389-research/ourocodus/pkg/relay/session"
 	"github.com/gorilla/websocket"
 )
@@ -191,7 +192,8 @@ func setupIntegrationServer(t *testing.T) (*Server, *integrationMockClientFactor
 
 	// Create real session.Manager with injected mocks
 	store := session.NewMemoryStore()
-	sessionManager := session.NewManager(store, sessionIDGen, sessionClock, sessionCleaner, sessionLogger, clientFactory, tempDir, nil) // nil publisher for integration tests
+	mockFactory := agent.NewMockLauncherFactory()                                                                                                    // NEW
+	sessionManager := session.NewManager(store, sessionIDGen, sessionClock, sessionCleaner, sessionLogger, clientFactory, tempDir, nil, mockFactory) // nil publisher for integration tests
 
 	// Create relay server with real session manager
 	server := NewServer(

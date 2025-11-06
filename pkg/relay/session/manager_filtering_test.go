@@ -3,6 +3,8 @@ package session
 import (
 	"context"
 	"testing"
+
+	"github.com/2389-research/ourocodus/pkg/agent"
 )
 
 // TestList tests the List method with filtering
@@ -18,7 +20,8 @@ func TestList(t *testing.T) {
 
 	// Create another active session
 	idGen := &mockIDGenerator{nextID: "session-2"}
-	manager2 := NewManager(NewMemoryStore(), idGen, &mockClock{}, &mockCleaner{}, &mockLogger{}, &mockClientFactory{}, ".", nil) // nil publisher for tests
+	mockFactory := agent.NewMockLauncherFactory()                                                                                             // NEW
+	manager2 := NewManager(NewMemoryStore(), idGen, &mockClock{}, &mockCleaner{}, &mockLogger{}, &mockClientFactory{}, ".", nil, mockFactory) // nil publisher for tests
 	session2, _ := manager2.CreateUserSession(ctx, &mockWebSocket{})
 
 	// Test list all

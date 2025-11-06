@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/2389-research/ourocodus/pkg/agent"
 )
 
 const (
@@ -49,19 +51,26 @@ type Manager struct {
 	clientFactory    ClientFactory
 	baseWorkspaceDir string
 	publisher        EventPublisher // Optional: publishes lifecycle events to NATS
+
+	// NEW: Launcher management
+	launcherFactory agent.LauncherFactory
+	launchers       map[string]agent.AgentLauncher // "sessionID:agentID" → launcher
+	handles         map[string]agent.AgentHandle   // "sessionID:agentID" → handle
+	launchersMu     sync.RWMutex                   // protects launchers/handles
 }
 
 // NewManager creates a session manager with injected dependencies.
 //
-// All dependencies are required and must be non-nil (except publisher). This constructor
-// panics on nil collaborators because missing dependencies indicate programmer configuration
-// bugs, not runtime failures.
+// All dependencies are required and must be non-nil (except publisher and launcherFactory).
+// This constructor panics on nil collaborators because missing dependencies indicate
+// programmer configuration bugs, not runtime failures.
 //
 // baseWorkspaceDir specifies the base directory under which all workspace paths
 // must be constrained. If empty, defaults to "./workspaces".
 //
 // publisher is optional and can be nil. If nil, event publishing is disabled.
-func NewManager(store Store, idGen IDGenerator, clock Clock, cleaner Cleaner, logger Logger, clientFactory ClientFactory, baseWorkspaceDir string, publisher EventPublisher) *Manager {
+// launcherFactory is optional and can be nil. If nil, container spawning is disabled.
+func NewManager(store Store, idGen IDGenerator, clock Clock, cleaner Cleaner, logger Logger, clientFactory ClientFactory, baseWorkspaceDir string, publisher EventPublisher, launcherFactory agent.LauncherFactory) *Manager {
 	if store == nil {
 		panic("store cannot be nil")
 	}
@@ -94,7 +103,16 @@ func NewManager(store Store, idGen IDGenerator, clock Clock, cleaner Cleaner, lo
 		clientFactory:    clientFactory,
 		baseWorkspaceDir: baseWorkspaceDir,
 		publisher:        publisher,
+		launcherFactory:  launcherFactory,                      // NEW
+		launchers:        make(map[string]agent.AgentLauncher), // NEW
+		handles:          make(map[string]agent.AgentHandle),   // NEW
 	}
+}
+
+// launcherKey generates a composite key for session-scoped launcher/handle maps.
+// This prevents collisions when multiple sessions use the same agentID.
+func launcherKey(sessionID, agentID string) string {
+	return sessionID + ":" + agentID
 }
 
 // CreateUserSession creates a new user session in ACTIVE state with no agents
@@ -202,7 +220,7 @@ func (m *Manager) SpawnAgent(ctx context.Context, userSessionID, agentID, worksp
 
 	// Create agent session in SPAWNING state
 	now := m.clock.Now()
-	agent := NewAgentSession(agentID, absPath, now)
+	agentSession := NewAgentSession(agentID, absPath, now)
 
 	// Re-check and add agent atomically (prevents TOCTOU race)
 	userSession.mu.Lock()
@@ -220,29 +238,96 @@ func (m *Manager) SpawnAgent(ctx context.Context, userSessionID, agentID, worksp
 	}
 
 	// Add agent to session in SPAWNING state
-	userSession.addAgent(agent)
+	userSession.addAgent(agentSession)
 	userSession.setLastActive(now)
 	userSession.mu.Unlock()
+
+	// NEW: Create launcher via factory if available
+	if m.launcherFactory != nil {
+		launcherConfig := agent.LauncherConfig{
+			AgentID:   agentID,
+			ImageName: "ourocodus/agent:latest", // TODO: make configurable
+			Command:   []string{"/bin/bash"},    // TODO: make configurable
+			Workspace: absPath,
+			// Credentials will be added in next task
+		}
+
+		launcher, err := m.launcherFactory.CreateLauncher(ctx, agentID, launcherConfig)
+		if err != nil {
+			// Mark agent as FAILED and cleanup
+			agentSession.mu.Lock()
+			agentSession.setAgentState(AgentFailed)
+			agentSession.setError(err.Error())
+			agentSession.mu.Unlock()
+
+			m.logger.Printf("Failed to create launcher: session=%s agentID=%s error=%v", userSessionID, agentID, err)
+			return fmt.Errorf("failed to create launcher: %w", err)
+		}
+
+		// NEW: Spawn agent container
+		spawnConfig := &agent.SpawnConfig{
+			Role:      agentID,
+			Image:     launcherConfig.ImageName,
+			Command:   launcherConfig.Command,
+			Workspace: absPath,
+		}
+
+		handle, err := launcher.Spawn(ctx, spawnConfig)
+		if err != nil {
+			// Mark agent as FAILED and cleanup
+			agentSession.mu.Lock()
+			agentSession.setAgentState(AgentFailed)
+			agentSession.setError(err.Error())
+			agentSession.mu.Unlock()
+
+			m.logger.Printf("Failed to spawn container: session=%s agentID=%s error=%v", userSessionID, agentID, err)
+			return fmt.Errorf("failed to spawn agent: %w", err)
+		}
+
+		// NEW: Store launcher and handle
+		key := launcherKey(userSessionID, agentID)
+		m.launchersMu.Lock()
+		m.launchers[key] = launcher
+		m.handles[key] = handle
+		m.launchersMu.Unlock()
+
+		m.logger.Printf("Agent container spawned: session=%s agentID=%s container=%s", userSessionID, agentID, handle.ContainerID())
+	}
 
 	// Spawn ACP client (I/O - no lock held)
 	acpClient, err := m.clientFactory.NewClient(absPath)
 	if err != nil {
+		// Cleanup launcher on client creation failure
+		if m.launcherFactory != nil {
+			key := launcherKey(userSessionID, agentID)
+			m.launchersMu.Lock()
+			launcher := m.launchers[key]
+			handle := m.handles[key]
+			delete(m.launchers, key)
+			delete(m.handles, key)
+			m.launchersMu.Unlock()
+
+			if launcher != nil && handle != nil {
+				_ = launcher.Stop(ctx, handle)
+			}
+		}
+
 		// Mark agent as FAILED
-		agent.mu.Lock()
-		agent.setAgentState(AgentFailed)
-		agent.setError(err.Error())
-		agent.mu.Unlock()
+		agentSession.mu.Lock()
+		agentSession.setAgentState(AgentFailed)
+		agentSession.setError(err.Error())
+		agentSession.mu.Unlock()
 
 		m.logger.Printf("Agent spawn failed: session=%s agentID=%s error=%v", userSessionID, agentID, err)
 		return fmt.Errorf("failed to spawn ACP client: %w", err)
 	}
 
 	// Transition agent to ACTIVE
-	agent.mu.Lock()
-	agent.setACPClient(acpClient)
-	agent.setAgentState(AgentActive)
-	agent.setAgentLastActive(m.clock.Now())
-	agent.mu.Unlock()
+	agentSession.mu.Lock()
+	agentSession.setACPClient(acpClient)
+	agentSession.setAgentState(AgentActive)
+	agentSession.setAgentLastActive(m.clock.Now())
+	agentSession.mu.Unlock()
 
 	// Publish agent.spawned event (synchronous, errors logged but non-fatal)
 	if m.publisher != nil {
@@ -308,6 +393,26 @@ func (m *Manager) TerminateAgent(ctx context.Context, userSessionID, agentID str
 	}
 
 	m.logger.Printf("Terminating agent: session=%s agentID=%s", userSessionID, agentID)
+
+	// NEW: Stop container if launcher exists
+	key := launcherKey(userSessionID, agentID)
+	m.launchersMu.RLock()
+	launcher := m.launchers[key]
+	handle := m.handles[key]
+	m.launchersMu.RUnlock()
+
+	if launcher != nil && handle != nil {
+		if err := launcher.Stop(ctx, handle); err != nil {
+			m.logger.Printf("WARN: Failed to stop container for agent %s: %v", agentID, err)
+			// Continue cleanup despite error
+		}
+	}
+
+	// NEW: Remove from launcher maps
+	m.launchersMu.Lock()
+	delete(m.launchers, key)
+	delete(m.handles, key)
+	m.launchersMu.Unlock()
 
 	// Close ACP client if present (with double-close protection)
 	agent.mu.Lock()
@@ -403,6 +508,28 @@ func (m *Manager) TerminateUserSession(ctx context.Context, userSessionID string
 					case <-agentCtx.Done():
 						m.logger.Printf("Agent close timeout: userSession=%s agentID=%s", userSessionID, id)
 					}
+				}
+
+				// NEW: Stop container if launcher exists
+				if m.launcherFactory != nil {
+					key := launcherKey(userSessionID, id)
+					m.launchersMu.RLock()
+					launcher := m.launchers[key]
+					handle := m.handles[key]
+					m.launchersMu.RUnlock()
+
+					if launcher != nil && handle != nil {
+						if err := launcher.Stop(agentCtx, handle); err != nil {
+							m.logger.Printf("WARN: Failed to stop container for agent %s: %v", id, err)
+							// Continue cleanup despite error
+						}
+					}
+
+					// Remove from launcher maps
+					m.launchersMu.Lock()
+					delete(m.launchers, key)
+					delete(m.handles, key)
+					m.launchersMu.Unlock()
 				}
 			}(agentID, agent)
 		}
