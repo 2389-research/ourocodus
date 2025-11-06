@@ -45,12 +45,12 @@ test-e2e:
 # Run interactive demo showcasing PR #27 features
 demo:
 	@echo "Running PR #27 features demo..."
-	go run scripts/demo/main.go
+	go run examples/basic-demo/main.go
 
 # Run interactive REPL for manual testing
 interactive:
 	@echo "Starting interactive REPL..."
-	go run scripts/interactive/main.go
+	go run examples/interactive-repl/main.go
 
 # Start the system (placeholder for now)
 run:
