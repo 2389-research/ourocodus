@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -147,6 +148,13 @@ func initializeAgentInfrastructure(ctx context.Context, logger *relay.StdLogger,
 	if workspaceDir == "" {
 		workspaceDir = "./workspaces"
 	}
+
+	// Convert workspaceDir to absolute path (Docker requires absolute paths for bind mounts)
+	absWorkspaceDir, err := filepath.Abs(workspaceDir)
+	if err != nil {
+		log.Fatalf("Failed to resolve absolute workspace directory: %v", err)
+	}
+	workspaceDir = absWorkspaceDir
 
 	repoPath := os.Getenv("REPO_PATH")
 	if repoPath == "" {
