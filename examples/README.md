@@ -10,7 +10,6 @@ Examples are organized by purpose and difficulty level:
 examples/
 ├── basic-demo/           # 🎬 Basic relay and agent interaction
 ├── interactive-repl/     # 🎮 Interactive testing and exploration
-├── performance-testing/  # 📊 Load testing and benchmarking suite
 ├── smoke-tests/          # 🧪 Manual verification tests
 ├── container-reuse/      # 🐳 Container reuse patterns (Phase 2)
 └── nats-basic/           # 📡 NATS pub/sub demo
@@ -72,7 +71,7 @@ go run main.go
 
 ---
 
-### Testing and Performance Examples
+### Testing Examples
 
 #### 🧪 Smoke Tests (`smoke-tests/`)
 
@@ -98,32 +97,6 @@ cd examples/smoke-tests/session && go run main.go
 **Use case:** Quick checks after code changes to ensure nothing broke.
 
 [📖 Full guide](./smoke-tests/README.md)
-
----
-
-#### 📊 Performance Testing (`performance-testing/`)
-
-**Difficulty:** Advanced | **Duration:** 5-10 minutes
-
-**What it shows:** Load testing, benchmarking, and performance visualization.
-
-**Run it:**
-```bash
-cd examples/performance-testing
-./demo-setup.sh
-./demo-run.sh
-# Open browser to http://localhost:9090
-```
-
-**Features demonstrated:**
-- Before/after performance comparisons
-- Load testing with concurrent users
-- Real-time metrics visualization
-- Performance report generation
-
-**Use case:** Validating optimizations, capacity planning, demonstrating improvements.
-
-[📖 Full guide](./performance-testing/EXAMPLE_README.md)
 
 ---
 
@@ -197,9 +170,6 @@ cd examples/interactive-repl && go run main.go
 # 🧪 Smoke tests - Quick verification
 cd examples/smoke-tests/relay && go run main.go
 
-# 📊 Performance testing - Advanced benchmarking
-cd examples/performance-testing && ./demo-setup.sh && ./demo-run.sh
-
 # 🐳 Container reuse - Infrastructure demo
 cd examples/container-reuse && ./demo-container-reuse.sh
 
@@ -210,13 +180,11 @@ cd examples/nats-basic && ./demo-nats-basic.sh
 ### Recommended Learning Path
 
 ```
-1. basic-demo          → Understand fundamentals
+1. basic-demo       → Understand fundamentals
    ↓
-2. interactive-repl    → Explore and experiment
+2. interactive-repl → Explore and experiment
    ↓
-3. smoke-tests         → Learn testing approaches
-   ↓
-4. performance-testing → Advanced concepts
+3. smoke-tests      → Learn testing approaches
 ```
 
 ## Prerequisites
