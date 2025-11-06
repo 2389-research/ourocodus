@@ -1,0 +1,16 @@
+# Minimal test agent for CI/smoketests
+# This is a simple bash-based agent for testing container integration
+FROM ubuntu:24.04
+
+# Install minimal dependencies
+RUN apt-get update && apt-get install -y \
+    git \
+    curl \
+    bash \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create a working directory
+WORKDIR /workspace
+
+# Default command
+CMD ["/bin/bash"]

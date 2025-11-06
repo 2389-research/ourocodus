@@ -32,5 +32,8 @@ jobs:
       - name: Build relay binary
         run: make build
 
+      - name: Build agent Docker image for testing
+        run: docker build -t ourocodus/agent:latest -f Dockerfile.agent .
+
       - name: Run all smoke tests
         run: ./scripts/smoke-test.sh all
