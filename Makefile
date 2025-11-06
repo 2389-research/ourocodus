@@ -10,6 +10,7 @@ build:
 	go build -o bin/relay ./cmd/relay
 	go build -o bin/cli ./cmd/cli
 	go build -o bin/echo-agent ./cmd/echo-agent
+	go build -o bin/event-logger ./cmd/event-logger
 	@echo "Build complete. Binaries in bin/"
 
 # Run unit tests
