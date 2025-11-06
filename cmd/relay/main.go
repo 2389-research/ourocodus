@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -33,6 +34,8 @@ type clockAdapter struct {
 }
 
 func (c *clockAdapter) Now() time.Time {
+	// relay.SystemClock.Now() returns string (RFC3339), but containersession.Clock.Now() needs time.Time
+	// Both ultimately call time.Now(), so we call it directly here
 	return time.Now()
 }
 
@@ -119,11 +122,11 @@ func main() {
 	log.Println("Shutdown signal received, gracefully stopping server...")
 
 	// Create shutdown context with timeout
-	ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
 
 	// Attempt graceful HTTP server shutdown
-	if err := httpServer.Shutdown(ctx); err != nil {
+	if err := httpServer.Shutdown(shutdownCtx); err != nil {
 		log.Printf("Server shutdown error: %v", err)
 		os.Exit(1)
 	}
@@ -131,7 +134,7 @@ func main() {
 	// Drain NATS connection if available
 	if natsClient != nil {
 		log.Println("Draining NATS connection...")
-		if err := natsClient.Drain(ctx); err != nil {
+		if err := natsClient.Drain(shutdownCtx); err != nil {
 			log.Printf("NATS drain error: %v", err)
 		} else {
 			log.Println("NATS connection drained successfully")
@@ -203,6 +206,21 @@ func initializeAgentInfrastructure(ctx context.Context, logger *relay.StdLogger,
 	)
 	log.Printf("Container session manager initialized")
 
+	// Get resource limits from environment or use defaults
+	cpuCores := int64(2)
+	if val := os.Getenv("AGENT_CPU_CORES"); val != "" {
+		if cores, err := strconv.ParseInt(val, 10, 64); err == nil && cores > 0 {
+			cpuCores = cores
+		}
+	}
+
+	memoryMB := int64(4096)
+	if val := os.Getenv("AGENT_MEMORY_MB"); val != "" {
+		if mem, err := strconv.ParseInt(val, 10, 64); err == nil && mem > 0 {
+			memoryMB = mem
+		}
+	}
+
 	// Create launcher factory
 	factoryConfig := agent.LauncherFactoryConfig{
 		DockerClient:     dockerClient,
@@ -212,8 +230,8 @@ func initializeAgentInfrastructure(ctx context.Context, logger *relay.StdLogger,
 		BaseWorkspaceDir: workspaceDir,
 		DefaultImageName: agentImage,
 		DefaultResourceLimits: agent.ResourceLimits{
-			CPUCores: 2,
-			MemoryMB: 4096,
+			CPUCores: cpuCores,
+			MemoryMB: memoryMB,
 		},
 	}
 	launcherFactory := agent.NewDefaultLauncherFactory(factoryConfig)

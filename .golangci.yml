@@ -53,3 +53,10 @@ issues:
       text: "cyclomatic complexity.*TerminateUserSession"
       linters:
         - gocyclo
+
+    # Temporary exception for initializeAgentInfrastructure complexity
+    # Function performs sequential initialization with error handling for each component
+    - path: cmd/relay/main\.go
+      text: "cyclomatic complexity.*initializeAgentInfrastructure"
+      linters:
+        - gocyclo
