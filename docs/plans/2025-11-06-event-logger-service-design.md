@@ -134,10 +134,12 @@ The relay is already publishing events. Event logger just needs to consume them.
 ### NATS Subject Pattern
 
 Relay publishes to these subjects (from `pkg/relay/subjects.go`):
-- `sessions.{sessionID}.session.created`
-- `sessions.{sessionID}.session.terminated`
-- `sessions.{sessionID}.agent.spawned`
-- `sessions.{sessionID}.agent.terminated`
+- `sessions.{sanitizedSessionID}.session.created`
+- `sessions.{sanitizedSessionID}.session.terminated`
+- `sessions.{sanitizedSessionID}.agent.spawned`
+- `sessions.{sanitizedSessionID}.agent.terminated`
+
+> **Note:** `{sanitizedSessionID}` is the user session ID with dots (`.`) replaced by underscores (`_`), as implemented in `pkg/relay/subjects.go`.
 
 Event logger subscribes to `>` (all subjects) to capture these plus any future events.
 

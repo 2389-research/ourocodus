@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"log"
 	"os"
@@ -10,6 +11,17 @@ import (
 
 	"github.com/nats-io/nats.go"
 )
+
+// encodeMessageData safely encodes NATS message data for JSON output.
+// If data is valid JSON, returns it as json.RawMessage.
+// If data is not valid JSON (binary/text), returns base64-encoded string.
+func encodeMessageData(data []byte) (interface{}, string) {
+	if json.Valid(data) {
+		return json.RawMessage(data), "json"
+	}
+	// Non-JSON data - encode as base64 for safe transport
+	return base64.StdEncoding.EncodeToString(data), "base64"
+}
 
 func main() {
 	// Get NATS URL from environment
@@ -41,11 +53,15 @@ func main() {
 
 	// Subscribe to all subjects using wildcard
 	_, err = nc.Subscribe(">", func(msg *nats.Msg) {
-		// Create log entry with timestamp, subject, and raw data
+		// Safely encode message data (JSON or base64)
+		data, encoding := encodeMessageData(msg.Data)
+
+		// Create log entry with timestamp, subject, data, and encoding type
 		logEntry := map[string]interface{}{
 			"timestamp": time.Now().UTC().Format(time.RFC3339),
 			"subject":   msg.Subject,
-			"data":      json.RawMessage(msg.Data),
+			"data":      data,
+			"encoding":  encoding,
 		}
 
 		// Write JSON line to stdout
