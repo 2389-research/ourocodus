@@ -53,26 +53,15 @@ func (l *StdLogger) Printf(format string, v ...interface{}) {
 //
 // Returns an error if neither location is accessible.
 func CreateDockerClient(ctx context.Context) (*client.Client, error) {
-	// Try Colima socket first
 	colimaSocket := filepath.Join(os.Getenv("HOME"), ".colima", "default", "docker.sock")
-	if _, err := os.Stat(colimaSocket); err == nil {
-		if err := os.Setenv("DOCKER_HOST", "unix://"+colimaSocket); err == nil {
-			dockerClient, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
-			if err == nil {
-				pingCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-				defer cancel()
-				if _, err := dockerClient.Ping(pingCtx); err == nil {
-					return dockerClient, nil
-				}
-				_ = dockerClient.Close()
-			}
-		}
-	}
+	colimaHost := "unix://" + colimaSocket
+	dockerHost := "unix:///var/run/docker.sock"
 
-	// Try Docker Desktop
-	if err := os.Setenv("DOCKER_HOST", "unix:///var/run/docker.sock"); err == nil {
-		dockerClient, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
-		if err == nil {
+	if _, err := os.Stat(colimaSocket); err == nil {
+		if dockerClient, err := client.NewClientWithOpts(
+			client.WithHost(colimaHost),
+			client.WithAPIVersionNegotiation(),
+		); err == nil {
 			pingCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 			defer cancel()
 			if _, err := dockerClient.Ping(pingCtx); err == nil {
@@ -80,6 +69,18 @@ func CreateDockerClient(ctx context.Context) (*client.Client, error) {
 			}
 			_ = dockerClient.Close()
 		}
+	}
+
+	if dockerClient, err := client.NewClientWithOpts(
+		client.WithHost(dockerHost),
+		client.WithAPIVersionNegotiation(),
+	); err == nil {
+		pingCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		defer cancel()
+		if _, err := dockerClient.Ping(pingCtx); err == nil {
+			return dockerClient, nil
+		}
+		_ = dockerClient.Close()
 	}
 
 	return nil, fmt.Errorf("cannot connect to Docker - tried Colima (%s) and Docker Desktop (/var/run/docker.sock)", colimaSocket)
