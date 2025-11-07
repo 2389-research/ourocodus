@@ -973,3 +973,71 @@ func TestCreateContainerSession_Reuse(t *testing.T) {
 		}
 	})
 }
+
+func TestCreateContainerSession_TimestampInvariant(t *testing.T) {
+	// This test ensures that CreateContainerSession uses a single
+	// timestamp for both the session's createdAt field and the container labels.
+	// This prevents timestamp drift and test flakiness.
+	t.Run("uses consistent timestamp across session and labels", func(t *testing.T) {
+		// Set up a frozen clock with a specific timestamp
+		frozenTime := time.Date(2025, 11, 7, 15, 30, 45, 0, time.UTC)
+		docker := &mockDockerClient{
+			createFn: func(ctx context.Context, config *container.Config, hostConfig *container.HostConfig, networkingConfig *network.NetworkingConfig, platform *ocispec.Platform, containerName string) (container.CreateResponse, error) {
+				// Verify the label timestamp matches our frozen time
+				labelTimestamp, exists := config.Labels[LabelCreatedAt]
+				if !exists {
+					t.Error("Expected LabelCreatedAt to exist in container labels")
+				}
+
+				// Parse the label timestamp
+				parsedTime, err := time.Parse(time.RFC3339, labelTimestamp)
+				if err != nil {
+					t.Errorf("Failed to parse label timestamp: %v", err)
+				}
+
+				// Verify label timestamp matches frozen time
+				if !parsedTime.Equal(frozenTime) {
+					t.Errorf("Label timestamp %v does not match frozen time %v", parsedTime, frozenTime)
+				}
+
+				return container.CreateResponse{ID: "test-container-id"}, nil
+			},
+		}
+		idGen := &mockIDGenerator{nextID: "test-timestamp-123"}
+		clock := &mockClock{now: frozenTime}
+		logger := &mockLogger{}
+
+		manager := NewManager(docker, idGen, clock, logger, t.TempDir())
+
+		session, err := manager.CreateContainerSession(context.Background(), "ubuntu:latest", []string{"/bin/bash"})
+		if err != nil {
+			t.Fatalf("Expected no error, got %v", err)
+		}
+
+		// Verify session's createdAt matches frozen time
+		if !session.CreatedAt().Equal(frozenTime) {
+			t.Errorf("Session createdAt %v does not match frozen time %v", session.CreatedAt(), frozenTime)
+		}
+
+		// Verify label timestamp matches frozen time (via our createFn check above)
+		labels := session.Labels()
+		labelTimestamp, exists := labels[LabelCreatedAt]
+		if !exists {
+			t.Error("Expected LabelCreatedAt to exist in session labels")
+		}
+
+		parsedTime, err := time.Parse(time.RFC3339, labelTimestamp)
+		if err != nil {
+			t.Errorf("Failed to parse session label timestamp: %v", err)
+		}
+
+		if !parsedTime.Equal(frozenTime) {
+			t.Errorf("Session label timestamp %v does not match frozen time %v", parsedTime, frozenTime)
+		}
+
+		// Critical invariant: session.CreatedAt() and parsed label timestamp must be equal
+		if !session.CreatedAt().Equal(parsedTime) {
+			t.Errorf("Session createdAt %v does not match label timestamp %v", session.CreatedAt(), parsedTime)
+		}
+	})
+}
