@@ -119,3 +119,68 @@ graph TB
 3. Agent Launcher uses ContainerSession Manager to create container
 4. Container runs Claude Code ACP process with mounted workspace
 5. Agent communicates back through Relay to PWA
+
+## Execution Flow
+
+The following sequence diagram shows the complete lifecycle of an agent session from spawn to termination:
+
+```mermaid
+sequenceDiagram
+    participant PWA as PWA (Browser)
+    participant Relay as Relay Server
+    participant CSM as ContainerSession Manager
+    participant Docker as Docker Engine
+    participant Agent as Claude Code Agent
+
+    PWA->>Relay: WebSocket Connect (UserSession)
+    Relay->>PWA: Connected
+
+    PWA->>Relay: Spawn Agent Request
+    Relay->>CSM: CreateContainerSession(config)
+    CSM->>Docker: Create Container with Env (ANTHROPIC_API_KEY)
+    Docker-->>CSM: Container ID
+    CSM->>Docker: Start Container
+    Docker->>Agent: Launch ACP Process
+    CSM-->>Relay: ContainerSession + AgentSession
+    Relay->>Agent: ACP Initialize
+    Agent-->>Relay: Ready
+    Relay-->>PWA: Agent Ready
+
+    PWA->>Relay: Task Request
+    Relay->>Agent: ACP Task Message
+    Agent->>Agent: Execute in Workspace
+    Agent-->>Relay: Task Result
+    Relay-->>PWA: Display Result
+
+    PWA->>Relay: Terminate Agent
+    Relay->>CSM: Stop(sessionID)
+    CSM->>Docker: Stop & Remove Container
+    Docker-->>CSM: Stopped
+    CSM-->>Relay: Terminated
+    Relay-->>PWA: Agent Terminated
+```
+
+**Flow Phases:**
+
+### 1. Connection Phase
+- User opens PWA → WebSocket connection established
+- UserSession created and tracked by Relay
+
+### 2. Agent Spawn Phase
+- User requests agent → Relay creates AgentSession
+- ContainerSession Manager creates Docker container with configuration
+- Container receives ANTHROPIC_API_KEY via environment variables
+- Claude Code ACP process launches inside container
+- ACP initialization completes → Agent reports ready
+
+### 3. Task Execution Phase
+- User sends task via PWA
+- Relay routes ACP message to agent
+- Agent executes task in mounted workspace
+- Results returned through Relay to PWA
+
+### 4. Termination Phase
+- User terminates agent (or UserSession disconnects)
+- ContainerSession Manager stops and removes container
+- AgentSession cleaned up from Session Manager
+- Workspace persists on host filesystem
