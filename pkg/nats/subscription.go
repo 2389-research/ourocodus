@@ -109,9 +109,20 @@ func (s *Subscription) Stop(ctx context.Context) error {
 	}
 
 	if s.natsSub != nil {
-		// Unsubscribe and drain
-		if err := s.natsSub.Drain(); err != nil {
-			return fmt.Errorf("drain subscription: %w", err)
+		// Drain with context deadline
+		drainDone := make(chan error, 1)
+		go func() {
+			drainDone <- s.natsSub.Drain()
+		}()
+
+		select {
+		case err := <-drainDone:
+			if err != nil {
+				return fmt.Errorf("drain subscription: %w", err)
+			}
+		case <-ctx.Done():
+			// Drain exceeded deadline
+			return fmt.Errorf("drain timeout: %w", ctx.Err())
 		}
 	}
 

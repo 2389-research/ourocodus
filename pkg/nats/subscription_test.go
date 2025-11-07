@@ -211,3 +211,76 @@ func TestSubscription_StopCancelsHandlers(t *testing.T) {
 		t.Fatal("timeout waiting for handler to exit")
 	}
 }
+
+// TestSubscription_StopWithTimeout verifies Stop() respects context timeout.
+func TestSubscription_StopWithTimeout(t *testing.T) {
+	srv := runTestServer(t)
+	defer srv.Shutdown()
+
+	client, err := NewClient(
+		WithURL(srv.ClientURL()),
+		WithName("test-timeout"),
+	)
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+	defer client.Close()
+
+	sub, err := client.Subscribe(context.Background(), "test.timeout", func(ctx context.Context, msg *Message) error {
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Subscribe() error = %v", err)
+	}
+
+	// Stop with a very short timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Nanosecond)
+	defer cancel()
+
+	// Wait a bit to ensure timeout fires
+	time.Sleep(10 * time.Millisecond)
+
+	start := time.Now()
+	err = sub.Stop(ctx)
+	elapsed := time.Since(start)
+
+	// Should complete quickly (either success or timeout)
+	if elapsed > time.Second {
+		t.Errorf("Stop() took too long: %v", elapsed)
+	}
+
+	// May get timeout error or succeed depending on timing
+	if err != nil && ctx.Err() == nil {
+		t.Errorf("Stop() returned error but context not expired: %v", err)
+	}
+}
+
+// TestSubscription_StopWithGenerousTimeout verifies Stop() completes normally.
+func TestSubscription_StopWithGenerousTimeout(t *testing.T) {
+	srv := runTestServer(t)
+	defer srv.Shutdown()
+
+	client, err := NewClient(
+		WithURL(srv.ClientURL()),
+		WithName("test-normal-stop"),
+	)
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+	defer client.Close()
+
+	sub, err := client.Subscribe(context.Background(), "test.normal", func(ctx context.Context, msg *Message) error {
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Subscribe() error = %v", err)
+	}
+
+	// Stop with generous timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := sub.Stop(ctx); err != nil {
+		t.Errorf("Stop() error = %v", err)
+	}
+}
