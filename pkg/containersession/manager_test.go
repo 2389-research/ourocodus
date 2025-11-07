@@ -975,7 +975,7 @@ func TestCreateContainerSession_Reuse(t *testing.T) {
 }
 
 func TestCreateContainerSession_TimestampInvariant(t *testing.T) {
-	// This test ensures that CreateContainerSessionWithConfig uses a single
+	// This test ensures that CreateContainerSession uses a single
 	// timestamp for both the session's createdAt field and the container labels.
 	// This prevents timestamp drift and test flakiness.
 	t.Run("uses consistent timestamp across session and labels", func(t *testing.T) {
