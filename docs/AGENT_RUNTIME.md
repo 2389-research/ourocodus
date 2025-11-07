@@ -538,3 +538,132 @@ If issues persist:
    - Docker logs for container
    - `docker info` output
    - Operating system and Docker version
+
+## Future: Kubernetes Migration Path
+
+### Current Architecture (Single Host)
+
+- **Docker Engine:** Direct connection via Docker socket
+- **Isolation:** Process isolation via Docker containers
+- **Networking:** Docker bridge network
+- **Storage:** Bind mounts from host filesystem
+- **Lifecycle:** Managed by ContainerSession Manager
+
+**Scaling Characteristics:**
+- Scales to ~50-100 concurrent agents on single host (depending on resources)
+- Simple deployment and debugging
+- No distributed systems complexity
+- Suitable for development and small-scale production
+
+### Near-Term Scaling (Single Host)
+
+The current architecture supports horizontal scaling on a single host:
+
+- **More Containers:** Current design handles N containers efficiently
+- **Resource Limits:** Add CPU/memory limits via `CreateConfig`
+- **Container Pooling:** Reuse containers for sequential agent sessions (future)
+- **Workspace Optimization:** Shared read-only base + per-agent overlay
+
+**When to migrate:** When consistently running >50 concurrent agents or need multi-host.
+
+### Long-Term: Kubernetes Migration
+
+**Primitive Mappings:**
+
+| Current | Kubernetes Equivalent | Notes |
+|---------|----------------------|-------|
+| ContainerSession | Job or Pod | Ephemeral workload for agent execution |
+| Docker container | Container in Pod | Same isolation model |
+| Environment variables (credentials) | Secrets | Native K8s secret management |
+| Bind mount (workspace) | PersistentVolumeClaim | Durable storage across pod restarts |
+| Docker bridge network | NetworkPolicy | Control traffic between pods |
+| ContainerSession Manager | Kubernetes API | API-driven lifecycle management |
+
+**Architecture Changes:**
+
+```
+Current:
+Relay → ContainerSession Manager → Docker API → Container
+
+Kubernetes:
+Relay → Kubernetes API → Job/Pod → Container
+```
+
+**What Stays Identical:**
+- Agent code (Claude Code ACP binary)
+- ACP protocol and message flow
+- Workspace structure and git worktrees
+- Session type abstractions (UserSession, AgentSession, ContainerSession)
+- Relay WebSocket handling
+
+**What Changes:**
+- `pkg/containersession` replaced with K8s client library
+- Container lifecycle managed by K8s instead of direct Docker API
+- Workspaces stored in PVCs instead of host bind mounts
+- Credentials managed via K8s Secrets API
+- Load balancing and scheduling via K8s scheduler
+
+**Migration Complexity:** Low-to-Medium
+
+- Clean abstraction boundaries make swap straightforward
+- ContainerSession interface remains conceptually the same
+- Main effort: implementing K8s client wrapper matching ContainerSession API
+
+**When to Migrate:**
+
+- **Don't migrate yet:** Current architecture sufficient for M2-M4
+- **Consider:** When running >100 concurrent agents consistently
+- **Migrate:** When need multi-host distribution or K8s-native deployment
+
+### Kubernetes Example (Future Reference)
+
+**Minimal Job Spec:**
+
+```yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: agent-session-abc123
+  labels:
+    ourocodus.session.id: abc123
+    ourocodus.user.id: user-xyz
+spec:
+  template:
+    spec:
+      containers:
+      - name: agent
+        image: ourocodus/agent:latest
+        env:
+        - name: ANTHROPIC_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: anthropic-credentials
+              key: api-key
+        volumeMounts:
+        - name: workspace
+          mountPath: /workspace
+      volumes:
+      - name: workspace
+        persistentVolumeClaim:
+          claimName: agent-workspace-abc123
+      restartPolicy: Never
+```
+
+**Benefits of K8s Migration:**
+
+- Multi-host distribution for massive scale
+- Native secret management and rotation
+- Better resource utilization via scheduler
+- High availability and fault tolerance
+- Standard deployment tooling (Helm, Kustomize)
+
+**Trade-offs:**
+
+- Increased operational complexity
+- Requires K8s cluster management
+- More difficult local development setup
+- Additional abstractions to understand
+
+### Design Principle
+
+The ContainerSession abstraction exists specifically to make this migration straightforward when needed. The current Docker-based implementation and future K8s implementation can share the same interface, minimizing changes to the relay and session management layers.
