@@ -171,7 +171,7 @@ TestNormalizeSubject(t *testing.T) {
     }{
         {"sessions.abc123.events", "sessions.*.events"},
         {"sessions.test.work", "sessions.*.work"},
-        {"agents.s1.a2.heartbeat", "agents.*.*.*"},
+        {"agents.s1.a2.heartbeat", "agents.*.*.heartbeat"},
         {"unknown.prefix", "unknown.prefix"},
     }
     // ...
