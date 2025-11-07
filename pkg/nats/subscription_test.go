@@ -2,6 +2,7 @@ package nats
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 )
@@ -93,5 +94,196 @@ func TestSubscription_MessageHandler(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timeout waiting for message")
+	}
+}
+
+// TestSubscription_HandlerCancellation verifies handlers detect context cancellation.
+func TestSubscription_HandlerCancellation(t *testing.T) {
+	srv := runTestServer(t)
+	defer srv.Shutdown()
+
+	client, err := NewClient(
+		WithURL(srv.ClientURL()),
+		WithName("test-cancellation"),
+	)
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+	defer client.Close()
+
+	// Create cancellable context
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Handler that blocks until context is cancelled
+	handlerCalled := make(chan struct{})
+	handlerDone := make(chan error, 1)
+
+	sub, err := client.Subscribe(ctx, "test.cancel", func(ctx context.Context, msg *Message) error {
+		close(handlerCalled)
+		// Block until context is cancelled
+		<-ctx.Done()
+		handlerDone <- ctx.Err()
+		return ctx.Err()
+	})
+	if err != nil {
+		t.Fatalf("Subscribe() error = %v", err)
+	}
+	defer sub.Stop(context.Background())
+
+	// Publish a message to trigger handler
+	if err := client.Publish(context.Background(), "test.cancel", []byte("test")); err != nil {
+		t.Fatalf("Publish() error = %v", err)
+	}
+
+	// Wait for handler to be called
+	select {
+	case <-handlerCalled:
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for handler to be called")
+	}
+
+	// Cancel the parent context
+	cancel()
+
+	// Verify handler detects cancellation
+	select {
+	case err := <-handlerDone:
+		if err != context.Canceled {
+			t.Errorf("handler error = %v, want context.Canceled", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for handler to exit")
+	}
+}
+
+// TestSubscription_StopCancelsHandlers verifies Stop() cancels in-flight handlers.
+func TestSubscription_StopCancelsHandlers(t *testing.T) {
+	srv := runTestServer(t)
+	defer srv.Shutdown()
+
+	client, err := NewClient(
+		WithURL(srv.ClientURL()),
+		WithName("test-stop-cancel"),
+	)
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+	defer client.Close()
+
+	// Handler that blocks and checks context
+	handlerCalled := make(chan struct{})
+	handlerDone := make(chan error, 1)
+
+	sub, err := client.Subscribe(context.Background(), "test.stop", func(ctx context.Context, msg *Message) error {
+		close(handlerCalled)
+		// Block until context is cancelled
+		<-ctx.Done()
+		handlerDone <- ctx.Err()
+		return ctx.Err()
+	})
+	if err != nil {
+		t.Fatalf("Subscribe() error = %v", err)
+	}
+
+	// Publish a message to trigger handler
+	if err := client.Publish(context.Background(), "test.stop", []byte("test")); err != nil {
+		t.Fatalf("Publish() error = %v", err)
+	}
+
+	// Wait for handler to be called
+	select {
+	case <-handlerCalled:
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for handler to be called")
+	}
+
+	// Stop the subscription (should cancel handlers)
+	if err := sub.Stop(context.Background()); err != nil {
+		t.Errorf("Stop() error = %v", err)
+	}
+
+	// Verify handler detected cancellation
+	select {
+	case err := <-handlerDone:
+		if err != context.Canceled {
+			t.Errorf("handler error = %v, want context.Canceled", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for handler to exit")
+	}
+}
+
+// TestSubscription_StopWithTimeout verifies Stop() respects context timeout.
+func TestSubscription_StopWithTimeout(t *testing.T) {
+	srv := runTestServer(t)
+	defer srv.Shutdown()
+
+	client, err := NewClient(
+		WithURL(srv.ClientURL()),
+		WithName("test-timeout"),
+	)
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+	defer client.Close()
+
+	sub, err := client.Subscribe(context.Background(), "test.timeout", func(ctx context.Context, msg *Message) error {
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Subscribe() error = %v", err)
+	}
+
+	// Stop with a short timeout (50ms)
+	timeout := 50 * time.Millisecond
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	start := time.Now()
+	err = sub.Stop(ctx)
+	elapsed := time.Since(start)
+
+	// Should complete within reasonable time (less than 1s)
+	if elapsed > time.Second {
+		t.Errorf("Stop() took too long: %v", elapsed)
+	}
+
+	// Should return timeout error if drain didn't complete in time
+	// Note: drain may succeed quickly in tests, so we accept both outcomes
+	if err != nil {
+		// If there's an error, verify it's timeout-related
+		if !strings.Contains(err.Error(), "timeout") && !strings.Contains(err.Error(), "deadline") {
+			t.Errorf("Stop() returned unexpected error: %v", err)
+		}
+	}
+}
+
+// TestSubscription_StopWithGenerousTimeout verifies Stop() completes normally.
+func TestSubscription_StopWithGenerousTimeout(t *testing.T) {
+	srv := runTestServer(t)
+	defer srv.Shutdown()
+
+	client, err := NewClient(
+		WithURL(srv.ClientURL()),
+		WithName("test-normal-stop"),
+	)
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+	defer client.Close()
+
+	sub, err := client.Subscribe(context.Background(), "test.normal", func(ctx context.Context, msg *Message) error {
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Subscribe() error = %v", err)
+	}
+
+	// Stop with generous timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := sub.Stop(ctx); err != nil {
+		t.Errorf("Stop() error = %v", err)
 	}
 }

@@ -18,9 +18,11 @@ type Subscription struct {
 
 	natsSub *nats.Subscription
 
+	ctx    context.Context
+	cancel context.CancelFunc
+
 	mu     sync.RWMutex
 	closed bool
-	stopCh chan struct{}
 }
 
 // newSubscription creates a new subscription.
@@ -30,12 +32,14 @@ func newSubscription(c *client, subject string, handler MsgHandler, opts *subOpt
 		subject: subject,
 		handler: handler,
 		opts:    opts,
-		stopCh:  make(chan struct{}),
 	}
 }
 
 // start begins the subscription.
-func (s *Subscription) start(_ context.Context) error {
+func (s *Subscription) start(ctx context.Context) error {
+	// Create cancellable context for subscription lifetime
+	s.ctx, s.cancel = context.WithCancel(ctx)
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -71,15 +75,14 @@ func (s *Subscription) messageHandler(msg *nats.Msg) {
 		s.mu.RUnlock()
 		return
 	}
+	// Read context while holding lock to avoid race
+	ctx := s.ctx
 	s.mu.RUnlock()
 
 	start := time.Now()
 
 	// Wrap message
 	wrappedMsg := wrapNatsMessage(msg, s.client.config.CorrelationHeader)
-
-	// Create context for handler
-	ctx := context.Background()
 
 	// Call user handler
 	err := s.handler(ctx, wrappedMsg)
@@ -98,12 +101,28 @@ func (s *Subscription) Stop(ctx context.Context) error {
 	}
 
 	s.closed = true
-	close(s.stopCh)
+
+	// Cancel subscription context to signal handlers
+	if s.cancel != nil {
+		s.cancel()
+	}
 
 	if s.natsSub != nil {
-		// Unsubscribe and drain
-		if err := s.natsSub.Drain(); err != nil {
-			return fmt.Errorf("drain subscription: %w", err)
+		// Drain with context deadline
+		drainDone := make(chan error, 1)
+		go func() {
+			drainDone <- s.natsSub.Drain()
+		}()
+
+		select {
+		case err := <-drainDone:
+			if err != nil {
+				return fmt.Errorf("drain subscription: %w", err)
+			}
+		case <-ctx.Done():
+			// Drain exceeded deadline, force unsubscribe to prevent resource leak
+			_ = s.natsSub.Unsubscribe()
+			return fmt.Errorf("drain timeout: %w", ctx.Err())
 		}
 	}
 
