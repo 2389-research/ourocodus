@@ -143,12 +143,5 @@ func validateWorkspaceBaseDir(basePath string) error {
 		return fmt.Errorf("workspace base directory cannot contain '..' sequences: %s", cleanPath)
 	}
 
-	// Verify the path doesn't try to escape (additional defense-in-depth)
-	// This catches cases where cleanPath might resolve to a parent of the original basePath
-	relPath, err := filepath.Rel(cleanPath, absPath)
-	if err == nil && (strings.HasPrefix(relPath, "..") || relPath == "..") {
-		return fmt.Errorf("workspace base directory escapes intended location: %s", basePath)
-	}
-
 	return nil
 }
