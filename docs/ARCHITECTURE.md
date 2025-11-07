@@ -119,6 +119,61 @@ Each AgentSession has three isolation layers orchestrated by `AgentContainerLaun
 
 ---
 
+## Agent Runtime Layer
+
+The agent runtime layer manages the lifecycle and execution environment for AI coding agents. This layer provides isolation, resource management, and workspace coordination.
+
+**Key Components:**
+
+- **Session Manager:** Tracks UserSessions (WebSocket connections) and spawns AgentSessions
+- **ContainerSession Manager:** Creates and manages Docker containers for agent execution
+- **Agent Launcher:** Coordinates agent spawning and ACP protocol initialization
+
+**Session Types:**
+
+- **UserSession:** WebSocket connection from PWA (browser) to Relay
+- **AgentSession:** Individual AI agent process with workspace and state
+- **ContainerSession:** Docker container runtime (one per AgentSession)
+
+**Architecture Overview:**
+
+```
+PWA (Browser)
+    ↓ WebSocket
+Relay Server (Session Management)
+    ↓ Docker API
+ContainerSession Manager
+    ↓ Container Lifecycle
+Docker Engine
+    ↓ Runs
+Claude Code Agent (ACP)
+    ↓ Reads/Writes
+Git Worktree (Workspace)
+```
+
+**For Complete Details:** See [Agent Runtime Architecture](./AGENT_RUNTIME.md) for:
+- Detailed session type definitions and lifecycle policies
+- Component and sequence diagrams (Mermaid)
+- Configuration and credential management
+- Troubleshooting common container issues
+- Future Kubernetes migration path
+
+**Session Lifecycle:**
+
+1. User connects via PWA → UserSession created
+2. User spawns agent → AgentSession + ContainerSession created
+3. Agent executes tasks in isolated container
+4. User terminates agent → ContainerSession and AgentSession cleaned up
+5. Workspace persists on host after termination
+
+**Implementation:**
+
+- Session tracking: `pkg/relay/session/`
+- Container management: `pkg/containersession/`
+- ACP client: `pkg/acp/`
+
+---
+
 ## Long-term: Production Architecture
 
 **Goal:** Autonomous multi-agent workflow system
