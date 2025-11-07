@@ -240,7 +240,52 @@ This pattern is useful for:
 - See `examples/containersession/echo-agent/` for I/O interaction patterns
 - See `pkg/containersession/` for implementation details
 
+## Platform Support
+
+### Supported Platforms
+
+**macOS and Linux:**
+- Docker Desktop
+- Colima (macOS)
+- Docker Engine (Linux)
+
+**Windows:**
+- Requires manual `DOCKER_HOST` configuration
+- Docker Desktop with WSL2 backend (recommended)
+- See Windows setup instructions below
+
+### Windows Setup
+
+The Docker client setup code assumes Unix-like systems with Unix socket paths. For Windows, you need to configure `DOCKER_HOST` before running:
+
+**Docker Desktop with Named Pipe:**
+```powershell
+# PowerShell
+$env:DOCKER_HOST="npipe:////./pipe/docker_engine"
+
+# Or Command Prompt
+set DOCKER_HOST=npipe:////./pipe/docker_engine
+```
+
+**Docker Desktop with TCP (if exposed):**
+```powershell
+$env:DOCKER_HOST="tcp://localhost:2375"
+```
+
+**WSL2 (Recommended):**
+Run the example inside WSL2 where Unix socket behavior matches macOS/Linux:
+```bash
+# Inside WSL2
+go run examples/containersession/multi/main.go
+```
+
 ## Troubleshooting
+
+**Error: "cannot connect to Docker"**
+- Ensure Docker Desktop or Colima is running
+- Check: `docker ps` works in your terminal
+- Windows: Verify `DOCKER_HOST` is set correctly (see Platform Support)
+- Check: `echo $DOCKER_HOST` (Unix) or `echo %DOCKER_HOST%` (Windows)
 
 **Sessions not starting**
 - Check Docker is running: `docker ps`

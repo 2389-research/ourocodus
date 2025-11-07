@@ -219,6 +219,45 @@ go test -tags=integration ./pkg/containersession -run TestIntegration_CreateStar
 
 See [pkg/containersession/integration_test.go](../../pkg/containersession/integration_test.go) for available tests.
 
+## Platform Support
+
+### Supported Platforms
+
+**macOS and Linux:**
+- Docker Desktop
+- Colima (macOS)
+- Docker Engine (Linux)
+
+**Windows:**
+- Requires manual `DOCKER_HOST` configuration
+- Docker Desktop with WSL2 backend (recommended)
+- See Windows setup instructions below
+
+### Windows Setup
+
+The Docker client setup code in examples assumes Unix-like systems with Unix socket paths. For Windows, you need to configure `DOCKER_HOST` before running examples:
+
+**Docker Desktop with Named Pipe:**
+```powershell
+# PowerShell
+$env:DOCKER_HOST="npipe:////./pipe/docker_engine"
+
+# Or Command Prompt
+set DOCKER_HOST=npipe:////./pipe/docker_engine
+```
+
+**Docker Desktop with TCP (if exposed):**
+```powershell
+$env:DOCKER_HOST="tcp://localhost:2375"
+```
+
+**WSL2 (Recommended):**
+Run examples inside WSL2 where Unix socket behavior matches macOS/Linux:
+```bash
+# Inside WSL2
+go run examples/containersession/basic/main.go
+```
+
 ## Troubleshooting
 
 ### "cannot connect to Docker"
@@ -229,7 +268,8 @@ See [pkg/containersession/integration_test.go](../../pkg/containersession/integr
 - Ensure Docker Desktop is running or Colima is started
 - Test: `docker ps` should work
 - Colima: `colima start`
-- Check DOCKER_HOST: `echo $DOCKER_HOST`
+- Check DOCKER_HOST: `echo $DOCKER_HOST` (Unix) or `echo %DOCKER_HOST%` (Windows)
+- Windows: Verify `DOCKER_HOST` is set correctly (see Platform Support above)
 
 ### "permission denied" on workspace
 
