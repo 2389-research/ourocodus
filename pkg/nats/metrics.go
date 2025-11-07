@@ -261,7 +261,7 @@ func normalizeSubject(subject string) string {
 		}
 	case "agents":
 		// agents.<session-id>.<agent-id>.heartbeat
-		// Normalize to: agents.*.*.*
+		// Normalize to: agents.*.*.{suffix}
 		if len(tokens) >= 2 {
 			tokens[1] = "*"
 		}
