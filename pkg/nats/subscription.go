@@ -20,7 +20,6 @@ type Subscription struct {
 
 	mu     sync.RWMutex
 	closed bool
-	stopCh chan struct{}
 }
 
 // newSubscription creates a new subscription.
@@ -30,7 +29,6 @@ func newSubscription(c *client, subject string, handler MsgHandler, opts *subOpt
 		subject: subject,
 		handler: handler,
 		opts:    opts,
-		stopCh:  make(chan struct{}),
 	}
 }
 
@@ -98,7 +96,6 @@ func (s *Subscription) Stop(ctx context.Context) error {
 	}
 
 	s.closed = true
-	close(s.stopCh)
 
 	if s.natsSub != nil {
 		// Unsubscribe and drain
