@@ -65,3 +65,57 @@ These are the authoritative definitions for session types in Ourocodus:
 - Network: Default Docker bridge network
 - Credentials: Injected via environment variables
 - Lifecycle: Created on agent spawn, destroyed on agent termination
+
+## Component Architecture
+
+The following diagram shows the runtime layer components and their relationships:
+
+```mermaid
+graph TB
+    subgraph "Browser"
+        PWA[PWA Frontend]
+    end
+
+    subgraph "Relay Server"
+        WS[WebSocket Handler]
+        SM[Session Manager]
+        AL[Agent Launcher]
+    end
+
+    subgraph "Container Runtime"
+        CM[ContainerSession Manager]
+        Docker[Docker Engine]
+    end
+
+    subgraph "Agent Execution"
+        Agent[Claude Code ACP]
+        Workspace[Git Worktree]
+    end
+
+    PWA -->|WebSocket| WS
+    WS --> SM
+    SM --> AL
+    AL -->|uses| CM
+    CM -->|creates/manages| Docker
+    Docker -->|runs| Agent
+    Agent -->|reads/writes| Workspace
+```
+
+**Components Explained:**
+
+- **PWA Frontend:** Browser-based user interface for interacting with agents
+- **WebSocket Handler:** Manages UserSession connections and message routing
+- **Session Manager:** Tracks active UserSessions and their AgentSessions
+- **Agent Launcher:** Coordinates agent spawning and initialization
+- **ContainerSession Manager:** Creates and manages Docker containers (`pkg/containersession`)
+- **Docker Engine:** Provides container runtime and isolation
+- **Claude Code ACP:** AI agent process running inside container
+- **Git Worktree:** Isolated workspace directory for agent operations
+
+**Key Interactions:**
+
+1. PWA establishes WebSocket connection → UserSession created
+2. User requests agent spawn → Session Manager coordinates with Agent Launcher
+3. Agent Launcher uses ContainerSession Manager to create container
+4. Container runs Claude Code ACP process with mounted workspace
+5. Agent communicates back through Relay to PWA
