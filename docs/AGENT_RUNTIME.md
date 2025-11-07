@@ -288,3 +288,253 @@ Agent process accesses via os.Getenv()
 - ContainerSession Config: `pkg/containersession/config.go`
 - Container Manager: `pkg/containersession/manager.go`
 - ACP Client: `pkg/acp/client.go`
+
+## Troubleshooting
+
+Common issues when working with the agent runtime and their solutions.
+
+### 1. Missing API Key
+
+**Symptom:**
+```
+Error: ANTHROPIC_API_KEY environment variable not set
+```
+
+**Cause:** The relay server cannot find the required API key in its environment.
+
+**Solution:**
+
+```bash
+# Set the environment variable before starting relay
+export ANTHROPIC_API_KEY="sk-ant-api03-..."
+./cmd/relay/relay
+
+# Verify it's set
+echo $ANTHROPIC_API_KEY
+```
+
+**Prevention:** Add to your shell profile (`.bashrc`, `.zshrc`) for persistence:
+```bash
+echo 'export ANTHROPIC_API_KEY="sk-ant-..."' >> ~/.zshrc
+```
+
+---
+
+### 2. Docker Connection Failed
+
+**Symptom:**
+```
+Error: Cannot connect to Docker daemon at unix:///var/run/docker.sock
+```
+
+**Cause:** Docker daemon is not running or not accessible.
+
+**Solution by Platform:**
+
+**macOS (Docker Desktop):**
+```bash
+# Check if Docker is running
+docker ps
+
+# If not running, start Docker Desktop application
+open -a Docker
+
+# Wait for Docker to start, then verify
+docker ps
+```
+
+**macOS (Colima):**
+```bash
+# Check Colima status
+colima status
+
+# Start if not running
+colima start
+
+# Verify connection
+docker ps
+```
+
+**Linux:**
+```bash
+# Check if Docker daemon is running
+sudo systemctl status docker
+
+# Start if not running
+sudo systemctl start docker
+
+# Ensure your user is in docker group
+sudo usermod -aG docker $USER
+# Log out and back in for group change to take effect
+
+# Verify connection (no sudo needed after group membership)
+docker ps
+```
+
+**Custom DOCKER_HOST:**
+```bash
+# If using custom Docker socket location
+export DOCKER_HOST="unix:///path/to/custom/docker.sock"
+```
+
+---
+
+### 3. Container Image Pull Failure
+
+**Symptom:**
+```
+Error: failed to pull image "ourocodus/agent:latest": pull access denied
+```
+
+**Cause:** Cannot pull the Docker image from registry.
+
+**Solutions:**
+
+**Check Internet Connection:**
+```bash
+# Test connectivity
+ping docker.io
+```
+
+**Verify Image Name:**
+```bash
+# Test manual pull
+docker pull ourocodus/agent:latest
+
+# Check available images
+docker images
+```
+
+**Docker Hub Rate Limits:**
+```bash
+# If hitting rate limits, authenticate
+docker login
+
+# Or use a mirror registry
+```
+
+**Image Doesn't Exist:**
+```bash
+# Build image locally if not in registry
+cd /path/to/ourocodus
+docker build -t ourocodus/agent:latest -f containers/agent/Dockerfile .
+```
+
+**Firewall/Proxy Issues:**
+```bash
+# Configure Docker to use proxy if behind corporate firewall
+# Edit /etc/docker/daemon.json or Docker Desktop settings
+```
+
+---
+
+### 4. Permission Denied on Workspace
+
+**Symptom:**
+```
+Error: permission denied: /workspace/file.txt
+```
+
+**Cause:** Container user lacks permissions to access mounted workspace.
+
+**Solution:**
+
+**Check Mount Permissions:**
+```bash
+# Verify workspace directory is accessible
+ls -la /path/to/workspace
+
+# Ensure directory is readable and writable
+chmod 755 /path/to/workspace
+```
+
+**Linux SELinux:**
+```bash
+# If using SELinux, add :z or :Z to mount options
+# This is handled in pkg/containersession mount configuration
+```
+
+---
+
+### 5. Agent Timeout or Unresponsive
+
+**Symptom:**
+- Agent spawn request hangs
+- No response from agent after several minutes
+
+**Cause:** Container startup issues or network problems.
+
+**Diagnosis:**
+
+```bash
+# List running containers
+docker ps
+
+# Check specific container logs
+docker logs <container-id>
+
+# Inspect container
+docker inspect <container-id>
+
+# Check container resource usage
+docker stats <container-id>
+```
+
+**Common Causes:**
+
+1. **Image pull taking too long:** Wait for pull to complete or pull manually first
+2. **Container startup script hanging:** Check container logs for errors
+3. **Network issues:** Verify container can reach Anthropic API
+4. **Resource exhaustion:** Check host CPU/memory availability
+
+**Solution:**
+```bash
+# Stop hanging container
+docker stop <container-id>
+
+# Remove and retry
+docker rm <container-id>
+
+# Try spawning agent again through PWA
+```
+
+---
+
+### Additional Diagnostics
+
+**View Relay Logs:**
+```bash
+# Relay logs show session and agent lifecycle events
+./cmd/relay/relay 2>&1 | tee relay.log
+```
+
+**Inspect ContainerSession State:**
+```bash
+# List all containers (including stopped)
+docker ps -a
+
+# Filter by ourocodus session labels
+docker ps -a --filter "label=ourocodus.session.id"
+```
+
+**Test ACP Communication:**
+```bash
+# Use echo-agent for testing without API key
+export OUROCODUS_ACP_BINARY="./cmd/echo-agent/echo-agent"
+./cmd/relay/relay
+```
+
+### Getting Help
+
+If issues persist:
+
+1. Check GitHub Issues: [github.com/2389-research/ourocodus/issues](https://github.com/2389-research/ourocodus/issues)
+2. Review relevant documentation:
+   - `docs/ARCHITECTURE.md` - System overview
+   - `docs/SESSION_LIFECYCLE.md` - Session management
+   - `pkg/containersession/doc.go` - Container session details
+3. Include diagnostic information when reporting issues:
+   - Relay logs
+   - Docker logs for container
+   - `docker info` output
+   - Operating system and Docker version
