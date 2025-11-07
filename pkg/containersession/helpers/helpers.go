@@ -41,18 +41,20 @@ func (l *StdLogger) Printf(format string, v ...interface{}) {
 	l.Logger.Printf(format, v...)
 }
 
-// CreateDockerClient attempts to connect to Docker, trying Colima first, then Docker Desktop.
+// CreateDockerClient attempts to connect to Docker using a three-step fallback strategy.
 //
 // Platform limitations:
-// - This function assumes a Unix-like environment (macOS/Linux)
-// - On Windows, Docker Desktop uses named pipes (npipe:////./pipe/docker_engine)
-// - Windows support requires detecting OS and using appropriate connection string
+// - Supports Unix-like systems (macOS/Linux) and Windows via DOCKER_HOST environment variable
+// - Windows users should set DOCKER_HOST to npipe:////./pipe/docker_engine or tcp://localhost:2375
+// - Alternatively, Windows users can run in WSL2 for native Unix socket support
 //
-// The function tries two common Docker socket locations:
-// 1. ~/.colima/default/docker.sock (Colima on macOS)
-// 2. /var/run/docker.sock (Docker Desktop on macOS/Linux)
+// The function tries the following connection methods in order:
+// 1. DOCKER_HOST environment variable (handles Windows named pipes, TCP, and custom Unix sockets)
+// 2. ~/.colima/default/docker.sock (macOS only - Colima convenience fallback)
+// 3. /var/run/docker.sock (standard Unix socket for Docker Desktop/Engine)
 //
-// Returns an error if neither location is accessible.
+// Each attempt includes a ping verification with a 2-second timeout.
+// Returns an error if all connection methods fail.
 func CreateDockerClient(ctx context.Context) (*client.Client, error) {
 	// Try 1: Environment variables (DOCKER_HOST, DOCKER_TLS_VERIFY, DOCKER_CERT_PATH)
 	// This handles Windows npipe, TCP, and explicit Unix socket configurations

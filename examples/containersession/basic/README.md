@@ -4,7 +4,7 @@ This example demonstrates the simplest container session lifecycle using the `pk
 
 ## What It Does
 
-1. Connects to Docker (tries Colima, then Docker Desktop)
+1. Connects to Docker (respects DOCKER_HOST, then tries Colima, then standard Unix socket)
 2. Creates a Manager with default dependencies
 3. Creates a container session with Ubuntu image
 4. Starts the container
@@ -132,7 +132,7 @@ The helper function (`pkg/containersession/helpers.CreateDockerClient`) attempts
 
 ### Windows Setup
 
-The Docker client setup code assumes Unix-like systems with Unix socket paths. For Windows, you need to configure `DOCKER_HOST` before running:
+The Docker client's fallback paths use Unix sockets (macOS/Linux). For Windows, configure `DOCKER_HOST` before running:
 
 **Docker Desktop with Named Pipe:**
 ```powershell
@@ -157,16 +157,19 @@ go run examples/containersession/basic/main.go
 
 ## Troubleshooting
 
-**Error: "cannot connect to Docker"**
+### Error: "cannot connect to Docker"
+
 - Ensure Docker Desktop or Colima is running
 - Check: `docker ps` works in your terminal
 - Windows: Verify `DOCKER_HOST` is set correctly (see Platform Support)
 - Check: `echo $DOCKER_HOST` (Unix) or `echo %DOCKER_HOST%` (Windows)
 
-**Error: "permission denied" on workspace**
+### Error: "permission denied" on workspace
+
 - Workspace directories are created with 0700 permissions
 - Ensure you have write access to the examples directory
 
-**Container not stopping**
+### Container not stopping
+
 - The example uses `sleep 60` command which should stop gracefully
 - If needed, manually clean up: `docker ps -a | grep containersession`

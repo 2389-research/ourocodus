@@ -263,7 +263,7 @@ The helper function (`pkg/containersession/helpers.CreateDockerClient`) attempts
 
 ### Windows Setup
 
-The Docker client setup code assumes Unix-like systems with Unix socket paths. For Windows, you need to configure `DOCKER_HOST` before running:
+The Docker client's fallback paths use Unix sockets (macOS/Linux). For Windows, configure `DOCKER_HOST` before running:
 
 **Docker Desktop with Named Pipe:**
 ```powershell
