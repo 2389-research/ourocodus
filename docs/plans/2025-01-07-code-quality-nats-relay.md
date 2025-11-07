@@ -95,7 +95,7 @@ func normalizeSubject(subject string) string {
 **Examples:**
 - `sessions.abc123.events` → `sessions.*.events`
 - `sessions.sess_456.work` → `sessions.*.work`
-- `agents.sess_123.agent_789.heartbeat` → `agents.*.*.*`
+- `agents.sess_123.agent_789.heartbeat` → `agents.*.*.heartbeat`
 - `test.static` → `test.static` (preserved)
 
 ### Nil-Safe Error Wrappers
