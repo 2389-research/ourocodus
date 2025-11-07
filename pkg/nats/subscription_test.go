@@ -2,6 +2,7 @@ package nats
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 )
@@ -233,25 +234,27 @@ func TestSubscription_StopWithTimeout(t *testing.T) {
 		t.Fatalf("Subscribe() error = %v", err)
 	}
 
-	// Stop with a very short timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Nanosecond)
+	// Stop with a short timeout (50ms)
+	timeout := 50 * time.Millisecond
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-
-	// Wait a bit to ensure timeout fires
-	time.Sleep(10 * time.Millisecond)
 
 	start := time.Now()
 	err = sub.Stop(ctx)
 	elapsed := time.Since(start)
 
-	// Should complete quickly (either success or timeout)
+	// Should complete within reasonable time (less than 1s)
 	if elapsed > time.Second {
 		t.Errorf("Stop() took too long: %v", elapsed)
 	}
 
-	// May get timeout error or succeed depending on timing
-	if err != nil && ctx.Err() == nil {
-		t.Errorf("Stop() returned error but context not expired: %v", err)
+	// Should return timeout error if drain didn't complete in time
+	// Note: drain may succeed quickly in tests, so we accept both outcomes
+	if err != nil {
+		// If there's an error, verify it's timeout-related
+		if !strings.Contains(err.Error(), "timeout") && !strings.Contains(err.Error(), "deadline") {
+			t.Errorf("Stop() returned unexpected error: %v", err)
+		}
 	}
 }
 

@@ -75,15 +75,14 @@ func (s *Subscription) messageHandler(msg *nats.Msg) {
 		s.mu.RUnlock()
 		return
 	}
+	// Read context while holding lock to avoid race
+	ctx := s.ctx
 	s.mu.RUnlock()
 
 	start := time.Now()
 
 	// Wrap message
 	wrappedMsg := wrapNatsMessage(msg, s.client.config.CorrelationHeader)
-
-	// Use subscription lifecycle context
-	ctx := s.ctx
 
 	// Call user handler
 	err := s.handler(ctx, wrappedMsg)
@@ -121,7 +120,8 @@ func (s *Subscription) Stop(ctx context.Context) error {
 				return fmt.Errorf("drain subscription: %w", err)
 			}
 		case <-ctx.Done():
-			// Drain exceeded deadline
+			// Drain exceeded deadline, force unsubscribe to prevent resource leak
+			_ = s.natsSub.Unsubscribe()
 			return fmt.Errorf("drain timeout: %w", ctx.Err())
 		}
 	}
