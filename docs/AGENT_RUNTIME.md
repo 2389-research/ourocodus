@@ -184,3 +184,107 @@ sequenceDiagram
 - ContainerSession Manager stops and removes container
 - AgentSession cleaned up from Session Manager
 - Workspace persists on host filesystem
+
+## Configuration & Credentials
+
+### Environment Variables
+
+The following environment variables control agent runtime behavior:
+
+| Variable | Required | Purpose | Example |
+|----------|----------|---------|---------|
+| `ANTHROPIC_API_KEY` | Yes | API key for Claude Code agents | `sk-ant-api03-...` |
+| `OUROCODUS_ACP_BINARY` | No | Custom ACP binary path (for testing) | `/path/to/echo-agent` |
+| `DOCKER_HOST` | No | Docker daemon connection | `unix:///var/run/docker.sock` |
+
+**Setting Environment Variables:**
+
+```bash
+# macOS/Linux
+export ANTHROPIC_API_KEY="sk-ant-api03-..."
+./cmd/relay/relay
+
+# Or inline
+ANTHROPIC_API_KEY="sk-ant-..." ./cmd/relay/relay
+```
+
+### Credential Injection Flow
+
+Credentials are injected into containers through the following process:
+
+1. **Host Environment:** Relay reads `ANTHROPIC_API_KEY` from its environment
+   - Source: `pkg/relay/session/client_factory.go:NewACPClientFactory()`
+   - Validation: Returns `ErrMissingAnthropicAPIKey` if not set
+
+2. **Container Configuration:** ContainerSession Manager receives config with `Env` field
+   - Source: `pkg/containersession/config.go:CreateConfig.Env`
+   - Format: `[]string{"ANTHROPIC_API_KEY=sk-ant-..."}`
+
+3. **Container Creation:** Docker creates container with environment variables
+   - Source: `pkg/containersession/manager.go:CreateContainerSessionWithConfig()`
+   - Container receives full environment including credentials
+
+4. **Agent Access:** Agent process inside container accesses credentials via environment
+   - Source: `pkg/acp/client.go:NewClient()` sets `cmd.Env`
+   - Agent uses credentials to authenticate with Anthropic API
+
+**Diagram:**
+
+```
+Host Environment (ANTHROPIC_API_KEY)
+    ↓
+Relay reads on startup
+    ↓
+ContainerSession Manager receives in CreateConfig
+    ↓
+Docker container created with Env variables
+    ↓
+Agent process accesses via os.Getenv()
+```
+
+### Current Limitations
+
+**Explicitly documented for MVP:**
+
+- **Single Credential:** One `ANTHROPIC_API_KEY` per relay instance (global scope)
+- **No Per-User Scoping:** All agents use the same credential
+- **No Per-Project Scoping:** Cannot configure different keys for different projects
+- **No Rotation Support:** Changing credentials requires relay restart
+- **Single Provider:** Only Anthropic/Claude supported currently
+
+**Future Enhancements:**
+
+- Mount credential files via `CustomMounts` for multi-provider support
+- Per-user credential scoping via UserSession metadata
+- Credential rotation via hot-reload mechanism
+- Support for OpenAI, Hugging Face, and other providers
+
+### Container Configuration
+
+**Image:**
+- Configurable via `CreateConfig.ImageName`
+- Must contain ACP-compatible agent binary
+- Example: Custom image with Claude Code ACP pre-installed
+
+**Workspace:**
+- Bind-mounted from host via `CustomMounts`
+- Typically a git worktree for isolated development
+- Persists on host after container termination
+- Agent has read/write access
+
+**Network:**
+- Default Docker bridge network
+- Allows outbound connections to Anthropic API
+- No inbound connections required (I/O via Relay)
+
+**Resource Limits:**
+- **Status:** Not enforced yet
+- **Future:** CPU and memory limits via `CreateConfig`
+- **Current:** Containers use host default limits
+
+### Code References
+
+- Session Factory: `pkg/relay/session/client_factory.go`
+- ContainerSession Config: `pkg/containersession/config.go`
+- Container Manager: `pkg/containersession/manager.go`
+- ACP Client: `pkg/acp/client.go`
