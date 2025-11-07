@@ -1,6 +1,7 @@
 package nats
 
 import (
+	"strings"
 	"sync"
 	"time"
 
@@ -246,7 +247,28 @@ func (m *metricsCollector) recordRequest(subject string, duration time.Duration,
 // normalizeSubject normalizes a subject to prevent high cardinality.
 // For example, "sessions.abc123.events" becomes "sessions.*.events"
 func normalizeSubject(subject string) string {
-	// TODO: Implement proper subject normalization
-	// For now, return the subject as-is
-	return subject
+	tokens := strings.Split(subject, ".")
+	if len(tokens) == 0 {
+		return subject
+	}
+
+	switch tokens[0] {
+	case "sessions":
+		// sessions.<session-id>.{events|work|results|approvals}
+		// Normalize to: sessions.*.{suffix}
+		if len(tokens) >= 2 {
+			tokens[1] = "*"
+		}
+	case "agents":
+		// agents.<session-id>.<agent-id>.heartbeat
+		// Normalize to: agents.*.*.{suffix}
+		if len(tokens) >= 2 {
+			tokens[1] = "*"
+		}
+		if len(tokens) >= 3 {
+			tokens[2] = "*"
+		}
+	}
+
+	return strings.Join(tokens, ".")
 }

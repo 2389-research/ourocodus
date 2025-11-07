@@ -96,3 +96,35 @@ func TestPredefinedErrors(t *testing.T) {
 		})
 	}
 }
+
+// TestWrapTransientError_NilHandling verifies nil error handling.
+func TestWrapTransientError_NilHandling(t *testing.T) {
+	// Nil error should return nil
+	err := WrapTransientError("test-op", "test.subject", nil)
+	if err != nil {
+		t.Errorf("WrapTransientError with nil should return nil, got %v", err)
+	}
+
+	// Non-nil error should be wrapped
+	baseErr := errors.New("base error")
+	wrapped := WrapTransientError("test-op", "test.subject", baseErr)
+	if wrapped == nil {
+		t.Error("WrapTransientError with non-nil should return wrapped error")
+	}
+}
+
+// TestWrapPermanentError_NilHandling verifies nil error handling.
+func TestWrapPermanentError_NilHandling(t *testing.T) {
+	// Nil error should return nil
+	err := WrapPermanentError("test-op", "test.subject", nil)
+	if err != nil {
+		t.Errorf("WrapPermanentError with nil should return nil, got %v", err)
+	}
+
+	// Non-nil error should be wrapped
+	baseErr := errors.New("base error")
+	wrapped := WrapPermanentError("test-op", "test.subject", baseErr)
+	if wrapped == nil {
+		t.Error("WrapPermanentError with non-nil should return wrapped error")
+	}
+}
