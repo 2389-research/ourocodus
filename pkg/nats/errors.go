@@ -72,6 +72,9 @@ func (e *PermanentError) IsPermanent() bool {
 
 // WrapTransientError wraps an error as a transient error.
 func WrapTransientError(op, subject string, err error) error {
+	if err == nil {
+		return nil
+	}
 	return &TransientError{
 		Op:      op,
 		Subject: subject,
@@ -81,6 +84,9 @@ func WrapTransientError(op, subject string, err error) error {
 
 // WrapPermanentError wraps an error as a permanent error.
 func WrapPermanentError(op, subject string, err error) error {
+	if err == nil {
+		return nil
+	}
 	return &PermanentError{
 		Op:      op,
 		Subject: subject,
