@@ -188,6 +188,8 @@ func (m *Manager) CreateContainerSessionWithConfig(ctx context.Context, config C
 
 	// Generate unique session ID
 	sessionID := m.idGen.Generate()
+	// Use single 'now' for both labels and session creation to ensure
+	// consistent timestamps and avoid test flakiness
 	now := m.clock.Now()
 
 	// Check for existing container with this session ID (for reuse scenarios)
