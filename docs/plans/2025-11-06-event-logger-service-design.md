@@ -25,7 +25,7 @@ The Event Logger Service is a standalone binary that consumes all NATS messages 
 
 ## Architecture
 
-```
+```text
 ┌─────────────┐
 │    NATS     │
 │   Server    │
@@ -68,18 +68,28 @@ Each message is logged as a single JSON line:
 {
   "timestamp": "2025-11-06T20:30:00Z",
   "subject": "sessions.abc123.session.created",
-  "data": {...original message payload...}
+  "data": {...original message payload...},
+  "encoding": "json"
 }
 ```
 
 **Fields:**
 - `timestamp` - When the logger received the message (RFC3339 UTC)
 - `subject` - NATS subject the message was published to
-- `data` - Raw message payload as JSON (no transformation)
+- `data` - Message payload (JSON object if valid JSON, base64 string otherwise)
+- `encoding` - Encoding type: `"json"` for valid JSON payloads, `"base64"` for binary/text data
 
 ### Core Logic
 
 ```go
+// Helper function to safely encode message data
+func encodeMessageData(data []byte) (interface{}, string) {
+    if json.Valid(data) {
+        return json.RawMessage(data), "json"
+    }
+    return base64.StdEncoding.EncodeToString(data), "base64"
+}
+
 // 1. Connect to NATS with auto-reconnect
 nc, _ := nats.Connect(natsURL,
     nats.Name("event-logger"),
@@ -87,11 +97,15 @@ nc, _ := nats.Connect(natsURL,
 
 // 2. Subscribe to ALL subjects
 nc.Subscribe(">", func(msg *nats.Msg) {
+    // Safely encode message data (JSON or base64)
+    data, encoding := encodeMessageData(msg.Data)
+
     // Format and print to stdout
     logEntry := map[string]interface{}{
         "timestamp": time.Now().UTC().Format(time.RFC3339),
         "subject":   msg.Subject,
-        "data":      json.RawMessage(msg.Data),
+        "data":      data,
+        "encoding":  encoding,
     }
     json.NewEncoder(os.Stdout).Encode(logEntry)
 })
