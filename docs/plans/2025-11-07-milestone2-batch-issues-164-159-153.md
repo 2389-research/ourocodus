@@ -94,7 +94,6 @@ This batch tackles three low-risk issues from Milestone 2, split into two indepe
    - If connection fails, verify Docker is running: `docker ps`
    - Check `DOCKER_HOST` environment variable
    - On macOS with Colima: `colima status`
-   ```
 
 3. **Platform-Specific Notes**
    - Document Unix socket assumption (`unix:///var/run/docker.sock`)
