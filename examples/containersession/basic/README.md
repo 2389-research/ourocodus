@@ -123,6 +123,13 @@ Files written to this directory are:
 - Docker Desktop with WSL2 backend (recommended)
 - See Windows setup instructions below
 
+### Connection Order
+
+The helper function (`pkg/containersession/helpers.CreateDockerClient`) attempts connection in this order:
+1. **DOCKER_HOST environment variable** - Honors standard Docker configuration
+2. **macOS Colima** (macOS only) - Automatic fallback to `~/.colima/default/docker.sock`
+3. **Standard Unix socket** - Falls back to `/var/run/docker.sock`
+
 ### Windows Setup
 
 The Docker client setup code assumes Unix-like systems with Unix socket paths. For Windows, you need to configure `DOCKER_HOST` before running:

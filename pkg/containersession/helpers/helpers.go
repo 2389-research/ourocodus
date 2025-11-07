@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"time"
 
 	"github.com/docker/docker/client"
@@ -53,13 +54,47 @@ func (l *StdLogger) Printf(format string, v ...interface{}) {
 //
 // Returns an error if neither location is accessible.
 func CreateDockerClient(ctx context.Context) (*client.Client, error) {
-	colimaSocket := filepath.Join(os.Getenv("HOME"), ".colima", "default", "docker.sock")
-	colimaHost := "unix://" + colimaSocket
-	dockerHost := "unix:///var/run/docker.sock"
+	// Try 1: Environment variables (DOCKER_HOST, DOCKER_TLS_VERIFY, DOCKER_CERT_PATH)
+	// This handles Windows npipe, TCP, and explicit Unix socket configurations
+	if dockerClient, err := client.NewClientWithOpts(
+		client.FromEnv,
+		client.WithAPIVersionNegotiation(),
+	); err == nil {
+		pingCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		defer cancel()
+		if _, err := dockerClient.Ping(pingCtx); err == nil {
+			return dockerClient, nil
+		}
+		_ = dockerClient.Close()
+	}
 
-	if _, err := os.Stat(colimaSocket); err == nil {
+	// Try 2: macOS Colima fallback (preserves existing convenience)
+	if runtime.GOOS == "darwin" {
+		homeDir, err := os.UserHomeDir()
+		if err == nil {
+			colimaSocket := filepath.Join(homeDir, ".colima", "default", "docker.sock")
+			if _, err := os.Stat(colimaSocket); err == nil {
+				colimaHost := "unix://" + colimaSocket
+				if dockerClient, err := client.NewClientWithOpts(
+					client.WithHost(colimaHost),
+					client.WithAPIVersionNegotiation(),
+				); err == nil {
+					pingCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+					defer cancel()
+					if _, err := dockerClient.Ping(pingCtx); err == nil {
+						return dockerClient, nil
+					}
+					_ = dockerClient.Close()
+				}
+			}
+		}
+	}
+
+	// Try 3: Standard Unix socket fallback
+	dockerHost := "unix:///var/run/docker.sock"
+	if _, err := os.Stat("/var/run/docker.sock"); err == nil {
 		if dockerClient, err := client.NewClientWithOpts(
-			client.WithHost(colimaHost),
+			client.WithHost(dockerHost),
 			client.WithAPIVersionNegotiation(),
 		); err == nil {
 			pingCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
@@ -71,17 +106,5 @@ func CreateDockerClient(ctx context.Context) (*client.Client, error) {
 		}
 	}
 
-	if dockerClient, err := client.NewClientWithOpts(
-		client.WithHost(dockerHost),
-		client.WithAPIVersionNegotiation(),
-	); err == nil {
-		pingCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-		defer cancel()
-		if _, err := dockerClient.Ping(pingCtx); err == nil {
-			return dockerClient, nil
-		}
-		_ = dockerClient.Close()
-	}
-
-	return nil, fmt.Errorf("cannot connect to Docker - tried Colima (%s) and Docker Desktop (/var/run/docker.sock)", colimaSocket)
+	return nil, fmt.Errorf("cannot connect to Docker: tried DOCKER_HOST env, Colima (macOS), and /var/run/docker.sock")
 }
