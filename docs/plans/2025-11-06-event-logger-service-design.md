@@ -155,7 +155,7 @@ Relay publishes to these subjects (from `pkg/relay/subjects.go`):
 
 > **Note:** `{sanitizedSessionID}` is the user session ID with dots (`.`) replaced by underscores (`_`), as implemented in `pkg/relay/subjects.go`.
 
-Event logger subscribes to `>` (all subjects) to capture these plus any future events.
+All subject patterns use the dot (`.`) separator and are immutable - they are tied to the relay's event publisher implementation. The event logger's wildcard subscription (`>`) will automatically capture these patterns plus any future events added by the relay.
 
 ## Testing Strategy
 
@@ -182,6 +182,9 @@ LOGGER_PID=$!
 
 # Verify events were logged
 grep "session.created" /tmp/events.log
+
+# Verify JSON output format (all required fields present)
+jq -e '.timestamp and .subject and .data and .encoding' /tmp/events.log | head -1
 kill $LOGGER_PID
 ```
 
