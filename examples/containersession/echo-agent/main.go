@@ -9,67 +9,9 @@ import (
 	"time"
 
 	"github.com/2389-research/ourocodus/pkg/containersession"
+	"github.com/2389-research/ourocodus/pkg/containersession/helpers"
 	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/client"
-	"github.com/google/uuid"
 )
-
-// UUIDGenerator generates unique IDs
-type UUIDGenerator struct{}
-
-func (g *UUIDGenerator) Generate() string {
-	return uuid.New().String()
-}
-
-// SystemClock provides real time
-type SystemClock struct{}
-
-func (c *SystemClock) Now() time.Time {
-	return time.Now()
-}
-
-// StdLogger wraps standard logger
-type StdLogger struct {
-	*log.Logger
-}
-
-func (l *StdLogger) Printf(format string, v ...interface{}) {
-	l.Logger.Printf(format, v...)
-}
-
-// createDockerClient tries Colima first, then Docker Desktop
-func createDockerClient() (*client.Client, error) {
-	colimaSocket := filepath.Join(os.Getenv("HOME"), ".colima", "default", "docker.sock")
-	if _, err := os.Stat(colimaSocket); err == nil {
-		if err := os.Setenv("DOCKER_HOST", "unix://"+colimaSocket); err == nil {
-			dockerClient, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
-			if err == nil {
-				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-				defer cancel()
-				if _, err := dockerClient.Ping(ctx); err == nil {
-					log.Printf("Using Colima at %s\n", colimaSocket)
-					return dockerClient, nil
-				}
-				dockerClient.Close()
-			}
-		}
-	}
-
-	if err := os.Setenv("DOCKER_HOST", "unix:///var/run/docker.sock"); err == nil {
-		dockerClient, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
-		if err == nil {
-			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-			defer cancel()
-			if _, err := dockerClient.Ping(ctx); err == nil {
-				log.Println("Using Docker Desktop")
-				return dockerClient, nil
-			}
-			dockerClient.Close()
-		}
-	}
-
-	return nil, fmt.Errorf("cannot connect to Docker")
-}
 
 func main() {
 	ctx := context.Background()
@@ -79,7 +21,7 @@ func main() {
 
 	// 1. Connect to Docker
 	fmt.Println("Step 1: Connecting to Docker...")
-	dockerClient, err := createDockerClient()
+	dockerClient, err := helpers.CreateDockerClient(ctx)
 	if err != nil {
 		log.Fatalf("Failed to connect to Docker: %v\n", err)
 	}
@@ -91,9 +33,9 @@ func main() {
 	baseWorkspace := "./workspaces/echo-agent"
 	manager := containersession.NewManager(
 		dockerClient,
-		&UUIDGenerator{},
-		&SystemClock{},
-		&StdLogger{Logger: log.New(os.Stdout, "[manager] ", 0)},
+		&helpers.UUIDGenerator{},
+		&helpers.SystemClock{},
+		&helpers.StdLogger{Logger: log.New(os.Stdout, "[manager] ", 0)},
 		baseWorkspace,
 	)
 	fmt.Println("✓ Manager created")

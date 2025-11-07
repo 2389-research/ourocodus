@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/2389-research/ourocodus/pkg/containersession"
+	"github.com/2389-research/ourocodus/pkg/containersession/helpers"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
 	"github.com/google/uuid"
@@ -49,43 +50,16 @@ func (l *testLogger) Printf(format string, v ...interface{}) {
 	l.t.Logf(format, v...)
 }
 
-// setupDockerClient creates a Docker client, trying Colima first then Docker Desktop
+// setupDockerClient creates a Docker client for testing
 func setupDockerClient(t *testing.T) *client.Client {
 	t.Helper()
 
-	// Try Colima socket first
-	colimaSocket := filepath.Join(os.Getenv("HOME"), ".colima", "default", "docker.sock")
-	if _, err := os.Stat(colimaSocket); err == nil {
-		if err := os.Setenv("DOCKER_HOST", "unix://"+colimaSocket); err == nil {
-			dockerClient, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
-			if err == nil {
-				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-				defer cancel()
-				if _, err := dockerClient.Ping(ctx); err == nil {
-					t.Logf("Using Colima at %s", colimaSocket)
-					return dockerClient
-				}
-				dockerClient.Close()
-			}
-		}
+	dockerClient, err := helpers.CreateDockerClient(context.Background())
+	if err != nil {
+		t.Fatalf("Failed to create Docker client: %v", err)
 	}
 
-	// Try Docker Desktop
-	if err := os.Setenv("DOCKER_HOST", "unix:///var/run/docker.sock"); err == nil {
-		dockerClient, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
-		if err == nil {
-			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-			defer cancel()
-			if _, err := dockerClient.Ping(ctx); err == nil {
-				t.Log("Using Docker Desktop")
-				return dockerClient
-			}
-			dockerClient.Close()
-		}
-	}
-
-	t.Fatalf("Cannot connect to Docker - tried Colima (%s) and Docker Desktop", colimaSocket)
-	return nil
+	return dockerClient
 }
 
 // cleanupContainers stops and removes containers for given session IDs
