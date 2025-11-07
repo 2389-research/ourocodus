@@ -230,7 +230,7 @@ Credentials are injected into containers through the following process:
 
 **Diagram:**
 
-```
+```text
 Host Environment (ANTHROPIC_API_KEY)
     ↓
 Relay reads on startup
@@ -296,7 +296,7 @@ Common issues when working with the agent runtime and their solutions.
 ### 1. Missing API Key
 
 **Symptom:**
-```
+```bash
 Error: ANTHROPIC_API_KEY environment variable not set
 ```
 
@@ -323,7 +323,7 @@ echo 'export ANTHROPIC_API_KEY="sk-ant-..."' >> ~/.zshrc
 ### 2. Docker Connection Failed
 
 **Symptom:**
-```
+```bash
 Error: Cannot connect to Docker daemon at unix:///var/run/docker.sock
 ```
 
@@ -382,7 +382,7 @@ export DOCKER_HOST="unix:///path/to/custom/docker.sock"
 ### 3. Container Image Pull Failure
 
 **Symptom:**
-```
+```bash
 Error: failed to pull image "ourocodus/agent:latest": pull access denied
 ```
 
@@ -431,7 +431,7 @@ docker build -t ourocodus/agent:latest -f containers/agent/Dockerfile .
 ### 4. Permission Denied on Workspace
 
 **Symptom:**
-```
+```bash
 Error: permission denied: /workspace/file.txt
 ```
 
@@ -488,6 +488,7 @@ docker stats <container-id>
 4. **Resource exhaustion:** Check host CPU/memory availability
 
 **Solution:**
+
 ```bash
 # Stop hanging container
 docker stop <container-id>
@@ -503,12 +504,14 @@ docker rm <container-id>
 ### Additional Diagnostics
 
 **View Relay Logs:**
+
 ```bash
 # Relay logs show session and agent lifecycle events
 ./cmd/relay/relay 2>&1 | tee relay.log
 ```
 
 **Inspect ContainerSession State:**
+
 ```bash
 # List all containers (including stopped)
 docker ps -a
@@ -518,6 +521,7 @@ docker ps -a --filter "label=ourocodus.session.id"
 ```
 
 **Test ACP Communication:**
+
 ```bash
 # Use echo-agent for testing without API key
 export OUROCODUS_ACP_BINARY="./cmd/echo-agent/echo-agent"
@@ -581,12 +585,12 @@ The current architecture supports horizontal scaling on a single host:
 
 **Architecture Changes:**
 
-```
+```yaml
 Current:
-Relay → ContainerSession Manager → Docker API → Container
+  Relay → ContainerSession Manager → Docker API → Container
 
 Kubernetes:
-Relay → Kubernetes API → Job/Pod → Container
+  Relay → Kubernetes API → Job/Pod → Container
 ```
 
 **What Stays Identical:**
