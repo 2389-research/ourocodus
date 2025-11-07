@@ -18,6 +18,9 @@ type Subscription struct {
 
 	natsSub *nats.Subscription
 
+	ctx    context.Context
+	cancel context.CancelFunc
+
 	mu     sync.RWMutex
 	closed bool
 }
@@ -33,7 +36,10 @@ func newSubscription(c *client, subject string, handler MsgHandler, opts *subOpt
 }
 
 // start begins the subscription.
-func (s *Subscription) start(_ context.Context) error {
+func (s *Subscription) start(ctx context.Context) error {
+	// Create cancellable context for subscription lifetime
+	s.ctx, s.cancel = context.WithCancel(ctx)
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -76,8 +82,8 @@ func (s *Subscription) messageHandler(msg *nats.Msg) {
 	// Wrap message
 	wrappedMsg := wrapNatsMessage(msg, s.client.config.CorrelationHeader)
 
-	// Create context for handler
-	ctx := context.Background()
+	// Use subscription lifecycle context
+	ctx := s.ctx
 
 	// Call user handler
 	err := s.handler(ctx, wrappedMsg)
@@ -96,6 +102,11 @@ func (s *Subscription) Stop(ctx context.Context) error {
 	}
 
 	s.closed = true
+
+	// Cancel subscription context to signal handlers
+	if s.cancel != nil {
+		s.cancel()
+	}
 
 	if s.natsSub != nil {
 		// Unsubscribe and drain

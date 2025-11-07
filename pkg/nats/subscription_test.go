@@ -95,3 +95,119 @@ func TestSubscription_MessageHandler(t *testing.T) {
 		t.Fatal("timeout waiting for message")
 	}
 }
+
+// TestSubscription_HandlerCancellation verifies handlers detect context cancellation.
+func TestSubscription_HandlerCancellation(t *testing.T) {
+	srv := runTestServer(t)
+	defer srv.Shutdown()
+
+	client, err := NewClient(
+		WithURL(srv.ClientURL()),
+		WithName("test-cancellation"),
+	)
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+	defer client.Close()
+
+	// Create cancellable context
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Handler that blocks until context is cancelled
+	handlerCalled := make(chan struct{})
+	handlerDone := make(chan error, 1)
+
+	sub, err := client.Subscribe(ctx, "test.cancel", func(ctx context.Context, msg *Message) error {
+		close(handlerCalled)
+		// Block until context is cancelled
+		<-ctx.Done()
+		handlerDone <- ctx.Err()
+		return ctx.Err()
+	})
+	if err != nil {
+		t.Fatalf("Subscribe() error = %v", err)
+	}
+	defer sub.Stop(context.Background())
+
+	// Publish a message to trigger handler
+	if err := client.Publish(context.Background(), "test.cancel", []byte("test")); err != nil {
+		t.Fatalf("Publish() error = %v", err)
+	}
+
+	// Wait for handler to be called
+	select {
+	case <-handlerCalled:
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for handler to be called")
+	}
+
+	// Cancel the parent context
+	cancel()
+
+	// Verify handler detects cancellation
+	select {
+	case err := <-handlerDone:
+		if err != context.Canceled {
+			t.Errorf("handler error = %v, want context.Canceled", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for handler to exit")
+	}
+}
+
+// TestSubscription_StopCancelsHandlers verifies Stop() cancels in-flight handlers.
+func TestSubscription_StopCancelsHandlers(t *testing.T) {
+	srv := runTestServer(t)
+	defer srv.Shutdown()
+
+	client, err := NewClient(
+		WithURL(srv.ClientURL()),
+		WithName("test-stop-cancel"),
+	)
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+	defer client.Close()
+
+	// Handler that blocks and checks context
+	handlerCalled := make(chan struct{})
+	handlerDone := make(chan error, 1)
+
+	sub, err := client.Subscribe(context.Background(), "test.stop", func(ctx context.Context, msg *Message) error {
+		close(handlerCalled)
+		// Block until context is cancelled
+		<-ctx.Done()
+		handlerDone <- ctx.Err()
+		return ctx.Err()
+	})
+	if err != nil {
+		t.Fatalf("Subscribe() error = %v", err)
+	}
+
+	// Publish a message to trigger handler
+	if err := client.Publish(context.Background(), "test.stop", []byte("test")); err != nil {
+		t.Fatalf("Publish() error = %v", err)
+	}
+
+	// Wait for handler to be called
+	select {
+	case <-handlerCalled:
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for handler to be called")
+	}
+
+	// Stop the subscription (should cancel handlers)
+	if err := sub.Stop(context.Background()); err != nil {
+		t.Errorf("Stop() error = %v", err)
+	}
+
+	// Verify handler detected cancellation
+	select {
+	case err := <-handlerDone:
+		if err != context.Canceled {
+			t.Errorf("handler error = %v, want context.Canceled", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for handler to exit")
+	}
+}
