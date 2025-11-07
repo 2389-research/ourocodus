@@ -188,7 +188,59 @@ This pattern is useful for:
 - See `examples/containersession/multi/` for concurrent sessions
 - See `pkg/containersession/manager.go` for full I/O implementation details
 
+## Platform Support
+
+### Supported Platforms
+
+**macOS and Linux:**
+- Docker Desktop
+- Colima (macOS)
+- Docker Engine (Linux)
+
+**Windows:**
+- Requires manual `DOCKER_HOST` configuration
+- Docker Desktop with WSL2 backend (recommended)
+- See Windows setup instructions below
+
+### Connection Order
+
+The helper function (`pkg/containersession/helpers.CreateDockerClient`) attempts connection in this order:
+1. **DOCKER_HOST environment variable** - Honors standard Docker configuration
+2. **macOS Colima** (macOS only) - Automatic fallback to `~/.colima/default/docker.sock`
+3. **Standard Unix socket** - Falls back to `/var/run/docker.sock`
+
+### Windows Setup
+
+The Docker client setup code assumes Unix-like systems with Unix socket paths. For Windows, you need to configure `DOCKER_HOST` before running:
+
+**Docker Desktop with Named Pipe:**
+```powershell
+# PowerShell
+$env:DOCKER_HOST="npipe:////./pipe/docker_engine"
+
+# Or Command Prompt
+set DOCKER_HOST=npipe:////./pipe/docker_engine
+```
+
+**Docker Desktop with TCP (if exposed):**
+```powershell
+$env:DOCKER_HOST="tcp://localhost:2375"
+```
+
+**WSL2 (Recommended):**
+Run the example inside WSL2 where Unix socket behavior matches macOS/Linux:
+```bash
+# Inside WSL2
+go run examples/containersession/echo-agent/main.go
+```
+
 ## Troubleshooting
+
+**Error: "cannot connect to Docker"**
+- Ensure Docker Desktop or Colima is running
+- Check: `docker ps` works in your terminal
+- Windows: Verify `DOCKER_HOST` is set correctly (see Platform Support)
+- Check: `echo $DOCKER_HOST` (Unix) or `echo %DOCKER_HOST%` (Windows)
 
 **Script not executing**
 - Ensure echo-script.sh has execute permissions (chmod +x)
