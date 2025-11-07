@@ -158,7 +158,7 @@ Git Worktree (Workspace)
 - Troubleshooting common container issues
 - Future Kubernetes migration path
 
-**Session Lifecycle:**
+#### Session Lifecycle
 
 1. User connects via PWA → UserSession created
 2. User spawns agent → AgentSession + ContainerSession created
@@ -166,7 +166,7 @@ Git Worktree (Workspace)
 4. User terminates agent → ContainerSession and AgentSession cleaned up
 5. Workspace persists on host after termination
 
-**Implementation:**
+#### Implementation
 
 - Session tracking: `pkg/relay/session/`
 - Container management: `pkg/containersession/`
