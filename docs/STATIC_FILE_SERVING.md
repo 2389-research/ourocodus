@@ -26,7 +26,7 @@ The current approach is sufficient for:
 When traffic increases or global distribution is needed:
 
 ### 1. CDN (Recommended for production)
-- Serve static assets from CloudFlare, Fastly, or AWS CloudFront
+- Serve static assets from Cloudflare, Fastly, or AWS CloudFront
 - Keep relay for WebSocket connections only
 - Benefits: global distribution, caching, DDoS protection
 
