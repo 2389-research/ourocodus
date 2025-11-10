@@ -567,8 +567,12 @@ func (m *Manager) TerminateUserSession(ctx context.Context, userSessionID string
 
 		summary.AgentsTerminated = int(atomic.LoadInt32(&agentSuccesses))
 		summary.AgentFailures = int(atomic.LoadInt32(&agentFailures))
-		if summary.AgentFailures > 0 && summary.CleanupStatus == CleanupStatusComplete {
-			summary.CleanupStatus = CleanupStatusPartial
+		if summary.AgentFailures > 0 {
+			if summary.AgentsTerminated == 0 {
+				summary.CleanupStatus = CleanupStatusFailed
+			} else if summary.CleanupStatus == CleanupStatusComplete {
+				summary.CleanupStatus = CleanupStatusPartial
+			}
 		}
 	}
 
