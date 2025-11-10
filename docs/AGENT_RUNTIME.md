@@ -1,125 +1,3 @@
-# Milestone 2 Completion - Implementation Plan
-
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
-
-**Goal:** Complete Milestone 2 by documenting static file serving approach and agent runtime architecture with MVP depth.
-
-**Architecture:** Single PR with three documentation files using Mermaid diagrams for visual clarity. Focuses on internal developer audience with clear session type definitions, execution flow, and troubleshooting.
-
-**Tech Stack:** Markdown, Mermaid diagrams, Git
-
----
-
-## Task 1: Create Branch and Setup
-
-**Files:**
-- Create branch: `docs/milestone-2-completion`
-
-**Step 1: Create feature branch**
-
-```bash
-git checkout -b docs/milestone-2-completion
-```
-
-**Step 2: Verify clean working directory**
-
-Run: `git status`
-Expected: "On branch docs/milestone-2-completion" with no uncommitted changes
-
-**Step 3: Commit checkpoint**
-
-Already on branch, ready to proceed.
-
----
-
-## Task 2: Create Static File Serving Documentation
-
-**Files:**
-- Create: `docs/STATIC_FILE_SERVING.md`
-
-**Step 1: Create STATIC_FILE_SERVING.md**
-
-```markdown
-# Static File Serving
-
-## Current Approach
-
-Ourocodus uses Go's standard `http.FileServer` to serve static files for the PWA frontend.
-
-**Implementation:** `cmd/relay/main.go`
-- Serves files from `web/` directory
-- Simple, zero-dependency solution
-- Suitable for development and small-scale deployments
-
-**Characteristics:**
-- No caching headers (browser default caching)
-- No compression (relies on reverse proxy if needed)
-- Single-instance serving (no load balancing built-in)
-
-## When to Scale
-
-The current approach is sufficient for:
-- Development environments
-- Internal tools with <100 concurrent users
-- Single-instance deployments
-
-## Future Scalability Options
-
-When traffic increases or global distribution is needed:
-
-### 1. CDN (Recommended for production)
-- Serve static assets from Cloudflare, Fastly, or AWS CloudFront
-- Keep relay for WebSocket connections only
-- Benefits: global distribution, caching, DDoS protection
-
-### 2. Separate Static Server
-- nginx or Apache for static files
-- Relay handles only WebSocket and API
-- Benefits: better caching control, compression, tuned configs
-
-### 3. Object Storage
-- S3, GCS, or similar with public access
-- Direct browser access to assets
-- Benefits: infinite scalability, no server load
-
-## Decision Timeline
-
-- **Now:** http.FileServer is appropriate
-- **Milestone 3-4:** Evaluate if traffic patterns require change
-- **Production:** Implement CDN before public launch
-
-## References
-
-- Implementation: `cmd/relay/main.go`
-- Related discussion: Issue #49
-```
-
-**Step 2: Verify file created**
-
-Run: `cat docs/STATIC_FILE_SERVING.md | head -5`
-Expected: First 5 lines show "# Static File Serving"
-
-**Step 3: Commit static file serving docs**
-
-```bash
-git add docs/STATIC_FILE_SERVING.md
-git commit -m "docs: Add static file serving documentation
-
-Documents current http.FileServer approach and future scalability options.
-
-Closes #49"
-```
-
----
-
-## Task 3: Create Agent Runtime Documentation (Part 1 - Structure and Definitions)
-
-**Files:**
-- Create: `docs/AGENT_RUNTIME.md`
-
-**Step 1: Create AGENT_RUNTIME.md with header and definitions**
-
-```markdown
 # Agent Runtime Architecture
 
 ## Overview
@@ -187,37 +65,6 @@ These are the authoritative definitions for session types in Ourocodus:
 - Network: Default Docker bridge network
 - Credentials: Injected via environment variables
 - Lifecycle: Created on agent spawn, destroyed on agent termination
-```
-
-**Step 2: Verify definitions section**
-
-Run: `grep -A 5 "## Session Type Definitions" docs/AGENT_RUNTIME.md`
-Expected: Shows the section header and following lines
-
-**Step 3: Commit definitions section**
-
-```bash
-git add docs/AGENT_RUNTIME.md
-git commit -m "docs: Add agent runtime session type definitions
-
-Defines UserSession, AgentSession, and ContainerSession with authoritative
-descriptions and lifecycle policies.
-
-Part of #110"
-```
-
----
-
-## Task 4: Add Component Architecture Diagram
-
-**Files:**
-- Modify: `docs/AGENT_RUNTIME.md`
-
-**Step 1: Add component diagram section**
-
-Append to `docs/AGENT_RUNTIME.md`:
-
-```markdown
 
 ## Component Architecture
 
@@ -272,36 +119,6 @@ graph TB
 3. Agent Launcher uses ContainerSession Manager to create container
 4. Container runs Claude Code ACP process with mounted workspace
 5. Agent communicates back through Relay to PWA
-```
-
-**Step 2: Verify Mermaid diagram syntax**
-
-Run: `grep -A 20 "graph TB" docs/AGENT_RUNTIME.md`
-Expected: Shows complete Mermaid diagram with proper syntax
-
-**Step 3: Commit component diagram**
-
-```bash
-git add docs/AGENT_RUNTIME.md
-git commit -m "docs: Add agent runtime component diagram
-
-Mermaid diagram showing runtime layer components and their relationships.
-
-Part of #110"
-```
-
----
-
-## Task 5: Add Execution Flow Sequence Diagram
-
-**Files:**
-- Modify: `docs/AGENT_RUNTIME.md`
-
-**Step 1: Add sequence diagram section**
-
-Append to `docs/AGENT_RUNTIME.md`:
-
-```markdown
 
 ## Execution Flow
 
@@ -367,36 +184,6 @@ sequenceDiagram
 - ContainerSession Manager stops and removes container
 - AgentSession cleaned up from Session Manager
 - Workspace persists on host filesystem
-```
-
-**Step 2: Verify sequence diagram**
-
-Run: `grep -A 30 "sequenceDiagram" docs/AGENT_RUNTIME.md`
-Expected: Shows complete sequence diagram with all participants
-
-**Step 3: Commit sequence diagram**
-
-```bash
-git add docs/AGENT_RUNTIME.md
-git commit -m "docs: Add agent runtime execution flow diagram
-
-Sequence diagram showing complete lifecycle from spawn to termination.
-
-Part of #110"
-```
-
----
-
-## Task 6: Add Configuration and Credentials Documentation
-
-**Files:**
-- Modify: `docs/AGENT_RUNTIME.md`
-
-**Step 1: Add configuration section**
-
-Append to `docs/AGENT_RUNTIME.md`:
-
-```markdown
 
 ## Configuration & Credentials
 
@@ -443,7 +230,7 @@ Credentials are injected into containers through the following process:
 
 **Diagram:**
 
-```
+```text
 Host Environment (ANTHROPIC_API_KEY)
     ↓
 Relay reads on startup
@@ -501,37 +288,6 @@ Agent process accesses via os.Getenv()
 - ContainerSession Config: `pkg/containersession/config.go`
 - Container Manager: `pkg/containersession/manager.go`
 - ACP Client: `pkg/acp/client.go`
-```
-
-**Step 2: Verify configuration table**
-
-Run: `grep -A 10 "| Variable | Required |" docs/AGENT_RUNTIME.md`
-Expected: Shows environment variables table with all three variables
-
-**Step 3: Commit configuration section**
-
-```bash
-git add docs/AGENT_RUNTIME.md
-git commit -m "docs: Add agent runtime configuration and credentials
-
-Documents environment variables, credential injection flow, current limitations,
-and container configuration options.
-
-Part of #110"
-```
-
----
-
-## Task 7: Add Troubleshooting Guide
-
-**Files:**
-- Modify: `docs/AGENT_RUNTIME.md`
-
-**Step 1: Add troubleshooting section**
-
-Append to `docs/AGENT_RUNTIME.md`:
-
-```markdown
 
 ## Troubleshooting
 
@@ -540,7 +296,7 @@ Common issues when working with the agent runtime and their solutions.
 ### 1. Missing API Key
 
 **Symptom:**
-```
+```bash
 Error: ANTHROPIC_API_KEY environment variable not set
 ```
 
@@ -567,7 +323,7 @@ echo 'export ANTHROPIC_API_KEY="sk-ant-..."' >> ~/.zshrc
 ### 2. Docker Connection Failed
 
 **Symptom:**
-```
+```bash
 Error: Cannot connect to Docker daemon at unix:///var/run/docker.sock
 ```
 
@@ -626,7 +382,7 @@ export DOCKER_HOST="unix:///path/to/custom/docker.sock"
 ### 3. Container Image Pull Failure
 
 **Symptom:**
-```
+```bash
 Error: failed to pull image "ourocodus/agent:latest": pull access denied
 ```
 
@@ -675,7 +431,7 @@ docker build -t ourocodus/agent:latest -f containers/agent/Dockerfile .
 ### 4. Permission Denied on Workspace
 
 **Symptom:**
-```
+```bash
 Error: permission denied: /workspace/file.txt
 ```
 
@@ -732,6 +488,7 @@ docker stats <container-id>
 4. **Resource exhaustion:** Check host CPU/memory availability
 
 **Solution:**
+
 ```bash
 # Stop hanging container
 docker stop <container-id>
@@ -747,12 +504,14 @@ docker rm <container-id>
 ### Additional Diagnostics
 
 **View Relay Logs:**
+
 ```bash
 # Relay logs show session and agent lifecycle events
 ./cmd/relay/relay 2>&1 | tee relay.log
 ```
 
 **Inspect ContainerSession State:**
+
 ```bash
 # List all containers (including stopped)
 docker ps -a
@@ -762,6 +521,7 @@ docker ps -a --filter "label=ourocodus.session.id"
 ```
 
 **Test ACP Communication:**
+
 ```bash
 # Use echo-agent for testing without API key
 export OUROCODUS_ACP_BINARY="./cmd/echo-agent/echo-agent"
@@ -782,41 +542,6 @@ If issues persist:
    - Docker logs for container
    - `docker info` output
    - Operating system and Docker version
-```
-
-**Step 2: Verify troubleshooting scenarios**
-
-Run: `grep -c "### [0-9]" docs/AGENT_RUNTIME.md`
-Expected: Shows "5" (five troubleshooting scenarios)
-
-**Step 3: Commit troubleshooting section**
-
-```bash
-git add docs/AGENT_RUNTIME.md
-git commit -m "docs: Add agent runtime troubleshooting guide
-
-Five common scenarios with diagnosis steps and solutions:
-- Missing API key
-- Docker connection failed
-- Image pull failure
-- Permission denied on workspace
-- Agent timeout/unresponsive
-
-Part of #110"
-```
-
----
-
-## Task 8: Add Future Scalability Section
-
-**Files:**
-- Modify: `docs/AGENT_RUNTIME.md`
-
-**Step 1: Add scalability section**
-
-Append to `docs/AGENT_RUNTIME.md`:
-
-```markdown
 
 ## Future: Kubernetes Migration Path
 
@@ -860,12 +585,12 @@ The current architecture supports horizontal scaling on a single host:
 
 **Architecture Changes:**
 
-```
+```yaml
 Current:
-Relay → ContainerSession Manager → Docker API → Container
+  Relay → ContainerSession Manager → Docker API → Container
 
 Kubernetes:
-Relay → Kubernetes API → Job/Pod → Container
+  Relay → Kubernetes API → Job/Pod → Container
 ```
 
 **What Stays Identical:**
@@ -946,287 +671,3 @@ spec:
 ### Design Principle
 
 The ContainerSession abstraction exists specifically to make this migration straightforward when needed. The current Docker-based implementation and future K8s implementation can share the same interface, minimizing changes to the relay and session management layers.
-```
-
-**Step 2: Verify scalability section**
-
-Run: `grep -A 5 "## Future: Kubernetes Migration Path" docs/AGENT_RUNTIME.md`
-Expected: Shows section header and opening paragraphs
-
-**Step 3: Commit scalability section**
-
-```bash
-git add docs/AGENT_RUNTIME.md
-git commit -m "docs: Add agent runtime Kubernetes migration path
-
-Documents current single-host architecture, near-term scaling options,
-and long-term K8s migration strategy with primitive mappings.
-
-Part of #110"
-```
-
----
-
-## Task 9: Update ARCHITECTURE.md with Agent Runtime Layer
-
-**Files:**
-- Modify: `docs/ARCHITECTURE.md`
-
-**Step 1: Read current ARCHITECTURE.md to find insertion point**
-
-Run: `cat docs/ARCHITECTURE.md | grep -n "##" | head -10`
-Expected: Shows section headers with line numbers
-
-**Step 2: Add Agent Runtime Layer section**
-
-After the main architecture overview (determine exact line based on Step 1), add:
-
-```markdown
-## Agent Runtime Layer
-
-The agent runtime layer manages the lifecycle and execution environment for AI coding agents. This layer provides isolation, resource management, and workspace coordination.
-
-**Key Components:**
-
-- **Session Manager:** Tracks UserSessions (WebSocket connections) and spawns AgentSessions
-- **ContainerSession Manager:** Creates and manages Docker containers for agent execution
-- **Agent Launcher:** Coordinates agent spawning and ACP protocol initialization
-
-**Session Types:**
-
-- **UserSession:** WebSocket connection from PWA (browser) to Relay
-- **AgentSession:** Individual AI agent process with workspace and state
-- **ContainerSession:** Docker container runtime (one per AgentSession)
-
-**Architecture Overview:**
-
-```
-PWA (Browser)
-    ↓ WebSocket
-Relay Server (Session Management)
-    ↓ Docker API
-ContainerSession Manager
-    ↓ Container Lifecycle
-Docker Engine
-    ↓ Runs
-Claude Code Agent (ACP)
-    ↓ Reads/Writes
-Git Worktree (Workspace)
-```
-
-**For Complete Details:** See [Agent Runtime Architecture](./AGENT_RUNTIME.md) for:
-- Detailed session type definitions and lifecycle policies
-- Component and sequence diagrams (Mermaid)
-- Configuration and credential management
-- Troubleshooting common container issues
-- Future Kubernetes migration path
-
-**Session Lifecycle:**
-
-1. User connects via PWA → UserSession created
-2. User spawns agent → AgentSession + ContainerSession created
-3. Agent executes tasks in isolated container
-4. User terminates agent → ContainerSession and AgentSession cleaned up
-5. Workspace persists on host after termination
-
-**Implementation:**
-
-- Session tracking: `pkg/relay/session/`
-- Container management: `pkg/containersession/`
-- ACP client: `pkg/acp/`
-```
-
-**Step 3: Verify insertion**
-
-Run: `grep -A 10 "## Agent Runtime Layer" docs/ARCHITECTURE.md`
-Expected: Shows the new section with content
-
-**Step 4: Commit ARCHITECTURE.md update**
-
-```bash
-git add docs/ARCHITECTURE.md
-git commit -m "docs: Add Agent Runtime Layer to architecture overview
-
-Links to detailed AGENT_RUNTIME.md documentation with session types,
-component overview, and lifecycle summary.
-
-Part of #110"
-```
-
----
-
-## Task 10: Final Verification and PR Creation
-
-**Files:**
-- All documentation files created
-
-**Step 1: Verify all files exist**
-
-```bash
-ls -la docs/STATIC_FILE_SERVING.md
-ls -la docs/AGENT_RUNTIME.md
-git diff origin/main docs/ARCHITECTURE.md
-```
-
-Expected: All files exist and ARCHITECTURE.md shows changes
-
-**Step 2: Test Mermaid diagrams in GitHub**
-
-Create a test view to verify Mermaid rendering:
-
-```bash
-# Open GitHub's markdown preview for AGENT_RUNTIME.md
-# Method 1: Push branch and view in GitHub UI
-git push origin docs/milestone-2-completion
-
-# Method 2: Use GitHub CLI to preview locally (if available)
-gh markdown-preview docs/AGENT_RUNTIME.md
-```
-
-Expected: Diagrams render correctly (component diagram, sequence diagram visible)
-
-**Step 3: Create Pull Request**
-
-```bash
-gh pr create \
-  --title "docs: Complete Milestone 2 - Agent Runtime and Static Serving" \
-  --body "$(cat <<'EOF'
-## Summary
-
-Completes Milestone 2 by documenting the remaining two open issues:
-- **Issue #49:** Static file serving approach and future scalability options
-- **Issue #110:** Agent runtime architecture (MVP documentation)
-
-## Changes
-
-### New Files
-
-1. **`docs/STATIC_FILE_SERVING.md`**
-   - Documents current http.FileServer approach
-   - When current approach is sufficient
-   - Future scalability options (CDN, separate server, object storage)
-   - Decision timeline for scaling
-
-2. **`docs/AGENT_RUNTIME.md`**
-   - Authoritative session type definitions (UserSession, AgentSession, ContainerSession)
-   - Component architecture diagram (Mermaid)
-   - Execution flow sequence diagram (Mermaid)
-   - Configuration and credential injection documentation
-   - Current limitations explicitly documented
-   - Troubleshooting guide (5 common scenarios)
-   - Kubernetes migration path for future scaling
-
-### Modified Files
-
-3. **`docs/ARCHITECTURE.md`**
-   - Added "Agent Runtime Layer" section
-   - Links to detailed AGENT_RUNTIME.md
-   - Session lifecycle summary
-
-## Documentation Quality
-
-- **Audience:** Internal developers
-- **Diagrams:** Mermaid (renders natively in GitHub)
-- **Scope:** MVP depth - establishes foundation for future expansion
-- **Testing:** All Mermaid diagrams verified to render correctly
-
-## Closes
-
-- Closes #49
-- Closes #110
-
-## Follow-up Issues
-
-After this PR merges, we should create follow-up issues for:
-- Extended troubleshooting scenarios (10+ scenarios)
-- Lifecycle state diagram for ContainerSession
-- Detailed Kubernetes migration implementation guide
-- Operational runbook (logs, metrics, debugging)
-- Multi-provider credential design
-
-## Review Notes
-
-This is MVP documentation focused on closing the milestone. The content provides:
-- Clear definitions for session types (eliminates ambiguity)
-- Visual diagrams for architecture understanding
-- Practical troubleshooting for common issues
-- Forward-looking scalability notes
-
-The foundation is solid for expanding documentation based on real usage patterns and team feedback.
-EOF
-)"
-```
-
-Expected: PR created successfully with PR number returned
-
-**Step 4: Verify PR and close issues**
-
-```bash
-# View the PR
-gh pr view
-
-# After PR is merged, close the issues
-gh issue close 49 --comment "Closed by PR #<number>"
-gh issue close 110 --comment "Closed by PR #<number>"
-```
-
----
-
-## Task 11: Clean Up and Final Commit
-
-**Step 1: Verify git status is clean**
-
-Run: `git status`
-Expected: "On branch docs/milestone-2-completion", "Your branch is up to date", no uncommitted changes
-
-**Step 2: Review commit history**
-
-```bash
-git log --oneline origin/main..HEAD
-```
-
-Expected: Shows all commits from this implementation:
-- docs: Add static file serving documentation
-- docs: Add agent runtime session type definitions
-- docs: Add agent runtime component diagram
-- docs: Add agent runtime execution flow diagram
-- docs: Add agent runtime configuration and credentials
-- docs: Add agent runtime troubleshooting guide
-- docs: Add agent runtime Kubernetes migration path
-- docs: Add Agent Runtime Layer to architecture overview
-
-**Step 3: Final summary**
-
-All tasks complete. Ready for PR review and merge.
-
----
-
-## Success Criteria
-
-- [x] Issue #49 addressed with STATIC_FILE_SERVING.md
-- [x] Issue #110 addressed with AGENT_RUNTIME.md (MVP scope)
-- [x] ARCHITECTURE.md updated with Agent Runtime Layer reference
-- [x] Two Mermaid diagrams render correctly in GitHub (component + sequence)
-- [x] Session types authoritatively defined (UserSession, AgentSession, ContainerSession)
-- [x] Credential injection flow documented
-- [x] Five troubleshooting scenarios documented
-- [x] Kubernetes migration path documented
-- [x] All commits follow conventional commits format
-- [x] PR created with clear description
-- [x] Ready to close both issues after merge
-
-## Estimated Time
-
-- **Total:** ~3-4 hours
-- **Task 1-2:** 30 min (branch setup, static file serving)
-- **Task 3-5:** 90 min (agent runtime core content with diagrams)
-- **Task 6-8:** 60 min (config, troubleshooting, scalability)
-- **Task 9-11:** 30 min (architecture update, PR creation, verification)
-
-## Notes for Executor
-
-- This is documentation work, so "tests" are replaced with verification steps (file exists, diagrams render, etc.)
-- Mermaid syntax is sensitive - verify diagrams render before committing
-- Use GitHub preview or push branch to verify Mermaid rendering
-- Keep commits small and focused (one section per commit for easy review)
-- PR description is comprehensive - adjust as needed for your team's style
