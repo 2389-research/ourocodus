@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/2389-research/ourocodus/internal/webapp"
 	"github.com/2389-research/ourocodus/pkg/agent"
 	"github.com/2389-research/ourocodus/pkg/agent/container"
 	"github.com/2389-research/ourocodus/pkg/containersession"
@@ -94,9 +95,12 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", server.HandleWebSocket)
 
-	// Serve PWA static files from web directory
-	fs := http.FileServer(http.Dir("./web"))
-	mux.Handle("/", fs)
+	// Serve PWA static files from embedded filesystem
+	webFS, err := webapp.GetFS()
+	if err != nil {
+		log.Fatalf("Failed to create web filesystem: %v", err)
+	}
+	mux.Handle("/", http.FileServer(http.FS(webFS)))
 
 	httpServer := &http.Server{
 		Addr:              fmt.Sprintf(":%d", port),
