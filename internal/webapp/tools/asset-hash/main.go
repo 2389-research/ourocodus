@@ -123,6 +123,11 @@ func discoverAssets(dir string) ([]string, error) {
 			continue
 		}
 
+		// Skip service worker (must remain at fixed URL)
+		if name == "sw.js" {
+			continue
+		}
+
 		// Include .js and .css files
 		ext := filepath.Ext(name)
 		if ext == ".js" || ext == ".css" {

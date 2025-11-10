@@ -1018,6 +1018,9 @@ class App {
     init() {
         this.logger.info('Initializing Ourocodus PWA');
 
+        // Register service worker for offline support
+        this.registerServiceWorker();
+
         // Setup New Project button handler
         const newProjectBtn = document.getElementById('newProjectBtn');
         if (newProjectBtn) {
@@ -1438,6 +1441,36 @@ class App {
             btn.disabled = false;
             messageInput.disabled = false;
         }
+    }
+
+    registerServiceWorker() {
+        if (!('serviceWorker' in navigator)) {
+            this.logger.info('Service Worker not supported');
+            return;
+        }
+
+        navigator.serviceWorker.register('/sw.js')
+            .then(registration => {
+                this.logger.info('Service Worker registered:', registration.scope);
+
+                // Check for updates on page load
+                registration.update();
+
+                // Listen for updates
+                registration.addEventListener('updatefound', () => {
+                    const newWorker = registration.installing;
+                    if (newWorker) {
+                        newWorker.addEventListener('statechange', () => {
+                            if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                                this.logger.info('New version available - reload to update');
+                            }
+                        });
+                    }
+                });
+            })
+            .catch(error => {
+                this.logger.error('Service Worker registration failed:', error);
+            });
     }
 }
 
