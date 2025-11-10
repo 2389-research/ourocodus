@@ -3,11 +3,35 @@
  * Handles connection lifecycle, error handling, and reconnection strategies
  */
 
+import { Logger } from './logger';
+import type {
+    AgentState,
+    ChatMessage,
+    SessionCreatedMessage,
+    AgentReadyMessage,
+    AgentResponseMessage,
+    ProtocolMessage
+} from './types';
+
 /**
  * Modal Manager - Handles modal display and interaction
  */
+interface ModalOptions {
+    onConfirm?: () => void;
+    onCancel?: () => void;
+    updateContent?: (modal: HTMLElement) => void;
+}
+
 class ModalManager {
-    constructor(modalId) {
+    private logger: Logger;
+    private modal: HTMLElement | null;
+    private overlay: HTMLElement | null;
+    private confirmBtn: HTMLElement | null;
+    private cancelBtn: HTMLElement | null;
+    private onConfirm: (() => void) | null;
+    private onCancel: (() => void) | null;
+
+    constructor(modalId: string) {
         this.logger = new Logger('ModalManager');
         this.modal = document.getElementById(modalId);
         this.overlay = null;
@@ -30,7 +54,7 @@ class ModalManager {
         this.setupListeners();
     }
 
-    setupListeners() {
+    setupListeners(): void {
         // Confirm button
         if (this.confirmBtn) {
             this.confirmBtn.addEventListener('click', () => {
@@ -62,7 +86,7 @@ class ModalManager {
         }
     }
 
-    show(options = {}) {
+    show(options: ModalOptions = {}): void {
         if (!this.modal) return;
 
         // Update callbacks
@@ -78,13 +102,29 @@ class ModalManager {
         this.modal.style.display = 'flex';
     }
 
-    hide() {
+    hide(): void {
         if (!this.modal) return;
         this.modal.style.display = 'none';
     }
 }
 
 class RelayConnection {
+    private logger: Logger;
+    private ws: WebSocket | null;
+    public isConnected: boolean;
+    private shouldReconnect: boolean;
+    private reconnectAttempts: number;
+    private maxReconnectAttempts: number;
+    private reconnectDelay: number;
+    private maxReconnectDelay: number;
+    public userSessionId: string | null;
+    private reconnectTimeout: number | null;
+    private currentChatRole: string | null;
+    private wsUrl: string;
+
+    // Map-based state for multiple agents: role → { role, status, messages, workspace }
+    public agents: Map<string, AgentState>;
+
     constructor() {
         this.logger = new Logger('RelayConnection');
         this.ws = null;
@@ -98,8 +138,8 @@ class RelayConnection {
         this.reconnectTimeout = null;
         this.currentChatRole = null;
 
-        // Map-based state for multiple agents: role → { role, status, messages, workspace }
-        this.agents = new Map();
+        // Map-based state for multiple agents
+        this.agents = new Map<string, AgentState>();
 
         // Get WebSocket URL (same host as HTTP)
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -112,7 +152,7 @@ class RelayConnection {
     /**
      * Connect to the relay WebSocket server
      */
-    connect() {
+    connect(): void {
         if (this.ws && (this.ws.readyState === WebSocket.CONNECTING || this.ws.readyState === WebSocket.OPEN)) {
             this.logger.debug('Already connected or connecting');
             return;
@@ -134,10 +174,14 @@ class RelayConnection {
     /**
      * Setup WebSocket event handlers
      */
-    setupEventHandlers() {
-        this.ws.onopen = (event) => {
-            this.logger.info('Connected to relay', event);
+    setupEventHandlers(): void {
+        this.ws!.onopen = (event) => {
+            this.logger.info('WebSocket onopen fired - Setting isConnected to true', {
+                readyState: this.ws.readyState,
+                expectedOpen: WebSocket.OPEN
+            });
             this.isConnected = true;
+            this.logger.info('Connected to relay - isConnected now:', this.isConnected);
             this.reconnectAttempts = 0;
             this.reconnectDelay = 1000;
             this.updateConnectionStatus('connected', 'Connected');
@@ -171,7 +215,7 @@ class RelayConnection {
     /**
      * Handle incoming WebSocket messages
      */
-    handleMessage(data) {
+    handleMessage(data: string): void {
         try {
             const message = JSON.parse(data);
             this.logger.debug('Parsed message:', message);
@@ -223,33 +267,44 @@ class RelayConnection {
     /**
      * Handle session:created response
      */
-    handleSessionCreated(message) {
+    handleSessionCreated(message: SessionCreatedMessage): void {
+        this.logger.info('[UI UPDATE] handleSessionCreated called with:', message);
+
         const sessionInfoCard = document.getElementById('sessionInfo');
         const sessionIdEl = document.getElementById('userSessionId');
         const sessionStatusEl = document.getElementById('sessionStatus');
         const welcomeCard = document.getElementById('welcomeCard');
 
+        this.logger.info('[UI UPDATE] Elements found:', {
+            sessionInfoCard: !!sessionInfoCard,
+            sessionIdEl: !!sessionIdEl,
+            sessionStatusEl: !!sessionStatusEl,
+            welcomeCard: !!welcomeCard
+        });
+
         if (!sessionInfoCard || !sessionIdEl || !sessionStatusEl) {
-            this.logger.error('Session UI elements not found');
+            this.logger.error('[UI UPDATE] Session UI elements not found - cannot update UI');
             return;
         }
 
         // Hide welcome card, show session info
         if (welcomeCard) {
+            this.logger.info('[UI UPDATE] Hiding welcome card');
             welcomeCard.style.display = 'none';
         }
 
+        this.logger.info('[UI UPDATE] Showing session info card');
         sessionInfoCard.style.display = 'block';
         sessionIdEl.textContent = message.userSessionId;
         sessionStatusEl.textContent = 'Active';
 
-        this.logger.debug('Session UI updated');
+        this.logger.info('[UI UPDATE] Session UI updated successfully');
     }
 
     /**
      * Handle agent:ready response
      */
-    handleAgentReady(message) {
+    handleAgentReady(message: AgentReadyMessage): void {
         const role = message.agentId;
         const workspace = message.workspace || '';
 
@@ -281,7 +336,7 @@ class RelayConnection {
     /**
      * Handle agent:response message
      */
-    handleAgentResponse(message) {
+    handleAgentResponse(message: AgentResponseMessage): void {
         const role = message.agentId;
         const agent = this.agents.get(role);
 
@@ -307,7 +362,7 @@ class RelayConnection {
     /**
      * Handle agent:terminated message
      */
-    handleAgentTerminated(message) {
+    handleAgentTerminated(message: any): void {
         const role = message.agentId;
         this.logger.info('Agent terminated from server:', role);
 
@@ -330,7 +385,7 @@ class RelayConnection {
     /**
      * Handle session:ended message
      */
-    handleSessionEnded(message) {
+    handleSessionEnded(message: any): void {
         this.logger.info('Session ended, all agents terminated:', message);
 
         // Clear all agents
@@ -428,19 +483,52 @@ class RelayConnection {
      * Send a message to the relay
      */
     sendMessage(message) {
-        this.logger.debug('sendMessage debug - isConnected:', this.isConnected, 'ws:', !!this.ws, 'readyState:', this.ws?.readyState, 'OPEN:', WebSocket.OPEN);
-        if (!this.isConnected || !this.ws || this.ws.readyState !== WebSocket.OPEN) {
-            this.logger.error('Cannot send message: not connected');
+        this.logger.debug('sendMessage called:', {
+            isConnected: this.isConnected,
+            hasWs: !!this.ws,
+            readyState: this.ws?.readyState,
+            expectedOpen: WebSocket.OPEN,
+            messageType: message.type
+        });
+
+        if (!this.isConnected) {
+            this.logger.error('Cannot send message: isConnected is false');
+            return false;
+        }
+
+        if (!this.ws) {
+            this.logger.error('Cannot send message: ws is null');
+            return false;
+        }
+
+        if (this.ws.readyState !== WebSocket.OPEN) {
+            this.logger.error('Cannot send message: WebSocket not in OPEN state', {
+                readyState: this.ws.readyState,
+                expected: WebSocket.OPEN,
+                states: {
+                    CONNECTING: WebSocket.CONNECTING,
+                    OPEN: WebSocket.OPEN,
+                    CLOSING: WebSocket.CLOSING,
+                    CLOSED: WebSocket.CLOSED
+                }
+            });
             return false;
         }
 
         try {
             const payload = JSON.stringify(message);
-            this.logger.debug('Sending message:', payload);
+            this.logger.info('Sending message:', {
+                type: message.type,
+                payloadLength: payload.length
+            });
             this.ws.send(payload);
+            this.logger.info('Message sent successfully:', message.type);
             return true;
         } catch (error) {
-            this.logger.error('Failed to send message:', error);
+            this.logger.error('Failed to send message - exception:', {
+                error: error.message,
+                type: message.type
+            });
             return false;
         }
     }
@@ -449,17 +537,26 @@ class RelayConnection {
      * Create a new session
      */
     createSession() {
+        this.logger.info('createSession called - Pre-send state:', {
+            isConnected: this.isConnected,
+            hasWs: !!this.ws,
+            readyState: this.ws?.readyState,
+            userSessionId: this.userSessionId
+        });
+
         const message = {
             type: 'session:create',
             version: '1.0'
         };
 
         if (!this.sendMessage(message)) {
-            this.logger.error('Failed to send session:create message');
+            this.logger.error('Failed to send session:create message - sendMessage returned false');
             const sessionStatusEl = document.getElementById('sessionStatus');
             if (sessionStatusEl) {
                 sessionStatusEl.textContent = 'Failed to create session';
             }
+        } else {
+            this.logger.info('session:create message sent successfully, waiting for response');
         }
     }
 
@@ -681,7 +778,7 @@ class RelayConnection {
     /**
      * Send message from chat interface
      */
-    sendMessage() {
+    sendChatMessage() {
         const input = document.getElementById('chatInput');
         if (!input) {
             this.logger.error('Chat input not found');
@@ -954,7 +1051,7 @@ class App {
             chatInput.addEventListener('keypress', (e) => {
                 if (e.key === 'Enter') {
                     e.preventDefault();
-                    this.connection.sendMessage();
+                    this.connection.sendChatMessage();
                 }
             });
         }
@@ -1222,6 +1319,7 @@ class App {
 
             // Wait for connection, then create session
             this.connectionCheckInterval = setInterval(() => {
+                this.logger.info('Connection check interval - isConnected:', this.connection.isConnected);
                 if (this.connection.isConnected) {
                     // Clean up interval and timeout
                     clearInterval(this.connectionCheckInterval);
@@ -1230,7 +1328,11 @@ class App {
                     this.connectionCheckTimeout = null;
                     this.isConnecting = false;
 
-                    this.logger.info('Connected, creating session...');
+                    this.logger.info('Connected, creating session...', {
+                        isConnected: this.connection.isConnected,
+                        wsReadyState: this.connection.ws?.readyState,
+                        expectedOpen: WebSocket.OPEN
+                    });
                     this.connection.createSession();
                     btn.disabled = false;
                     btn.innerHTML = '<span class="btn-icon">+</span> New Project';

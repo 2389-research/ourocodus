@@ -4,9 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="Ourocodus - Multi-Agent AI Development Platform">
-    <meta name="theme-color" content="#1a1a2e">
+    <meta name="theme-color" content="#ffffff">
     <title>Ourocodus</title>
-    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="styles.min.55e70520.css""">
+    <link rel="stylesheet" href="tailwind.fc562ecc.css""">
 </head>
 <body>
     <div class="container">
@@ -37,7 +38,7 @@
             <div class="card info-card" id="sessionInfo" style="display: none;">
                 <div class="card-header">
                     <h3>Session Information</h3>
-                    <button class="btn btn-danger btn-small" id="endSessionBtn" title="Terminate all agents, end session, disconnect, and reset demo to initial state">
+                    <button class="btn btn-danger btn-small" id="endSessionBtn" title="Terminate all agents, end session, and disconnect">
                         <span class="btn-icon">🗑️</span>
                         End Session
                     </button>
@@ -61,7 +62,7 @@
                     </div>
                     <div class="form-group">
                         <label for="agentWorkspace">Workspace:</label>
-                        <input type="text" id="agentWorkspace" value="./workspaces/demo" placeholder="./workspaces/demo">
+                        <input type="text" id="agentWorkspace" value="./workspaces/default" placeholder="./workspaces/default">
                     </div>
                     <button class="btn btn-secondary" id="spawnAgentBtn">
                         <span class="btn-icon">🤖</span>
@@ -153,7 +154,7 @@
             <h3 id="endSessionModalTitle">End Session?</h3>
             <div id="endSessionModalDesc">
                 <p>This will terminate the session, close all agents, and disconnect from the relay.</p>
-                <p class="modal-warning">⚠️ All agents will be terminated and the demo will reset to its initial state.</p>
+                <p class="modal-warning">⚠️ All agents will be terminated and the session will end.</p>
             </div>
             <div class="modal-actions">
                 <button class="btn btn-secondary" id="cancelEndSession" aria-label="Cancel end session">Cancel</button>
@@ -184,7 +185,7 @@
         </div>
     </div>
 
-    <script src="logger.js"></script>
-    <script src="app.js"></script>
+    <script src="logger.54809809.js"""></script>
+    <script src="app.493c9c44.js"""></script>
 </body>
 </html>

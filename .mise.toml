@@ -10,6 +10,11 @@ go = "1.24.0"
 "go:honnef.co/go/tools/cmd/staticcheck" = "latest"
 "go:mvdan.cc/gofumpt" = "latest"
 
+# Asset compilation tools (no Node.js required)
+"go:github.com/evanw/esbuild/cmd/esbuild" = "latest"  # TypeScript/JS bundler (Go-based)
+"go:github.com/tdewolff/minify/v2/cmd/minify" = "latest"  # HTML/CSS/JS minifier (Go-based)
+# Note: Tailwind CLI standalone binary can be installed separately (see docs)
+
 [env]
 # Set Go environment variables
 # Copy .envrc.example to .envrc and customize as needed
@@ -37,8 +42,12 @@ run = [
   "make build"
 ]
 
+[tasks.assets]
+description = "Compile and bundle web assets (TypeScript, CSS)"
+run = "make assets"
+
 [tasks.build]
-description = "Build relay/cli binaries via Makefile"
+description = "Build relay/cli binaries via Makefile (includes asset compilation)"
 run = "make build"
 
 [tasks.test]

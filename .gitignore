@@ -71,6 +71,20 @@ logs/
 # Node modules (for PWA tooling)
 node_modules/
 
+# PWA build artifacts (compiled from TypeScript/Tailwind)
+internal/webapp/web/app.js
+internal/webapp/web/logger.js
+internal/webapp/web/tailwind.css
+internal/webapp/web/styles.min.css
+internal/webapp/web/*.bak
+
+# PWA asset fingerprints (content-hashed filenames)
+internal/webapp/web/app.*.js
+internal/webapp/web/logger.*.js
+internal/webapp/web/tailwind.*.css
+internal/webapp/web/styles.min.*.css
+internal/webapp/web/asset-manifest.json
+
 # SQLite
 *.db
 *.sqlite

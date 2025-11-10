@@ -1,17 +1,17 @@
-# Ourocodus PWA Demo
+# Ourocodus PWA
 
-This directory contains the Progressive Web Application (PWA) demo for Ourocodus, including the Protocol Inspector tool for visualizing WebSocket communication.
+This directory contains the Progressive Web Application (PWA) for Ourocodus, including the Protocol Inspector tool for visualizing WebSocket communication.
 
 ## Overview
 
-The demo showcases the full lifecycle of multi-agent interactions:
+The PWA showcases the full lifecycle of multi-agent interactions:
 - WebSocket connection management
 - Session creation and lifecycle
 - Agent spawning, messaging, and termination
 - Real-time protocol inspection
 - Error handling and recovery
 
-## Running the Demo
+## Running the Application
 
 ### Prerequisites
 
@@ -30,9 +30,9 @@ The demo showcases the full lifecycle of multi-agent interactions:
    OUROCODUS_ACP_BINARY=/Users/clint/code/ourocodus/bin/echo-agent ./bin/relay
    ```
 
-3. **Open the demo:**
+3. **Open the application:**
    - **PWA interface**: http://localhost:3000/
-   - **Protocol Inspector**: http://localhost:3000/demo.html
+   - **Protocol Inspector**: http://localhost:3000/protocol-inspector.html
 
 ### Environment Variables
 
@@ -51,16 +51,16 @@ The demo showcases the full lifecycle of multi-agent interactions:
 
 ### Protocol Inspector
 
-- **`demo.html`**: Split-screen inspector UI
-- **`demo.js`**: Protocol Inspector class for message visualization
-- **`demo-shim.js`**: WebSocket interceptor for non-invasive traffic capture
-- **`demo.css`**: Inspector-specific styling
+- **`protocol-inspector.html`**: Split-screen inspector UI
+- **`protocol-inspector.js`**: Protocol Inspector class for message visualization
+- **`websocket-interceptor.js`**: WebSocket interceptor for non-invasive traffic capture
+- **`inspector.css`**: Inspector-specific styling
 
 ## Features
 
 ### Connection Management
 
-The demo supports three distinct connection control actions:
+The application supports three distinct connection control actions:
 
 1. **Disconnect** (Header button)
    - Closes WebSocket connection only
@@ -72,8 +72,8 @@ The demo supports three distinct connection control actions:
    - Sends `session:end` protocol message
    - Terminates all agents
    - Disconnects from relay
-   - Resets demo to initial state
-   - Tooltip: "Terminate all agents, end session, disconnect, and reset demo to initial state"
+   - Resets to initial state
+   - Tooltip: "Terminate all agents, end session, and disconnect"
 
 3. **Terminate Agent** (Agent card button)
    - Sends `agent:terminate` protocol message
@@ -136,11 +136,11 @@ The Protocol Inspector provides real-time WebSocket protocol visualization witho
 
 ### How It Works
 
-1. **demo.html** loads the PWA in an iframe
-2. **demo-shim.js** is injected into the iframe
-3. Shim wraps native `WebSocket` constructor
+1. **protocol-inspector.html** loads the PWA in an iframe
+2. **websocket-interceptor.js** is injected into the iframe
+3. Interceptor wraps native `WebSocket` constructor
 4. All WebSocket events broadcast via `postMessage()`
-5. **demo.js** receives and displays messages in real-time
+5. **protocol-inspector.js** receives and displays messages in real-time
 
 ### Key Features
 
