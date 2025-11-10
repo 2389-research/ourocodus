@@ -3,7 +3,7 @@
  */
 
 import { Logger } from './logger';
-import type { AgentState, SessionCreatedMessage, AgentReadyMessage, AgentResponseMessage } from './types';
+import type { AgentState, SessionCreatedMessage, AgentReadyMessage, AgentResponseMessage, ErrorMessage } from './types';
 
 export class RelayConnection {
     private logger: Logger;
@@ -301,7 +301,7 @@ export class RelayConnection {
     /**
      * Display a message in the message history
      */
-    displayMessage(sender, content) {
+    displayMessage(sender: string, content: string): void {
         const messageHistory = document.getElementById('messageHistory');
         if (!messageHistory) {
             this.logger.error('Message history element not found');
@@ -334,7 +334,7 @@ export class RelayConnection {
     /**
      * Handle error messages from server
      */
-    handleError(message) {
+    handleError(message: ErrorMessage): void {
         this.logger.error('Server error:', message);
 
         // Extract error details
@@ -349,7 +349,7 @@ export class RelayConnection {
     /**
      * Show error notification
      */
-    showErrorNotification(code, message, recoverable) {
+    showErrorNotification(code: string, message: string, recoverable: boolean): void {
         // Create error notification element
         const errorDiv = document.createElement('div');
         errorDiv.className = 'error-notification';
@@ -747,7 +747,7 @@ export class RelayConnection {
     /**
      * Terminate a specific agent from card UI
      */
-    terminateAgentCard(role) {
+    terminateAgentCard(role: string): boolean {
         this.logger.info('Terminating agent from card:', role);
 
         if (!this.userSessionId) {
@@ -841,7 +841,7 @@ export class RelayConnection {
     /**
      * Update the connection status UI
      */
-    updateConnectionStatus(state, text) {
+    updateConnectionStatus(state: 'connected' | 'connecting' | 'reconnecting' | 'disconnected' | 'error' | 'failed', text: string): void {
         const statusIndicator = document.getElementById('statusIndicator');
         const statusText = document.getElementById('statusText');
         const disconnectBtn = document.getElementById('disconnectBtn');

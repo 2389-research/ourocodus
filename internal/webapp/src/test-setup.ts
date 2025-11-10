@@ -1,3 +1,20 @@
+// Mock CloseEvent (not available in Node.js test environment)
+class MockCloseEvent extends Event {
+  public code: number;
+  public reason: string;
+  public wasClean: boolean;
+
+  constructor(type: string, eventInitDict?: { code?: number; reason?: string; wasClean?: boolean }) {
+    super(type);
+    this.code = eventInitDict?.code || 1000;
+    this.reason = eventInitDict?.reason || '';
+    this.wasClean = eventInitDict?.wasClean ?? true;
+  }
+}
+
+// Install CloseEvent mock globally
+(global as any).CloseEvent = MockCloseEvent;
+
 // Mock WebSocket
 class MockWebSocket {
   public readyState: number;

@@ -62,6 +62,20 @@ export interface ConnectionEstablishedMessage extends BaseMessage {
     timestamp: string;
 }
 
+// Error message types
+export interface ErrorMessage extends BaseMessage {
+    type: 'error';
+    // Nested error object (preferred format)
+    error?: {
+        code?: string;
+        message?: string;
+        recoverable?: boolean;
+    };
+    // Top-level error properties (alternative format)
+    code?: string;
+    message?: string;
+}
+
 export type ProtocolMessage =
     | SessionCreateMessage
     | SessionCreatedMessage
@@ -71,7 +85,8 @@ export type ProtocolMessage =
     | AgentResponseMessage
     | SessionEndMessage
     | AgentTerminateMessage
-    | ConnectionEstablishedMessage;
+    | ConnectionEstablishedMessage
+    | ErrorMessage;
 
 // Agent state types
 export interface ChatMessage {
