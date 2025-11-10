@@ -21,7 +21,7 @@ func main() {
 	htmlPath := os.Args[2]
 
 	// Read manifest
-	manifestData, err := os.ReadFile(manifestPath)
+	manifestData, err := os.ReadFile(manifestPath) // nolint:gosec // G304: CLI tool takes file path as argument
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error reading manifest: %v\n", err)
 		os.Exit(1)
@@ -34,7 +34,7 @@ func main() {
 	}
 
 	// Read HTML file
-	htmlContent, err := os.ReadFile(htmlPath)
+	htmlContent, err := os.ReadFile(htmlPath) // nolint:gosec // G304: CLI tool takes file path as argument
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error reading HTML: %v\n", err)
 		os.Exit(1)
@@ -44,29 +44,22 @@ func main() {
 	updated := html
 
 	// Replace asset references in HTML
-	// Pattern: src="file.js?v=X" or href="file.css?v=X" or src="file.oldhash.js"
-	// Replace with: src="file.hash.js" or href="file.hash.css"
-
 	for original, hashed := range manifest {
 		// Extract base name and extension
 		ext := filepath.Ext(original)
 		base := original[:len(original)-len(ext)]
 
-		// Match:
-		// 1. Original filename with optional query params: app.js?v=6
-		// 2. Already-hashed filename: app.abc123.js
-		patterns := []string{
-			// Original with optional query params
-			fmt.Sprintf(`(src|href)="%s(\?[^"]*)?`, regexp.QuoteMeta(original)),
-			// Already hashed version: basename.*.ext
-			fmt.Sprintf(`(src|href)="%s\.[a-f0-9]{8}%s`, regexp.QuoteMeta(base), regexp.QuoteMeta(ext)),
-		}
+		// Pattern 1: Original filename with optional query params
+		// Matches: src="app.js?v=6" or href="styles.css"
+		pattern1 := regexp.MustCompile(
+			fmt.Sprintf(`((?:src|href)=")%s(?:\?[^"]*)?(")`, regexp.QuoteMeta(original)))
+		updated = pattern1.ReplaceAllString(updated, fmt.Sprintf(`${1}%s${2}`, hashed))
 
-		for _, pattern := range patterns {
-			re := regexp.MustCompile(pattern)
-			replacement := fmt.Sprintf(`$1="%s"`, hashed)
-			updated = re.ReplaceAllString(updated, replacement)
-		}
+		// Pattern 2: Already-hashed filename
+		// Matches: src="app.abc123.js"
+		pattern2 := regexp.MustCompile(
+			fmt.Sprintf(`((?:src|href)=")%s\.[a-f0-9]{8}%s(")`, regexp.QuoteMeta(base), regexp.QuoteMeta(ext)))
+		updated = pattern2.ReplaceAllString(updated, fmt.Sprintf(`${1}%s${2}`, hashed))
 
 		fmt.Printf("✓ %s -> %s\n", original, hashed)
 	}
@@ -75,12 +68,12 @@ func main() {
 	if updated != html {
 		// Create backup
 		backupPath := htmlPath + ".bak"
-		if err := os.WriteFile(backupPath, []byte(html), 0644); err != nil {
+		if err := os.WriteFile(backupPath, []byte(html), 0600); err != nil {
 			fmt.Fprintf(os.Stderr, "Error creating backup: %v\n", err)
 			os.Exit(1)
 		}
 
-		if err := os.WriteFile(htmlPath, []byte(updated), 0644); err != nil {
+		if err := os.WriteFile(htmlPath, []byte(updated), 0600); err != nil {
 			fmt.Fprintf(os.Stderr, "Error writing HTML: %v\n", err)
 			os.Exit(1)
 		}

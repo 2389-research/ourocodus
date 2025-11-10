@@ -7,6 +7,14 @@ all: build test
 # This runs before build to prepare assets for embedding
 assets:
 	@echo "Compiling web assets..."
+	@# Check if mise is available
+	@if ! command -v mise >/dev/null 2>&1; then \
+		echo "⚠️  WARNING: mise is not installed or not in PATH"; \
+		echo "   Asset compilation will be skipped."; \
+		echo "   Install mise: https://mise.jdx.dev/getting-started.html"; \
+		echo "   Or install tools manually: esbuild, minify, tailwindcss"; \
+		exit 0; \
+	fi
 	@# TypeScript/JavaScript bundling
 	@if [ -d "internal/webapp/src" ]; then \
 		echo "  → Bundling TypeScript with esbuild..."; \
@@ -36,12 +44,12 @@ assets:
 	fi
 	@# Generate content-hash fingerprinted assets
 	@echo "  → Generating asset fingerprints..."
-	@go run internal/webapp/tools/asset-hash.go internal/webapp/web internal/webapp/web/asset-manifest.json
+	@go run internal/webapp/tools/asset-hash/main.go internal/webapp/web internal/webapp/web/asset-manifest.json
 	@# Inject hashed filenames into HTML
 	@echo "  → Injecting hashes into HTML..."
-	@go run internal/webapp/tools/inject-hashes.go internal/webapp/web/asset-manifest.json internal/webapp/web/index.html
+	@go run internal/webapp/tools/inject-hashes/main.go internal/webapp/web/asset-manifest.json internal/webapp/web/index.html
 	@if [ -f "internal/webapp/web/protocol-inspector.html" ]; then \
-		go run internal/webapp/tools/inject-hashes.go internal/webapp/web/asset-manifest.json internal/webapp/web/protocol-inspector.html; \
+		go run internal/webapp/tools/inject-hashes/main.go internal/webapp/web/asset-manifest.json internal/webapp/web/protocol-inspector.html; \
 	fi
 	@echo "✓ Assets compiled"
 

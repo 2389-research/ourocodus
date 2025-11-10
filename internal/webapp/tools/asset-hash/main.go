@@ -43,7 +43,7 @@ func main() {
 		}
 
 		// Read file and compute hash
-		file, err := os.Open(originalPath)
+		file, err := os.Open(originalPath) // nolint:gosec // G304: CLI tool operates on web asset files
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error opening %s: %v\n", filename, err)
 			continue
@@ -51,11 +51,13 @@ func main() {
 
 		hasher := sha256.New()
 		if _, err := io.Copy(hasher, file); err != nil {
-			file.Close()
+			_ = file.Close()
 			fmt.Fprintf(os.Stderr, "Error hashing %s: %v\n", filename, err)
 			continue
 		}
-		file.Close()
+		if err := file.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error closing %s: %v\n", filename, err)
+		}
 
 		// Get short hash (first 8 chars)
 		hash := hex.EncodeToString(hasher.Sum(nil))[:8]
@@ -84,7 +86,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := os.WriteFile(manifestPath, manifestJSON, 0644); err != nil {
+	if err := os.WriteFile(manifestPath, manifestJSON, 0600); err != nil {
 		fmt.Fprintf(os.Stderr, "Error writing manifest: %v\n", err)
 		os.Exit(1)
 	}
@@ -93,17 +95,17 @@ func main() {
 }
 
 func copyFile(src, dst string) error {
-	sourceFile, err := os.Open(src)
+	sourceFile, err := os.Open(src) // nolint:gosec // G304: CLI tool copies asset files
 	if err != nil {
 		return err
 	}
-	defer sourceFile.Close()
+	defer func() { _ = sourceFile.Close() }()
 
-	destFile, err := os.Create(dst)
+	destFile, err := os.Create(dst) // nolint:gosec // G304: CLI tool creates asset files
 	if err != nil {
 		return err
 	}
-	defer destFile.Close()
+	defer func() { _ = destFile.Close() }()
 
 	_, err = io.Copy(destFile, sourceFile)
 	return err
