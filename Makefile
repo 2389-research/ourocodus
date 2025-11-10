@@ -56,12 +56,16 @@ assets:
 	fi
 	@echo "✓ Assets compiled"
 
-# Check if asset tools are installed
+# Check if asset tools are installed and verify TypeScript types
 assets-check:
 	@echo "Checking asset compilation tools..."
 	@mise exec -- esbuild --version >/dev/null 2>&1 && echo "  ✓ esbuild installed" || echo "  ✗ esbuild missing (run: mise install)"
 	@mise exec -- minify --version >/dev/null 2>&1 && echo "  ✓ minify installed" || echo "  ✗ minify missing (run: mise install)"
 	@[ -f "bin/tailwindcss" ] && echo "  ✓ tailwindcss installed" || echo "  ✗ tailwindcss missing (run: make tailwind-download)"
+	@echo "Checking TypeScript types..."
+	@if [ -d "internal/webapp/src" ]; then \
+		cd internal/webapp/src && mise exec -- tsc --noEmit && echo "  ✓ TypeScript types valid" || echo "  ⚠ TypeScript has type errors (non-blocking)"; \
+	fi
 
 # Download Tailwind CSS standalone CLI
 tailwind-download:
@@ -182,6 +186,7 @@ pre-commit: fmt
 	go vet ./...
 	$(MAKE) lint
 	go mod tidy
+	$(MAKE) assets-check
 	$(MAKE) build
 	$(MAKE) test
 	@echo "All checks passed!"

@@ -110,7 +110,7 @@ class ModalManager {
 
 class RelayConnection {
     private logger: Logger;
-    private ws: WebSocket | null;
+    public ws: WebSocket | null;
     public isConnected: boolean;
     private shouldReconnect: boolean;
     private reconnectAttempts: number;
@@ -119,7 +119,7 @@ class RelayConnection {
     private maxReconnectDelay: number;
     public userSessionId: string | null;
     private reconnectTimeout: number | null;
-    private currentChatRole: string | null;
+    public currentChatRole: string | null;
     public currentAgentRole: string | null; // Currently selected agent for single-agent card view
     private wsUrl: string;
 
@@ -1000,6 +1000,15 @@ class RelayConnection {
  * Application initialization
  */
 class App {
+    private logger: Logger;
+    connection: RelayConnection;
+    private connectionCheckInterval: ReturnType<typeof setInterval> | null;
+    private connectionCheckTimeout: ReturnType<typeof setTimeout> | null;
+    private isConnecting: boolean;
+    private disconnectModal: ModalManager;
+    private endSessionModal: ModalManager;
+    private terminateAgentModal: ModalManager;
+
     constructor() {
         this.logger = new Logger('App');
         this.connection = new RelayConnection();

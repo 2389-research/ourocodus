@@ -13,6 +13,7 @@ go = "1.24.0"
 # Asset compilation tools (no Node.js required)
 "go:github.com/evanw/esbuild/cmd/esbuild" = "latest"  # TypeScript/JS bundler (Go-based)
 "go:github.com/tdewolff/minify/v2/cmd/minify" = "latest"  # HTML/CSS/JS minifier (Go-based)
+"npm:typescript" = "latest"  # TypeScript compiler for type checking
 # Note: Tailwind CLI standalone binary can be installed separately (see docs)
 
 [env]
