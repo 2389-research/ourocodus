@@ -42,6 +42,9 @@ assets:
 		echo "  → Minifying CSS..."; \
 		mise exec -- minify -o internal/webapp/web/styles.min.css internal/webapp/web/styles.css 2>/dev/null || true; \
 	fi
+	@# Generate PWA icons
+	@echo "  → Generating PWA icons..."
+	@go run internal/webapp/tools/gen-icons/main.go internal/webapp/web
 	@# Generate content-hash fingerprinted assets
 	@echo "  → Generating asset fingerprints..."
 	@go run internal/webapp/tools/asset-hash/main.go internal/webapp/web internal/webapp/web/asset-manifest.json
