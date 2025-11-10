@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/2389-research/ourocodus/pkg/acp"
+	"github.com/2389-research/ourocodus/pkg/agent/container"
 	"github.com/2389-research/ourocodus/pkg/relay/session"
 )
 
@@ -283,7 +285,10 @@ func (s *Server) handleAgentSpawn(ctx context.Context, conn WebSocketConn, rawMe
 		errorCode, errorMessage, recoverable := s.mapError(err)
 
 		// Override generic message for spawn-specific context
-		if errorCode == "INTERNAL_ERROR" {
+		if errors.Is(err, container.ErrContainerSetupFailed) && strings.Contains(err.Error(), "No such image") {
+			errorCode = "AGENT_SPAWN_FAILED"
+			errorMessage = "Failed to spawn agent: Docker image 'ourocodus/agent:latest' not found. Build it with: make agent-image"
+		} else if errorCode == "INTERNAL_ERROR" {
 			errorCode = "AGENT_SPAWN_FAILED"
 			errorMessage = fmt.Sprintf("Failed to spawn agent: %v", err)
 		}
@@ -474,15 +479,14 @@ func (s *Server) handleSessionEnd(ctx context.Context, conn WebSocketConn, rawMe
 
 	s.logger.Printf("Terminating user session: %s", msg.UserSessionID)
 
-	// Get session to count agents before termination
+	// Optional: capture session to log agent count prior to termination
 	userSession := s.sessionManager.Get(msg.UserSessionID)
-	agentCount := 0
 	if userSession != nil {
-		agentCount = len(userSession.ListAgents())
+		s.logger.Printf("Session has %d agents before termination", len(userSession.ListAgents()))
 	}
 
 	// Terminate session (this will terminate all agents)
-	err = s.sessionManager.TerminateUserSession(ctx, msg.UserSessionID)
+	summary, err := s.sessionManager.TerminateUserSession(ctx, msg.UserSessionID)
 	if err != nil {
 		s.logger.Printf("Error terminating session: %v", err)
 		// Map error to protocol error code
@@ -495,10 +499,11 @@ func (s *Server) handleSessionEnd(ctx context.Context, conn WebSocketConn, rawMe
 		return !recoverable
 	}
 
-	s.logger.Printf("User session terminated: %s, agents terminated: %d", msg.UserSessionID, agentCount)
+	s.logger.Printf("User session terminated: %s, agents terminated: %d (failures=%d, cleanup=%s)",
+		msg.UserSessionID, summary.AgentsTerminated, summary.AgentFailures, summary.CleanupStatus)
 
 	// Send session:ended response
-	response := NewSessionEndedMessage(msg.UserSessionID, agentCount, "complete")
+	response := NewSessionEndedMessage(msg.UserSessionID, summary.AgentsTerminated, string(summary.CleanupStatus))
 	if err := conn.WriteJSON(response); err != nil {
 		s.logger.Printf("Failed to send session:ended: %v", err)
 		return true
@@ -581,7 +586,12 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 
-		s.logger.Printf("[RELAY] Received message (%d bytes): %s", len(message), string(message))
+		var base BaseMessage
+		if err := json.Unmarshal(message, &base); err != nil {
+			s.logger.Printf("[RELAY] Received message (%d bytes, type=unknown parse error)", len(message))
+		} else {
+			s.logger.Printf("[RELAY] Received message (%d bytes, type=%s)", len(message), base.Type)
+		}
 
 		if shouldClose := s.routeMessage(ctx, conn, message); shouldClose {
 			break

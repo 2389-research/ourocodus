@@ -339,11 +339,11 @@ func runScenario3(ctx context.Context, dockerClient *client.Client, baseWorkspac
 
 	sessionA, err := managerA.CreateContainerSession(ctx, "ubuntu:latest", []string{"sleep", "300"})
 	if err != nil {
-		return fmt.Errorf("Process A failed to create session: %w", err)
+		return fmt.Errorf("process A failed to create session: %w", err)
 	}
 
 	if err := managerA.StartContainerSession(ctx, sessionA.ID()); err != nil {
-		return fmt.Errorf("Process A failed to start session: %w", err)
+		return fmt.Errorf("process A failed to start session: %w", err)
 	}
 
 	printInfo("Session ID", sessionA.ID())
@@ -379,7 +379,7 @@ func runScenario3(ctx context.Context, dockerClient *client.Client, baseWorkspac
 	// AttachContainerSession returns ErrInvalidWorkspacePath.
 	sessionB, err := managerB.AttachContainerSession(ctx, persistedSessionID)
 	if err != nil {
-		return fmt.Errorf("Process B failed to attach: %w", err)
+		return fmt.Errorf("process B failed to attach: %w", err)
 	}
 
 	printStep(5, "Verify both processes connected to SAME container")

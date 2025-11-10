@@ -331,7 +331,7 @@ func testTerminateSession(ctx context.Context, manager *session.Manager, verbose
 	}
 
 	// Terminate session
-	if err := manager.TerminateUserSession(ctx, sessionID); err != nil {
+	if _, err := manager.TerminateUserSession(ctx, sessionID); err != nil {
 		return fmt.Errorf("failed to terminate session: %w", err)
 	}
 
@@ -377,12 +377,12 @@ func testIdempotentTermination(ctx context.Context, manager *session.Manager, ve
 	}
 
 	// Terminate session twice - both should succeed (idempotent)
-	if err := manager.TerminateUserSession(ctx, sessionID); err != nil {
+	if _, err := manager.TerminateUserSession(ctx, sessionID); err != nil {
 		return fmt.Errorf("first session termination failed: %w", err)
 	}
 
 	// Second termination should succeed without error (idempotent behavior)
-	if err := manager.TerminateUserSession(ctx, sessionID); err != nil {
+	if _, err := manager.TerminateUserSession(ctx, sessionID); err != nil {
 		return fmt.Errorf("second session termination failed (expected idempotent): %w", err)
 	}
 
@@ -439,7 +439,7 @@ func testListAndFilter(ctx context.Context, verbose bool) error {
 	}
 
 	// Terminate one session
-	if err := freshManager.TerminateUserSession(ctx, session1.GetID()); err != nil {
+	if _, err := freshManager.TerminateUserSession(ctx, session1.GetID()); err != nil {
 		return fmt.Errorf("failed to terminate session: %w", err)
 	}
 
@@ -601,7 +601,7 @@ func testEventPublishing(ctx context.Context, verbose bool) error {
 	debug(verbose, "✓ agent.terminated event published")
 
 	// Test 4: Session terminated event
-	err = manager.TerminateUserSession(ctx, userSession.GetID())
+	_, err = manager.TerminateUserSession(ctx, userSession.GetID())
 	if err != nil {
 		return fmt.Errorf("failed to terminate session: %w", err)
 	}

@@ -209,6 +209,11 @@ export class App {
                 this.endSessionModal.show({
                     onConfirm: () => {
                         this.logger.info('User confirmed end session');
+                        const btnEl = document.getElementById('endSessionBtn') as HTMLButtonElement | null;
+                        if (btnEl) {
+                            btnEl.disabled = true;
+                            btnEl.textContent = 'Ending...';
+                        }
                         this.connection.endSession();
                     },
                     onCancel: () => {
@@ -249,7 +254,7 @@ export class App {
     }
 
     handleNewProject() {
-        const btn = document.getElementById('newProjectBtn');
+        const btn = document.getElementById('newProjectBtn') as HTMLButtonElement | null;
         if (!btn) {
             this.logger.error('New Project button not found');
             return;

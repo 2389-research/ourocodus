@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/2389-research/ourocodus/pkg/agent"
@@ -450,12 +451,15 @@ func (m *Manager) TerminateAgent(ctx context.Context, userSessionID, agentID str
 
 // TerminateUserSession terminates ALL agents in parallel, then terminates the session
 // Idempotent - safe to call multiple times
-func (m *Manager) TerminateUserSession(ctx context.Context, userSessionID string) error {
+
+func (m *Manager) TerminateUserSession(ctx context.Context, userSessionID string) (TerminationSummary, error) {
+	summary := TerminationSummary{CleanupStatus: CleanupStatusComplete}
+
 	userSession := m.store.Get(userSessionID)
 	if userSession == nil {
 		// Already cleaned up - idempotent
 		m.logger.Printf("Session not found during termination: %s (already cleaned?)", userSessionID)
-		return nil
+		return summary, nil
 	}
 
 	// Set state to TERMINATED immediately to prevent new agent spawns during termination
@@ -474,11 +478,14 @@ func (m *Manager) TerminateUserSession(ctx context.Context, userSessionID string
 
 		var wg sync.WaitGroup
 		agentTimeout := DefaultAgentTerminationTimeout
+		var agentSuccesses int32
+		var agentFailures int32
 
 		for agentID, agent := range agents {
 			wg.Add(1)
 			go func(id string, a *AgentSession) {
 				defer wg.Done()
+				failed := false
 
 				// Create context with timeout for this agent
 				agentCtx, cancel := context.WithTimeout(ctx, agentTimeout)
@@ -504,9 +511,11 @@ func (m *Manager) TerminateUserSession(ctx context.Context, userSessionID string
 					case err := <-done:
 						if err != nil {
 							m.logger.Printf("Error closing agent: userSession=%s agentID=%s error=%v", userSessionID, id, err)
+							failed = true
 						}
 					case <-agentCtx.Done():
 						m.logger.Printf("Agent close timeout: userSession=%s agentID=%s", userSessionID, id)
+						failed = true
 					}
 				}
 
@@ -521,6 +530,7 @@ func (m *Manager) TerminateUserSession(ctx context.Context, userSessionID string
 					if launcher != nil && handle != nil {
 						if err := launcher.Stop(agentCtx, handle); err != nil {
 							m.logger.Printf("WARN: Failed to stop container for agent %s: %v", id, err)
+							failed = true
 							// Continue cleanup despite error
 						}
 					}
@@ -530,6 +540,11 @@ func (m *Manager) TerminateUserSession(ctx context.Context, userSessionID string
 					delete(m.launchers, key)
 					delete(m.handles, key)
 					m.launchersMu.Unlock()
+				}
+				if failed {
+					atomic.AddInt32(&agentFailures, 1)
+				} else {
+					atomic.AddInt32(&agentSuccesses, 1)
 				}
 			}(agentID, agent)
 		}
@@ -546,12 +561,24 @@ func (m *Manager) TerminateUserSession(ctx context.Context, userSessionID string
 			m.logger.Printf("All agents terminated: session=%s", userSessionID)
 		case <-ctx.Done():
 			m.logger.Printf("Session termination timeout: session=%s", userSessionID)
+			summary.CleanupStatus = CleanupStatusPartial
+			summary.addError("session termination timeout before all agents completed")
+		}
+
+		summary.AgentsTerminated = int(atomic.LoadInt32(&agentSuccesses))
+		summary.AgentFailures = int(atomic.LoadInt32(&agentFailures))
+		if summary.AgentFailures > 0 && summary.CleanupStatus == CleanupStatusComplete {
+			summary.CleanupStatus = CleanupStatusPartial
 		}
 	}
 
 	// Run cleanup hook
 	if err := m.cleaner.Cleanup(ctx, userSession); err != nil {
 		m.logger.Printf("Cleanup error for user session %s: %v", userSessionID, err)
+		summary.addError(err.Error())
+		if summary.CleanupStatus == CleanupStatusComplete {
+			summary.CleanupStatus = CleanupStatusPartial
+		}
 		// Continue with termination even if hook fails
 	}
 
@@ -569,7 +596,7 @@ func (m *Manager) TerminateUserSession(ctx context.Context, userSessionID string
 	}
 
 	m.logger.Printf("User session terminated: id=%s", userSessionID)
-	return nil
+	return summary, nil
 }
 
 // RecordHeartbeat updates the last activity timestamp for a user session

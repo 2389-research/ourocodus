@@ -8,7 +8,7 @@ import { App } from './ui/state';
 // Declare app on window object for debugging
 declare global {
     interface Window {
-        app: App;
+        app?: App;
     }
 }
 

@@ -548,7 +548,7 @@ type mockSessionManager struct {
 	getAgentFunc         func(sessionID, role string) (*session.AgentSession, error)
 	getFunc              func(sessionID string) *session.UserSession
 	terminateAgentFunc   func(ctx context.Context, sessionID, role string) error
-	terminateSessionFunc func(ctx context.Context, sessionID string) error
+	terminateSessionFunc func(ctx context.Context, sessionID string) (session.TerminationSummary, error)
 }
 
 func (m *mockSessionManager) CreateUserSession(ctx context.Context, ws session.WebSocketConn) (*session.UserSession, error) {
@@ -586,11 +586,11 @@ func (m *mockSessionManager) TerminateAgent(ctx context.Context, sessionID, role
 	return fmt.Errorf("mock not configured")
 }
 
-func (m *mockSessionManager) TerminateUserSession(ctx context.Context, sessionID string) error {
+func (m *mockSessionManager) TerminateUserSession(ctx context.Context, sessionID string) (session.TerminationSummary, error) {
 	if m.terminateSessionFunc != nil {
 		return m.terminateSessionFunc(ctx, sessionID)
 	}
-	return fmt.Errorf("mock not configured")
+	return session.TerminationSummary{}, fmt.Errorf("mock not configured")
 }
 
 type mockACPClient struct {

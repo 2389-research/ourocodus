@@ -453,9 +453,18 @@ func TestTerminateUserSession_AllAgentsTerminated(t *testing.T) {
 	}
 
 	// Terminate user session
-	err = manager.TerminateUserSession(ctx, sessionID)
+	summary, err := manager.TerminateUserSession(ctx, sessionID)
 	if err != nil {
 		t.Fatalf("Expected no error terminating session, got: %v", err)
+	}
+	if summary.AgentsTerminated != 3 {
+		t.Fatalf("Expected 3 agents terminated, got %d", summary.AgentsTerminated)
+	}
+	if summary.AgentFailures != 0 {
+		t.Fatalf("Expected no agent failures, got %d", summary.AgentFailures)
+	}
+	if summary.CleanupStatus != CleanupStatusComplete {
+		t.Fatalf("Expected cleanup status complete, got %s", summary.CleanupStatus)
 	}
 
 	// Check session was removed from store
@@ -485,12 +494,12 @@ func TestTerminateUserSession_Idempotent(t *testing.T) {
 		t.Fatalf("Failed to create session: %v", err)
 	}
 	sessionID := session.GetID()
-	if err := manager.TerminateUserSession(ctx, sessionID); err != nil {
+	if _, err := manager.TerminateUserSession(ctx, sessionID); err != nil {
 		t.Fatalf("Failed to terminate session: %v", err)
 	}
 
 	// Terminate again (should not panic or error)
-	err = manager.TerminateUserSession(ctx, sessionID)
+	_, err = manager.TerminateUserSession(ctx, sessionID)
 	if err != nil {
 		t.Fatalf("Expected idempotent termination, got error: %v", err)
 	}
@@ -514,7 +523,7 @@ func TestTerminateUserSession_DoesNotCloseWebSocket(t *testing.T) {
 	}
 
 	// Terminate session
-	if err := manager.TerminateUserSession(ctx, sessionID); err != nil {
+	if _, err := manager.TerminateUserSession(ctx, sessionID); err != nil {
 		t.Fatalf("Failed to terminate session: %v", err)
 	}
 

@@ -52,8 +52,8 @@ type SessionManagerInterface interface {
 	// TerminateAgent terminates a single agent in a user session
 	TerminateAgent(ctx context.Context, userSessionID, agentID string) error
 
-	// TerminateUserSession terminates all agents and the session
-	TerminateUserSession(ctx context.Context, userSessionID string) error
+	// TerminateUserSession terminates all agents and the session, returning cleanup telemetry
+	TerminateUserSession(ctx context.Context, userSessionID string) (session.TerminationSummary, error)
 }
 
 // Ensure gorilla websocket implements our interface
