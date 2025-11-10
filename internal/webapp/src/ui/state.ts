@@ -1,0 +1,410 @@
+/**
+ * Application state and modal management
+ */
+
+import { Logger } from '../logger';
+import { RelayConnection } from '../connection';
+
+/**
+ * Modal Manager - Handles modal display and interaction
+ */
+interface ModalOptions {
+    onConfirm?: () => void;
+    onCancel?: () => void;
+    updateContent?: (modal: HTMLElement) => void;
+}
+
+class ModalManager {
+    private logger: Logger;
+    private modal: HTMLElement | null;
+    private overlay: HTMLElement | null;
+    private confirmBtn: HTMLElement | null;
+    private cancelBtn: HTMLElement | null;
+    private onConfirm: (() => void) | null;
+    private onCancel: (() => void) | null;
+
+    constructor(modalId: string) {
+        this.logger = new Logger('ModalManager');
+        this.modal = document.getElementById(modalId);
+        this.overlay = null;
+        this.confirmBtn = null;
+        this.cancelBtn = null;
+        this.onConfirm = null;
+        this.onCancel = null;
+
+        if (!this.modal) {
+            this.logger.error('Modal not found:', modalId);
+            return;
+        }
+
+        // Find overlay and buttons
+        this.overlay = this.modal.querySelector('.modal-overlay');
+        this.confirmBtn = this.modal.querySelector('[id^="confirm"]');
+        this.cancelBtn = this.modal.querySelector('[id^="cancel"]');
+
+        // Setup event listeners
+        this.setupListeners();
+    }
+
+    setupListeners(): void {
+        // Confirm button
+        if (this.confirmBtn) {
+            this.confirmBtn.addEventListener('click', () => {
+                if (this.onConfirm) {
+                    this.onConfirm();
+                }
+                this.hide();
+            });
+        }
+
+        // Cancel button
+        if (this.cancelBtn) {
+            this.cancelBtn.addEventListener('click', () => {
+                if (this.onCancel) {
+                    this.onCancel();
+                }
+                this.hide();
+            });
+        }
+
+        // Overlay click
+        if (this.overlay) {
+            this.overlay.addEventListener('click', () => {
+                if (this.onCancel) {
+                    this.onCancel();
+                }
+                this.hide();
+            });
+        }
+    }
+
+    show(options: ModalOptions = {}): void {
+        if (!this.modal) return;
+
+        // Update callbacks
+        this.onConfirm = options.onConfirm || null;
+        this.onCancel = options.onCancel || null;
+
+        // Update dynamic content if provided
+        if (options.updateContent) {
+            options.updateContent(this.modal);
+        }
+
+        // Show modal
+        this.modal.style.display = 'flex';
+    }
+
+    hide(): void {
+        if (!this.modal) return;
+        this.modal.style.display = 'none';
+    }
+}
+
+/**
+ * Application initialization
+ */
+export class App {
+    private logger: Logger;
+    connection: RelayConnection;
+    private connectionCheckInterval: ReturnType<typeof setInterval> | null;
+    private connectionCheckTimeout: ReturnType<typeof setTimeout> | null;
+    private isConnecting: boolean;
+    private disconnectModal: ModalManager;
+    private endSessionModal: ModalManager;
+    private terminateAgentModal: ModalManager;
+
+    constructor() {
+        this.logger = new Logger('App');
+        this.connection = new RelayConnection();
+        this.connectionCheckInterval = null;
+        this.connectionCheckTimeout = null;
+        this.isConnecting = false;
+
+        // Initialize modal managers
+        this.disconnectModal = new ModalManager('disconnectModal');
+        this.endSessionModal = new ModalManager('endSessionModal');
+        this.terminateAgentModal = new ModalManager('terminateAgentModal');
+
+        this.init();
+    }
+
+    init() {
+        this.logger.info('Initializing Ourocodus PWA');
+
+        // Register service worker for offline support
+        this.registerServiceWorker();
+
+        // Setup New Project button handler
+        const newProjectBtn = document.getElementById('newProjectBtn');
+        if (newProjectBtn) {
+            newProjectBtn.addEventListener('click', () => {
+                this.logger.debug('New Project button clicked');
+                this.handleNewProject();
+            });
+        }
+
+        // Setup Spawn Agent button handler
+        const spawnAgentBtn = document.getElementById('spawnAgentBtn');
+        if (spawnAgentBtn) {
+            spawnAgentBtn.addEventListener('click', () => {
+                this.logger.debug('Spawn Agent button clicked');
+                this.handleSpawnAgent();
+            });
+        }
+
+        // Setup Send Message button handler
+        const sendMessageBtn = document.getElementById('sendMessageBtn');
+        if (sendMessageBtn) {
+            sendMessageBtn.addEventListener('click', () => {
+                this.logger.debug('Send Message button clicked');
+                this.handleSendMessage();
+            });
+        }
+
+        // Setup Enter key in message input
+        const messageInput = document.getElementById('messageInput');
+        if (messageInput) {
+            messageInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    this.handleSendMessage();
+                }
+            });
+        }
+
+        // Setup Enter key in chat input
+        const chatInput = document.getElementById('chatInput');
+        if (chatInput) {
+            chatInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    this.connection.sendChatMessage();
+                }
+            });
+        }
+
+        // Setup Disconnect button
+        const disconnectBtn = document.getElementById('disconnectBtn');
+        if (disconnectBtn) {
+            disconnectBtn.addEventListener('click', () => {
+                this.logger.debug('Disconnect button clicked');
+                this.disconnectModal.show({
+                    onConfirm: () => {
+                        this.logger.info('User confirmed disconnect');
+                        // Just close WS, server will cleanup
+                        this.connection.disconnect(1000, 'User requested disconnect');
+                    },
+                    onCancel: () => {
+                        this.logger.info('User cancelled disconnect');
+                    }
+                });
+            });
+        }
+
+        // Setup End Session button
+        const endSessionBtn = document.getElementById('endSessionBtn');
+        if (endSessionBtn) {
+            endSessionBtn.addEventListener('click', () => {
+                this.logger.debug('End Session button clicked');
+                this.endSessionModal.show({
+                    onConfirm: () => {
+                        this.logger.info('User confirmed end session');
+                        this.connection.endSession();
+                    },
+                    onCancel: () => {
+                        this.logger.info('User cancelled end session');
+                    }
+                });
+            });
+        }
+
+        // Setup Terminate Agent button
+        const terminateAgentBtn = document.getElementById('terminateAgentBtn');
+        if (terminateAgentBtn) {
+            terminateAgentBtn.addEventListener('click', () => {
+                this.logger.debug('Terminate Agent button clicked');
+                this.terminateAgentModal.show({
+                    onConfirm: () => {
+                        this.logger.info('User confirmed terminate agent');
+                        const role = this.connection.currentChatRole || this.connection.currentAgentRole;
+                        if (role) {
+                            this.connection.terminateAgent(role);
+                        }
+                    },
+                    onCancel: () => {
+                        this.logger.info('User cancelled terminate agent');
+                    },
+                    updateContent: (modal) => {
+                        // Update modal with current agent role
+                        const roleEl = modal.querySelector('#terminateAgentRole');
+                        if (roleEl) {
+                            roleEl.textContent = this.connection.currentChatRole || this.connection.currentAgentRole || '-';
+                        }
+                    }
+                });
+            });
+        }
+
+        this.logger.info('Ourocodus PWA initialized');
+    }
+
+    handleNewProject() {
+        const btn = document.getElementById('newProjectBtn');
+        if (!btn) {
+            this.logger.error('New Project button not found');
+            return;
+        }
+
+        // Disable button while connecting
+        btn.disabled = true;
+        btn.textContent = 'Connecting...';
+
+        if (!this.connection.isConnected) {
+            this.logger.info('Not connected, attempting connection...');
+            this.isConnecting = true;
+
+            // Start connection
+            this.connection.connect();
+
+            // Poll for connection (with timeout)
+            this.connectionCheckInterval = setInterval(() => {
+                this.logger.debug('Connection check...', {
+                    isConnected: this.connection.isConnected,
+                    wsReadyState: this.connection.ws?.readyState,
+                });
+
+                if (this.connection.isConnected) {
+                    // Connected! Clean up and create session
+                    clearInterval(this.connectionCheckInterval!);
+                    clearTimeout(this.connectionCheckTimeout!);
+                    this.connectionCheckInterval = null;
+                    this.connectionCheckTimeout = null;
+                    this.isConnecting = false;
+
+                    this.logger.info('Connection established, creating session...');
+                    this.connection.createSession();
+                    btn.disabled = false;
+                    btn.innerHTML = '<span class="btn-icon">+</span> New Project';
+                }
+            }, 100);
+
+            // Timeout after 10 seconds
+            this.connectionCheckTimeout = setTimeout(() => {
+                // Clean up interval and reset state
+                clearInterval(this.connectionCheckInterval!);
+                this.connectionCheckInterval = null;
+                this.connectionCheckTimeout = null;
+                this.isConnecting = false;
+
+                if (!this.connection.isConnected) {
+                    this.logger.error('Connection timeout');
+                    btn.disabled = false;
+                    btn.innerHTML = '<span class="btn-icon">+</span> New Project';
+                }
+            }, 10000);
+        } else {
+            this.logger.info('Already connected, creating session...');
+            this.connection.createSession();
+        }
+    }
+
+    handleSpawnAgent() {
+        const roleInput = document.getElementById('agentRole');
+        const workspaceInput = document.getElementById('agentWorkspace');
+        const btn = document.getElementById('spawnAgentBtn');
+
+        if (!roleInput || !workspaceInput) {
+            this.logger.error('Agent spawn inputs not found');
+            return;
+        }
+
+        const role = (roleInput as HTMLInputElement).value.trim();
+        const workspace = (workspaceInput as HTMLInputElement).value.trim();
+
+        if (!role || !workspace) {
+            alert('Please provide both agent role and workspace');
+            return;
+        }
+
+        (btn as HTMLButtonElement).disabled = true;
+        btn!.textContent = 'Spawning...';
+
+        if (this.connection.spawnAgent(role, workspace)) {
+            this.logger.info('Agent spawn initiated');
+            // Button will be re-enabled when agent:ready is received
+        } else {
+            this.logger.error('Failed to spawn agent');
+            (btn as HTMLButtonElement).disabled = false;
+            btn!.innerHTML = '<span class="btn-icon">🤖</span> Spawn Agent';
+        }
+    }
+
+    handleSendMessage() {
+        const messageInput = document.getElementById('messageInput');
+        const btn = document.getElementById('sendMessageBtn');
+
+        if (!messageInput) {
+            this.logger.error('Message input not found');
+            return;
+        }
+
+        const content = (messageInput as HTMLInputElement).value.trim();
+        if (!content) {
+            return;
+        }
+
+        const role = this.connection.currentChatRole || this.connection.currentAgentRole;
+        if (!role) {
+            this.logger.error('No active agent');
+            return;
+        }
+
+        (btn as HTMLButtonElement).disabled = true;
+        (messageInput as HTMLInputElement).disabled = true;
+
+        if (this.connection.sendAgentMessage(role, content)) {
+            this.logger.debug('Message sent');
+            (messageInput as HTMLInputElement).value = '';
+            // Re-enable after a short delay
+            setTimeout(() => {
+                (btn as HTMLButtonElement).disabled = false;
+                (messageInput as HTMLInputElement).disabled = false;
+                (messageInput as HTMLInputElement).focus();
+            }, 500);
+        } else {
+            this.logger.error('Failed to send message');
+            (btn as HTMLButtonElement).disabled = false;
+            (messageInput as HTMLInputElement).disabled = false;
+        }
+    }
+
+    registerServiceWorker() {
+        if (!('serviceWorker' in navigator)) {
+            this.logger.info('Service Worker not supported');
+            return;
+        }
+
+        navigator.serviceWorker.register('/sw.js')
+            .then(registration => {
+                this.logger.info('Service Worker registered:', registration.scope);
+
+                // Check for updates on page load
+                registration.update();
+
+                // Listen for updates
+                registration.addEventListener('updatefound', () => {
+                    const newWorker = registration.installing;
+                    if (newWorker) {
+                        newWorker.addEventListener('statechange', () => {
+                            if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                                this.logger.info('New version available - reload to update');
+                            }
+                        });
+                    }
+                });
+            })
+            .catch(error => {
+                this.logger.error('Service Worker registration failed:', error);
+            });
+    }
+}
