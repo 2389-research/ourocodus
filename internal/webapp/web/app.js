@@ -289,7 +289,7 @@ class RelayConnection {
 
             // If this is the currently open chat, render messages
             if (this.currentChatRole === role) {
-                this.displayMessage('agent', message.content);
+                this.renderChatMessages(role);
             }
 
             // Update agent cards to reflect new message count
@@ -582,25 +582,121 @@ class RelayConnection {
 
         this.currentChatRole = role;
 
-        // Show agent card with chat
-        const agentCard = document.getElementById('agentCard');
-        const agentRoleDisplay = document.getElementById('agentRoleDisplay');
+        // Update chat header with agent name
+        const chatAgentName = document.getElementById('chatAgentName');
+        if (chatAgentName) {
+            chatAgentName.textContent = `Agent: ${role}`;
+        }
 
-        if (agentCard && agentRoleDisplay) {
-            agentCard.style.display = 'block';
-            agentRoleDisplay.textContent = role;
+        // Show chat container
+        const chatContainer = document.getElementById('chatContainer');
+        if (chatContainer) {
+            chatContainer.style.display = 'flex';
         }
 
         // Render all messages for this agent
-        const messageHistory = document.getElementById('messageHistory');
-        if (messageHistory) {
-            messageHistory.innerHTML = '';
-            agent.messages.forEach(msg => {
-                this.displayMessage(msg.sender, msg.content);
-            });
+        this.renderChatMessages(role);
+
+        // Focus input
+        const chatInput = document.getElementById('chatInput');
+        if (chatInput) {
+            chatInput.focus();
         }
 
         this.logger.debug('Showing chat for agent:', role);
+    }
+
+    /**
+     * Close chat interface
+     */
+    closeChat() {
+        const chatContainer = document.getElementById('chatContainer');
+        if (chatContainer) {
+            chatContainer.style.display = 'none';
+        }
+        this.currentChatRole = null;
+        this.logger.debug('Chat closed');
+    }
+
+    /**
+     * Render chat messages for a specific agent
+     */
+    renderChatMessages(role) {
+        const agent = this.agents.get(role);
+        if (!agent) {
+            this.logger.error('Agent not found:', role);
+            return;
+        }
+
+        const container = document.getElementById('chatMessages');
+        if (!container) {
+            this.logger.error('Chat messages container not found');
+            return;
+        }
+
+        // Clear existing messages
+        container.innerHTML = '';
+
+        // Render each message
+        agent.messages.forEach(msg => {
+            const div = document.createElement('div');
+            div.className = `chat-message ${msg.sender}`;
+            div.textContent = msg.content;
+            container.appendChild(div);
+        });
+
+        // Auto-scroll to bottom
+        container.scrollTop = container.scrollHeight;
+
+        this.logger.debug('Rendered', agent.messages.length, 'messages for agent:', role);
+    }
+
+    /**
+     * Send message from chat interface
+     */
+    sendMessage() {
+        const input = document.getElementById('chatInput');
+        if (!input) {
+            this.logger.error('Chat input not found');
+            return;
+        }
+
+        const content = input.value.trim();
+        if (!content || !this.currentChatRole) {
+            return;
+        }
+
+        const agent = this.agents.get(this.currentChatRole);
+        if (!agent) {
+            this.logger.error('No agent found for current chat');
+            return;
+        }
+
+        // Add user message to agent's messages
+        agent.messages.push({
+            sender: 'user',
+            content: content,
+            timestamp: new Date()
+        });
+
+        // Send to server
+        const message = {
+            type: 'agent:message',
+            version: '1.0',
+            userSessionId: this.userSessionId,
+            agentId: this.currentChatRole,
+            content: content
+        };
+
+        this.logger.debug('Sending message via chat interface:', message);
+        this.ws.send(JSON.stringify(message));
+
+        // Clear input and re-render
+        input.value = '';
+        this.renderChatMessages(this.currentChatRole);
+        this.renderAgentCards(); // Update message count
+
+        this.logger.debug('Message sent from chat interface');
     }
 
     /**
@@ -797,6 +893,17 @@ class App {
                 if (e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault();
                     this.handleSendMessage();
+                }
+            });
+        }
+
+        // Setup Enter key in chat input
+        const chatInput = document.getElementById('chatInput');
+        if (chatInput) {
+            chatInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    this.connection.sendMessage();
                 }
             });
         }
