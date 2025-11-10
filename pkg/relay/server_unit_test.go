@@ -543,9 +543,12 @@ func TestMapError_AgentNotFoundSentinel(t *testing.T) {
 // Mock infrastructure for handler testing
 
 type mockSessionManager struct {
-	createSessionFunc func(ctx context.Context, ws session.WebSocketConn) (*session.UserSession, error)
-	spawnAgentFunc    func(ctx context.Context, sessionID, role, workspace string) error
-	getAgentFunc      func(sessionID, role string) (*session.AgentSession, error)
+	createSessionFunc    func(ctx context.Context, ws session.WebSocketConn) (*session.UserSession, error)
+	spawnAgentFunc       func(ctx context.Context, sessionID, role, workspace string) error
+	getAgentFunc         func(sessionID, role string) (*session.AgentSession, error)
+	getFunc              func(sessionID string) *session.UserSession
+	terminateAgentFunc   func(ctx context.Context, sessionID, role string) error
+	terminateSessionFunc func(ctx context.Context, sessionID string) error
 }
 
 func (m *mockSessionManager) CreateUserSession(ctx context.Context, ws session.WebSocketConn) (*session.UserSession, error) {
@@ -567,6 +570,27 @@ func (m *mockSessionManager) GetAgent(sessionID, role string) (*session.AgentSes
 		return m.getAgentFunc(sessionID, role)
 	}
 	return nil, fmt.Errorf("mock not configured")
+}
+
+func (m *mockSessionManager) Get(sessionID string) *session.UserSession {
+	if m.getFunc != nil {
+		return m.getFunc(sessionID)
+	}
+	return nil
+}
+
+func (m *mockSessionManager) TerminateAgent(ctx context.Context, sessionID, role string) error {
+	if m.terminateAgentFunc != nil {
+		return m.terminateAgentFunc(ctx, sessionID, role)
+	}
+	return fmt.Errorf("mock not configured")
+}
+
+func (m *mockSessionManager) TerminateUserSession(ctx context.Context, sessionID string) error {
+	if m.terminateSessionFunc != nil {
+		return m.terminateSessionFunc(ctx, sessionID)
+	}
+	return fmt.Errorf("mock not configured")
 }
 
 type mockACPClient struct {

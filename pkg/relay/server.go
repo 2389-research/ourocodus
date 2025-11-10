@@ -126,10 +126,14 @@ func (s *Server) routeMessage(ctx context.Context, conn WebSocketConn, rawMessag
 	switch base.Type {
 	case "session:create":
 		return s.handleSessionCreate(ctx, conn, rawMessage)
+	case "session:end":
+		return s.handleSessionEnd(ctx, conn, rawMessage)
 	case "agent:spawn":
 		return s.handleAgentSpawn(ctx, conn, rawMessage)
 	case "agent:message":
 		return s.handleAgentMessage(ctx, conn, rawMessage)
+	case "agent:terminate":
+		return s.handleAgentTerminate(ctx, conn, rawMessage)
 	case "test:echo":
 		// Keep echo for testing during Phase 1
 		return s.handleEcho(conn, rawMessage)
@@ -431,6 +435,98 @@ func (s *Server) handleAgentMessage(ctx context.Context, conn WebSocketConn, raw
 	if err := conn.WriteJSON(responseMsg); err != nil {
 		s.logger.Printf("Failed to send agent:response: %v", err)
 		return true // Close on write failure
+	}
+
+	return false // Continue processing messages
+}
+
+// handleSessionEnd handles session:end messages
+// Terminates all agents in the session and cleans up resources
+func (s *Server) handleSessionEnd(ctx context.Context, conn WebSocketConn, rawMessage []byte) bool {
+	// Parse message
+	msg, err := parseSessionEndMessage(rawMessage)
+	if err != nil {
+		return s.handleValidationError(conn, err)
+	}
+
+	// Validate message
+	if validationErr := validateSessionEndMessage(msg); validationErr != nil {
+		return s.handleValidationError(conn, validationErr)
+	}
+
+	s.logger.Printf("Terminating user session: %s", msg.UserSessionID)
+
+	// Get session to count agents before termination
+	userSession := s.sessionManager.Get(msg.UserSessionID)
+	agentCount := 0
+	if userSession != nil {
+		agentCount = len(userSession.ListAgents())
+	}
+
+	// Terminate session (this will terminate all agents)
+	err = s.sessionManager.TerminateUserSession(ctx, msg.UserSessionID)
+	if err != nil {
+		s.logger.Printf("Error terminating session: %v", err)
+		// Map error to protocol error code
+		errorCode, errorMessage, recoverable := s.mapError(err)
+		errorMsg := NewErrorMessage(errorCode, errorMessage, recoverable)
+		if writeErr := conn.WriteJSON(errorMsg); writeErr != nil {
+			s.logger.Printf("Failed to send error response: %v", writeErr)
+			return true
+		}
+		return !recoverable
+	}
+
+	s.logger.Printf("User session terminated: %s, agents terminated: %d", msg.UserSessionID, agentCount)
+
+	// Send session:ended response
+	response := NewSessionEndedMessage(msg.UserSessionID, agentCount, "complete")
+	if err := conn.WriteJSON(response); err != nil {
+		s.logger.Printf("Failed to send session:ended: %v", err)
+		return true
+	}
+
+	return false // Continue processing messages
+}
+
+// handleAgentTerminate handles agent:terminate messages
+// Terminates a specific agent while keeping the session active
+func (s *Server) handleAgentTerminate(ctx context.Context, conn WebSocketConn, rawMessage []byte) bool {
+	// Parse message
+	msg, err := parseAgentTerminateMessage(rawMessage)
+	if err != nil {
+		return s.handleValidationError(conn, err)
+	}
+
+	// Validate message
+	if validationErr := validateAgentTerminateMessage(msg); validationErr != nil {
+		return s.handleValidationError(conn, validationErr)
+	}
+
+	s.logger.Printf("Terminating agent: userSession=%s agentID=%s", msg.UserSessionID, msg.AgentID)
+
+	// Terminate the agent
+	err = s.sessionManager.TerminateAgent(ctx, msg.UserSessionID, msg.AgentID)
+	if err != nil {
+		s.logger.Printf("Error terminating agent: %v", err)
+		// Map error to protocol error code
+		errorCode, errorMessage, recoverable := s.mapError(err)
+		errorMsg := NewErrorMessage(errorCode, errorMessage, recoverable)
+		if writeErr := conn.WriteJSON(errorMsg); writeErr != nil {
+			s.logger.Printf("Failed to send error response: %v", writeErr)
+			return true
+		}
+		return !recoverable
+	}
+
+	s.logger.Printf("Agent terminated: userSession=%s agentID=%s", msg.UserSessionID, msg.AgentID)
+
+	// Send agent:terminated response
+	// Workspace is always cleaned during termination, so workspaceCleaned is true
+	response := NewAgentTerminatedMessage(msg.UserSessionID, msg.AgentID, true)
+	if err := conn.WriteJSON(response); err != nil {
+		s.logger.Printf("Failed to send agent:terminated: %v", err)
+		return true
 	}
 
 	return false // Continue processing messages

@@ -45,6 +45,15 @@ type SessionManagerInterface interface {
 
 	// GetAgent retrieves an agent by user session ID and agent ID
 	GetAgent(userSessionID, agentID string) (*session.AgentSession, error)
+
+	// Get retrieves a user session by ID
+	Get(userSessionID string) *session.UserSession
+
+	// TerminateAgent terminates a single agent in a user session
+	TerminateAgent(ctx context.Context, userSessionID, agentID string) error
+
+	// TerminateUserSession terminates all agents and the session
+	TerminateUserSession(ctx context.Context, userSessionID string) error
 }
 
 // Ensure gorilla websocket implements our interface
