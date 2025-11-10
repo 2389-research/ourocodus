@@ -126,6 +126,79 @@ Tailwind provides a standalone CLI binary (no Node.js):
        fi
    ```
 
+## Asset Hashing & Cache Busting
+
+The pipeline includes content-based fingerprinting for optimal browser caching:
+
+### Step 4: Asset Fingerprinting
+
+After compilation, assets are hashed using SHA256:
+
+```bash
+go run internal/webapp/tools/asset-hash/main.go \
+    internal/webapp/web \
+    internal/webapp/web/asset-manifest.json
+```
+
+This generates:
+- Hashed copies: `app.js` → `app.493c9c44.js`
+- Manifest mapping original → hashed filenames
+- Short 8-character hashes from full SHA256
+
+**Example manifest:**
+```json
+{
+  "app.js": "app.493c9c44.js",
+  "logger.js": "logger.54809809.js",
+  "styles.min.css": "styles.min.55e70520.css",
+  "tailwind.css": "tailwind.fc562ecc.css"
+}
+```
+
+### Step 5: HTML Injection
+
+The manifest is used to update HTML references:
+
+```bash
+go run internal/webapp/tools/inject-hashes/main.go \
+    internal/webapp/web/asset-manifest.json \
+    internal/webapp/web/index.html
+```
+
+**Transformation:**
+```html
+<!-- Before -->
+<link rel="stylesheet" href="styles.min.css">
+<script src="app.js"></script>
+
+<!-- After -->
+<link rel="stylesheet" href="styles.min.55e70520.css">
+<script src="app.493c9c44.js"></script>
+```
+
+### Why Hash Assets?
+
+1. **Aggressive Caching** - Browser caches assets forever (filename changes with content)
+2. **Cache Busting** - New deploys automatically invalidate old cached assets
+3. **CDN Efficiency** - Serve from edge with long TTLs
+4. **Parallel Downloads** - Multiple hashed assets download concurrently
+
+### Testing Asset Injection
+
+The inject-hashes tool includes unit tests:
+
+```bash
+cd internal/webapp/tools/inject-hashes
+go test -v
+```
+
+Tests verify:
+- HTML attribute preservation (`href=`, `src=`)
+- Multiple asset injection
+- Query parameter handling
+- Already-hashed filename updates
+- Regression: no attribute stripping
+
 ## Build Pipeline
 
 ```
@@ -141,11 +214,25 @@ Tailwind provides a standalone CLI binary (no Node.js):
 │  (web/*.js)         │
 └──────────┬──────────┘
            │
-           │ optional: minify CSS
+           │ minify CSS + Tailwind
            ↓
 ┌─────────────────────┐
 │  Optimized Assets   │
-│  (web/*)            │
+│  (web/*.js, *.css)  │
+└──────────┬──────────┘
+           │
+           │ asset-hash (SHA256 → filename.hash.ext)
+           ↓
+┌─────────────────────┐
+│  Hashed Assets      │
+│  (web/*.hash.*)     │
+└──────────┬──────────┘
+           │
+           │ inject-hashes (update HTML references)
+           ↓
+┌─────────────────────┐
+│  Updated HTML       │
+│  (index.html)       │
 └──────────┬──────────┘
            │
            │ Go embed (//go:embed all:web)
@@ -156,14 +243,34 @@ Tailwind provides a standalone CLI binary (no Node.js):
 └─────────────────────┘
 ```
 
+## When to Run `make assets`
+
+You **MUST** run `make assets` whenever you:
+
+- ✅ Modify TypeScript files in `internal/webapp/src/`
+- ✅ Change CSS in `internal/webapp/web/styles.css` or `tailwind.input.css`
+- ✅ Update HTML templates
+- ✅ Before committing changes
+- ✅ After pulling changes that affect web assets
+
+The asset pipeline automatically:
+1. Compiles TypeScript → JavaScript
+2. Processes and minifies CSS
+3. Generates content hashes
+4. Updates HTML with hashed filenames
+
+**Tip:** `make build` includes `make assets`, so running `make build` is sufficient!
+
 ## Features
 
 ✓ **TypeScript support** - Type-safe JavaScript
 ✓ **Fast compilation** - esbuild is extremely fast (~100x faster than webpack)
 ✓ **No Node.js** - Pure Go/Rust toolchain
 ✓ **Automatic minification** - Smaller binary size
+✓ **Content hashing** - SHA256-based cache busting
 ✓ **Integrated with make** - `make build` handles everything
 ✓ **Zero config** - Works out of the box
+✓ **Tested** - Unit tests verify asset injection correctness
 
 ## Benefits
 
