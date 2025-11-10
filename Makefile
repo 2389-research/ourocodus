@@ -67,6 +67,11 @@ assets-check:
 		cd internal/webapp/src && mise exec -- tsc --noEmit && echo "  ✓ TypeScript types valid" || echo "  ⚠ TypeScript has type errors (non-blocking)"; \
 	fi
 
+# Run TypeScript unit tests
+test-ts:
+	@echo "Running TypeScript tests..."
+	@cd internal/webapp/src && mise exec -- vitest run
+
 # Download Tailwind CSS standalone CLI
 tailwind-download:
 	@echo "Downloading Tailwind CSS standalone CLI..."
@@ -109,6 +114,7 @@ build: assets
 test:
 	@echo "Running unit tests..."
 	go test ./...
+	$(MAKE) test-ts
 
 # Run WebSocket relay integration smoke test
 smoke-relay:

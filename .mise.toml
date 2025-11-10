@@ -14,6 +14,8 @@ go = "1.24.0"
 "go:github.com/evanw/esbuild/cmd/esbuild" = "latest"  # TypeScript/JS bundler (Go-based)
 "go:github.com/tdewolff/minify/v2/cmd/minify" = "latest"  # HTML/CSS/JS minifier (Go-based)
 "npm:typescript" = "latest"  # TypeScript compiler for type checking
+"npm:vitest" = "latest"  # Unit testing framework
+"npm:jsdom" = "latest"  # DOM environment for tests
 # Note: Tailwind CLI standalone binary can be installed separately (see docs)
 
 [env]
