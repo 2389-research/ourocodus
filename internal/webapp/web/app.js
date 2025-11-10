@@ -202,6 +202,11 @@ class RelayConnection {
                     this.handleAgentTerminated(message);
                     break;
 
+                case 'session:ended':
+                    this.logger.info('Session ended:', message);
+                    this.handleSessionEnded(message);
+                    break;
+
                 case 'error':
                     this.logger.error('Server error:', message);
                     this.handleError(message);
@@ -319,6 +324,22 @@ class RelayConnection {
         }
 
         // Re-render agent cards
+        this.renderAgentCards();
+    }
+
+    /**
+     * Handle session:ended message
+     */
+    handleSessionEnded(message) {
+        this.logger.info('Session ended, all agents terminated:', message);
+
+        // Clear all agents
+        this.agents.clear();
+
+        // Close chat if open
+        this.closeChat();
+
+        // Re-render agent cards (will show empty and hide terminate all button)
         this.renderAgentCards();
     }
 
@@ -567,6 +588,12 @@ class RelayConnection {
             container.appendChild(card);
         });
 
+        // Show/hide terminate all button based on agent count
+        const terminateAllBtn = document.getElementById('terminateAll');
+        if (terminateAllBtn) {
+            terminateAllBtn.style.display = this.agents.size > 1 ? 'block' : 'none';
+        }
+
         this.logger.debug('Rendered', this.agents.size, 'agent cards');
     }
 
@@ -739,6 +766,30 @@ class RelayConnection {
         };
 
         this.logger.info('Terminating agent:', message);
+        return this.sendMessage(message);
+    }
+
+    /**
+     * Terminate all agents (Multi-agent support)
+     * Sends session:end message to server which terminates all agents
+     */
+    terminateAll() {
+        if (!this.userSessionId) {
+            this.logger.error('Cannot terminate all: no session');
+            return false;
+        }
+
+        if (!confirm(`Terminate all ${this.agents.size} agents?`)) {
+            return false;
+        }
+
+        const message = {
+            type: 'session:end',
+            version: '1.0',
+            userSessionId: this.userSessionId
+        };
+
+        this.logger.info('Terminating all agents:', message);
         return this.sendMessage(message);
     }
 
