@@ -1,0 +1,27 @@
+{
+  "name": "Ourocodus",
+  "short_name": "Ourocodus",
+  "description": "Multi-Agent AI Development Platform powered by Claude Code",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#ffffff",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["development", "productivity", "utilities"],
+  "shortcuts": [],
+  "screenshots": []
+}

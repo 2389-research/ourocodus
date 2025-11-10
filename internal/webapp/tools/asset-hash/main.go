@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -23,24 +24,22 @@ func main() {
 	webDir := os.Args[1]
 	manifestPath := os.Args[2]
 
-	// Files to hash
-	filesToHash := []string{
-		"app.js",
-		"logger.js",
-		"tailwind.css",
-		"styles.min.css",
+	// Auto-discover JS and CSS files to hash
+	filesToHash, err := discoverAssets(webDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error discovering assets: %v\n", err)
+		os.Exit(1)
+	}
+
+	if len(filesToHash) == 0 {
+		fmt.Fprintf(os.Stderr, "No asset files found in %s\n", webDir)
+		os.Exit(1)
 	}
 
 	manifest := make(AssetManifest)
 
 	for _, filename := range filesToHash {
 		originalPath := filepath.Join(webDir, filename)
-
-		// Check if file exists
-		if _, err := os.Stat(originalPath); os.IsNotExist(err) {
-			fmt.Printf("Skipping %s (not found)\n", filename)
-			continue
-		}
 
 		// Read file and compute hash
 		file, err := os.Open(originalPath) // nolint:gosec // G304: CLI tool operates on web asset files
@@ -92,6 +91,46 @@ func main() {
 	}
 
 	fmt.Printf("✓ Manifest written to %s\n", manifestPath)
+}
+
+// discoverAssets finds all JS and CSS files in the directory that should be hashed.
+// Excludes already-hashed files (*.{8-char-hex}.{js|css}) and backup files.
+func discoverAssets(dir string) ([]string, error) {
+	var assets []string
+
+	// Regex to match already-hashed files: name.12345678.ext
+	hashedPattern := regexp.MustCompile(`\.[a-f0-9]{8}\.(js|css)$`)
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read directory: %w", err)
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+
+		name := entry.Name()
+
+		// Skip backup files
+		if strings.HasSuffix(name, ".bak") {
+			continue
+		}
+
+		// Skip already-hashed files
+		if hashedPattern.MatchString(name) {
+			continue
+		}
+
+		// Include .js and .css files
+		ext := filepath.Ext(name)
+		if ext == ".js" || ext == ".css" {
+			assets = append(assets, name)
+		}
+	}
+
+	return assets, nil
 }
 
 func copyFile(src, dst string) error {
