@@ -1,5 +1,5 @@
 // Protocol Inspector Logic
-// Receives WebSocket events from the demo-shim and updates the UI
+// Receives WebSocket events from the WebSocket interceptor and updates the UI
 
 class ProtocolInspector {
     constructor() {
@@ -175,10 +175,10 @@ document.addEventListener('DOMContentLoaded', function() {
     iframe.addEventListener('load', function() {
         console.log('[Protocol Inspector] iframe loaded, injecting shim');
 
-        fetch('/demo-shim.js')
+        fetch('/websocket-interceptor.js')
             .then(function(r) {
                 if (!r.ok) {
-                    throw new Error('Failed to load demo-shim.js: ' + r.status);
+                    throw new Error('Failed to load websocket-interceptor.js: ' + r.status);
                 }
                 return r.text();
             })

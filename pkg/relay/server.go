@@ -123,17 +123,29 @@ func (s *Server) routeMessage(ctx context.Context, conn WebSocketConn, rawMessag
 	}
 
 	// Route based on message type
+	s.logger.Printf("[RELAY] Routing message type: %s", base.Type)
 	switch base.Type {
 	case "session:create":
+		s.logger.Printf("[RELAY] Handling session:create")
 		return s.handleSessionCreate(ctx, conn, rawMessage)
+	case "session:end":
+		s.logger.Printf("[RELAY] Handling session:end")
+		return s.handleSessionEnd(ctx, conn, rawMessage)
 	case "agent:spawn":
+		s.logger.Printf("[RELAY] Handling agent:spawn")
 		return s.handleAgentSpawn(ctx, conn, rawMessage)
 	case "agent:message":
+		s.logger.Printf("[RELAY] Handling agent:message")
 		return s.handleAgentMessage(ctx, conn, rawMessage)
+	case "agent:terminate":
+		s.logger.Printf("[RELAY] Handling agent:terminate")
+		return s.handleAgentTerminate(ctx, conn, rawMessage)
 	case "test:echo":
 		// Keep echo for testing during Phase 1
+		s.logger.Printf("[RELAY] Handling test:echo")
 		return s.handleEcho(conn, rawMessage)
 	default:
+		s.logger.Printf("[RELAY] Unknown message type: %s", base.Type)
 		return s.handleUnknownMessageType(conn, base.Type)
 	}
 }
@@ -167,23 +179,31 @@ func (a *SessionWebSocketAdapter) Close() error {
 // handleSessionCreate handles session:create messages
 // Creates a new user session and responds with session:created
 func (s *Server) handleSessionCreate(ctx context.Context, conn WebSocketConn, rawMessage []byte) bool {
+	s.logger.Printf("[RELAY] handleSessionCreate: parsing message")
+
 	// Parse message
 	msg, err := parseSessionCreateMessage(rawMessage)
 	if err != nil {
+		s.logger.Printf("[RELAY] handleSessionCreate: parse error: %v", err)
 		return s.handleValidationError(conn, err)
 	}
 
+	s.logger.Printf("[RELAY] handleSessionCreate: validating message")
+
 	// Validate message (currently no-op, but for consistency)
 	if validationErr := validateSessionCreateMessage(msg); validationErr != nil {
+		s.logger.Printf("[RELAY] handleSessionCreate: validation error: %v", validationErr)
 		return s.handleValidationError(conn, validationErr)
 	}
+
+	s.logger.Printf("[RELAY] handleSessionCreate: creating user session")
 
 	// Create user session
 	// Wrap our WebSocketConn in session.WebSocketConn adapter
 	sessionWS := &SessionWebSocketAdapter{conn: conn}
 	userSession, err := s.sessionManager.CreateUserSession(ctx, sessionWS)
 	if err != nil {
-		s.logger.Printf("Failed to create user session: %v", err)
+		s.logger.Printf("[RELAY] Failed to create user session: %v", err)
 		errorMsg := NewErrorMessage(
 			"SESSION_CREATE_FAILED",
 			fmt.Sprintf("Failed to create session: %v", err),
@@ -195,15 +215,17 @@ func (s *Server) handleSessionCreate(ctx context.Context, conn WebSocketConn, ra
 		return false // Keep connection open for retry
 	}
 
-	s.logger.Printf("Created user session: %s", userSession.GetID())
+	s.logger.Printf("[RELAY] Created user session: %s", userSession.GetID())
 
 	// Send session:created response
+	s.logger.Printf("[RELAY] handleSessionCreate: sending session:created response")
 	response := NewSessionCreatedMessage(userSession.GetID(), s.clock.Now())
 	if err := conn.WriteJSON(response); err != nil {
-		s.logger.Printf("Failed to send session:created: %v", err)
+		s.logger.Printf("[RELAY] Failed to send session:created: %v", err)
 		return true // Close connection on write failure
 	}
 
+	s.logger.Printf("[RELAY] handleSessionCreate: success, continuing message processing")
 	return false // Continue processing messages
 }
 
@@ -436,6 +458,98 @@ func (s *Server) handleAgentMessage(ctx context.Context, conn WebSocketConn, raw
 	return false // Continue processing messages
 }
 
+// handleSessionEnd handles session:end messages
+// Terminates all agents in the session and cleans up resources
+func (s *Server) handleSessionEnd(ctx context.Context, conn WebSocketConn, rawMessage []byte) bool {
+	// Parse message
+	msg, err := parseSessionEndMessage(rawMessage)
+	if err != nil {
+		return s.handleValidationError(conn, err)
+	}
+
+	// Validate message
+	if validationErr := validateSessionEndMessage(msg); validationErr != nil {
+		return s.handleValidationError(conn, validationErr)
+	}
+
+	s.logger.Printf("Terminating user session: %s", msg.UserSessionID)
+
+	// Get session to count agents before termination
+	userSession := s.sessionManager.Get(msg.UserSessionID)
+	agentCount := 0
+	if userSession != nil {
+		agentCount = len(userSession.ListAgents())
+	}
+
+	// Terminate session (this will terminate all agents)
+	err = s.sessionManager.TerminateUserSession(ctx, msg.UserSessionID)
+	if err != nil {
+		s.logger.Printf("Error terminating session: %v", err)
+		// Map error to protocol error code
+		errorCode, errorMessage, recoverable := s.mapError(err)
+		errorMsg := NewErrorMessage(errorCode, errorMessage, recoverable)
+		if writeErr := conn.WriteJSON(errorMsg); writeErr != nil {
+			s.logger.Printf("Failed to send error response: %v", writeErr)
+			return true
+		}
+		return !recoverable
+	}
+
+	s.logger.Printf("User session terminated: %s, agents terminated: %d", msg.UserSessionID, agentCount)
+
+	// Send session:ended response
+	response := NewSessionEndedMessage(msg.UserSessionID, agentCount, "complete")
+	if err := conn.WriteJSON(response); err != nil {
+		s.logger.Printf("Failed to send session:ended: %v", err)
+		return true
+	}
+
+	return false // Continue processing messages
+}
+
+// handleAgentTerminate handles agent:terminate messages
+// Terminates a specific agent while keeping the session active
+func (s *Server) handleAgentTerminate(ctx context.Context, conn WebSocketConn, rawMessage []byte) bool {
+	// Parse message
+	msg, err := parseAgentTerminateMessage(rawMessage)
+	if err != nil {
+		return s.handleValidationError(conn, err)
+	}
+
+	// Validate message
+	if validationErr := validateAgentTerminateMessage(msg); validationErr != nil {
+		return s.handleValidationError(conn, validationErr)
+	}
+
+	s.logger.Printf("Terminating agent: userSession=%s agentID=%s", msg.UserSessionID, msg.AgentID)
+
+	// Terminate the agent
+	err = s.sessionManager.TerminateAgent(ctx, msg.UserSessionID, msg.AgentID)
+	if err != nil {
+		s.logger.Printf("Error terminating agent: %v", err)
+		// Map error to protocol error code
+		errorCode, errorMessage, recoverable := s.mapError(err)
+		errorMsg := NewErrorMessage(errorCode, errorMessage, recoverable)
+		if writeErr := conn.WriteJSON(errorMsg); writeErr != nil {
+			s.logger.Printf("Failed to send error response: %v", writeErr)
+			return true
+		}
+		return !recoverable
+	}
+
+	s.logger.Printf("Agent terminated: userSession=%s agentID=%s", msg.UserSessionID, msg.AgentID)
+
+	// Send agent:terminated response
+	// Workspace is always cleaned during termination, so workspaceCleaned is true
+	response := NewAgentTerminatedMessage(msg.UserSessionID, msg.AgentID, true)
+	if err := conn.WriteJSON(response); err != nil {
+		s.logger.Printf("Failed to send agent:terminated: %v", err)
+		return true
+	}
+
+	return false // Continue processing messages
+}
+
 // HandleWebSocket handles WebSocket upgrade and connection lifecycle
 func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	// Upgrade HTTP connection to WebSocket
@@ -466,6 +580,8 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 			s.logger.Printf("Read error: %v", err)
 			break
 		}
+
+		s.logger.Printf("[RELAY] Received message (%d bytes): %s", len(message), string(message))
 
 		if shouldClose := s.routeMessage(ctx, conn, message); shouldClose {
 			break

@@ -145,6 +145,32 @@ func parseAgentMessageRequest(data []byte) (AgentMessageRequest, error) {
 	return msg, nil
 }
 
+// parseSessionEndMessage parses JSON into SessionEndMessage (pure function)
+func parseSessionEndMessage(data []byte) (SessionEndMessage, error) {
+	var msg SessionEndMessage
+	if err := json.Unmarshal(data, &msg); err != nil {
+		return msg, ValidationError{
+			Code:        "INVALID_MESSAGE",
+			Message:     fmt.Sprintf("Invalid JSON: %v", err),
+			Recoverable: true,
+		}
+	}
+	return msg, nil
+}
+
+// parseAgentTerminateMessage parses JSON into AgentTerminateMessage (pure function)
+func parseAgentTerminateMessage(data []byte) (AgentTerminateMessage, error) {
+	var msg AgentTerminateMessage
+	if err := json.Unmarshal(data, &msg); err != nil {
+		return msg, ValidationError{
+			Code:        "INVALID_MESSAGE",
+			Message:     fmt.Sprintf("Invalid JSON: %v", err),
+			Recoverable: true,
+		}
+	}
+	return msg, nil
+}
+
 // validateSessionCreateMessage validates SessionCreateMessage has no additional requirements
 // beyond base message validation (pure function)
 func validateSessionCreateMessage(msg SessionCreateMessage) error {
@@ -199,6 +225,37 @@ func validateAgentMessageRequest(msg AgentMessageRequest) error {
 		return ValidationError{
 			Code:        "INVALID_MESSAGE",
 			Message:     "Missing required field: content",
+			Recoverable: true,
+		}
+	}
+	return nil
+}
+
+// validateSessionEndMessage validates SessionEndMessage required fields (pure function)
+func validateSessionEndMessage(msg SessionEndMessage) error {
+	if msg.UserSessionID == "" {
+		return ValidationError{
+			Code:        "INVALID_MESSAGE",
+			Message:     "Missing required field: userSessionId",
+			Recoverable: true,
+		}
+	}
+	return nil
+}
+
+// validateAgentTerminateMessage validates AgentTerminateMessage required fields (pure function)
+func validateAgentTerminateMessage(msg AgentTerminateMessage) error {
+	if msg.UserSessionID == "" {
+		return ValidationError{
+			Code:        "INVALID_MESSAGE",
+			Message:     "Missing required field: userSessionId",
+			Recoverable: true,
+		}
+	}
+	if msg.AgentID == "" {
+		return ValidationError{
+			Code:        "INVALID_MESSAGE",
+			Message:     "Missing required field: agentId",
 			Recoverable: true,
 		}
 	}
@@ -281,6 +338,35 @@ type AgentMessageResponse struct {
 	Timestamp     string `json:"timestamp"`
 }
 
+// SessionEndMessage is sent by PWA to terminate all agents and end the session
+type SessionEndMessage struct {
+	BaseMessage
+	UserSessionID string `json:"userSessionId"`
+}
+
+// SessionEndedMessage is sent by relay confirming session termination
+type SessionEndedMessage struct {
+	BaseMessage
+	UserSessionID    string `json:"userSessionId"`
+	AgentsTerminated int    `json:"agentsTerminated"`
+	CleanupStatus    string `json:"cleanupStatus"`
+}
+
+// AgentTerminateMessage is sent by PWA to terminate a specific agent
+type AgentTerminateMessage struct {
+	BaseMessage
+	UserSessionID string `json:"userSessionId"`
+	AgentID       string `json:"agentId"`
+}
+
+// AgentTerminatedMessage is sent by relay confirming agent termination
+type AgentTerminatedMessage struct {
+	BaseMessage
+	UserSessionID    string `json:"userSessionId"`
+	AgentID          string `json:"agentId"`
+	WorkspaceCleaned bool   `json:"workspaceCleaned"`
+}
+
 // NewConnectionEstablished creates a connection established message (pure function)
 func NewConnectionEstablished(serverID, timestamp string) ConnectionEstablishedMessage {
 	return ConnectionEstablishedMessage{
@@ -343,5 +429,31 @@ func NewAgentMessageResponse(userSessionID, agentID, content, timestamp string) 
 		AgentID:       agentID,
 		Content:       content,
 		Timestamp:     timestamp,
+	}
+}
+
+// NewSessionEndedMessage creates a session ended message (pure function)
+func NewSessionEndedMessage(userSessionID string, agentsTerminated int, cleanupStatus string) SessionEndedMessage {
+	return SessionEndedMessage{
+		BaseMessage: BaseMessage{
+			Version: ProtocolVersion,
+			Type:    "session:ended",
+		},
+		UserSessionID:    userSessionID,
+		AgentsTerminated: agentsTerminated,
+		CleanupStatus:    cleanupStatus,
+	}
+}
+
+// NewAgentTerminatedMessage creates an agent terminated message (pure function)
+func NewAgentTerminatedMessage(userSessionID, agentID string, workspaceCleaned bool) AgentTerminatedMessage {
+	return AgentTerminatedMessage{
+		BaseMessage: BaseMessage{
+			Version: ProtocolVersion,
+			Type:    "agent:terminated",
+		},
+		UserSessionID:    userSessionID,
+		AgentID:          agentID,
+		WorkspaceCleaned: workspaceCleaned,
 	}
 }

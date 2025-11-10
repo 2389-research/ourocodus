@@ -29,6 +29,14 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-go-
 
+      - name: Install mise
+        uses: jdx/mise-action@v2
+        with:
+          install: true
+
+      - name: Download Tailwind CSS
+        run: make tailwind-download
+
       - name: Build relay binary
         run: make build
 

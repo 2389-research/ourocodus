@@ -4,9 +4,14 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="Ourocodus - Multi-Agent AI Development Platform">
-    <meta name="theme-color" content="#1a1a2e">
+    <meta name="theme-color" content="#ffffff">
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+    <link rel="manifest" href="/manifest.webmanifest">
+    <link rel="apple-touch-icon" href="/icon-192.png">
     <title>Ourocodus</title>
-    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="styles.min.55e70520.css">
+    <link rel="stylesheet" href="tailwind.99d1fe80.css">
 </head>
 <body>
     <div class="container">
@@ -37,7 +42,7 @@
             <div class="card info-card" id="sessionInfo" style="display: none;">
                 <div class="card-header">
                     <h3>Session Information</h3>
-                    <button class="btn btn-danger btn-small" id="endSessionBtn" title="Terminate all agents, end session, disconnect, and reset demo to initial state">
+                    <button class="btn btn-danger btn-small" id="endSessionBtn" title="Terminate all agents, end session, and disconnect">
                         <span class="btn-icon">🗑️</span>
                         End Session
                     </button>
@@ -61,12 +66,33 @@
                     </div>
                     <div class="form-group">
                         <label for="agentWorkspace">Workspace:</label>
-                        <input type="text" id="agentWorkspace" value="./workspaces/demo" placeholder="./workspaces/demo">
+                        <input type="text" id="agentWorkspace" value="./workspaces/default" placeholder="./workspaces/default">
                     </div>
                     <button class="btn btn-secondary" id="spawnAgentBtn">
                         <span class="btn-icon">🤖</span>
                         Spawn Agent
                     </button>
+                </div>
+
+                <div id="agentCards" class="agent-cards-container">
+                    <!-- Agent cards will be rendered here -->
+                </div>
+
+                <button id="terminateAll" class="btn btn-danger" style="display: none;" onclick="app.connection.terminateAll()">
+                    <span class="btn-icon">🗑️</span>
+                    Terminate All Agents
+                </button>
+            </div>
+
+            <div id="chatContainer" class="chat-container" style="display: none;">
+                <div class="chat-header">
+                    <span id="chatAgentName"></span>
+                    <button onclick="app.connection.closeChat()">×</button>
+                </div>
+                <div id="chatMessages" class="chat-messages"></div>
+                <div class="chat-input">
+                    <input type="text" id="chatInput" placeholder="Type a message...">
+                    <button onclick="app.connection.sendChatMessage()">Send</button>
                 </div>
             </div>
 
@@ -132,7 +158,7 @@
             <h3 id="endSessionModalTitle">End Session?</h3>
             <div id="endSessionModalDesc">
                 <p>This will terminate the session, close all agents, and disconnect from the relay.</p>
-                <p class="modal-warning">⚠️ All agents will be terminated and the demo will reset to its initial state.</p>
+                <p class="modal-warning">⚠️ All agents will be terminated and the session will end.</p>
             </div>
             <div class="modal-actions">
                 <button class="btn btn-secondary" id="cancelEndSession" aria-label="Cancel end session">Cancel</button>
@@ -163,6 +189,7 @@
         </div>
     </div>
 
-    <script src="app.js"></script>
+    <script src="logger.e107c653.js"></script>
+    <script src="app.efbb2775.js"></script>
 </body>
 </html>

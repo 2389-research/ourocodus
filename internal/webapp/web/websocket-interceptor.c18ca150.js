@@ -73,5 +73,5 @@
     window.WebSocket.CLOSING = OriginalWebSocket.CLOSING;
     window.WebSocket.CLOSED = OriginalWebSocket.CLOSED;
 
-    console.log('[Demo Shim] WebSocket interceptor installed');
+    console.log('[WebSocket Interceptor] WebSocket interceptor installed');
 })();
