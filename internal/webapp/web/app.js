@@ -96,6 +96,10 @@ class RelayConnection {
         this.maxReconnectDelay = 30000; // Max 30 seconds
         this.userSessionId = null;
         this.reconnectTimeout = null;
+        this.currentChatRole = null;
+
+        // Map-based state for multiple agents: role → { role, status, messages, workspace }
+        this.agents = new Map();
 
         // Get WebSocket URL (same host as HTTP)
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -193,6 +197,11 @@ class RelayConnection {
                     this.handleAgentResponse(message);
                     break;
 
+                case 'agent:terminated':
+                    this.logger.info('Agent terminated:', message);
+                    this.handleAgentTerminated(message);
+                    break;
+
                 case 'error':
                     this.logger.error('Server error:', message);
                     this.handleError(message);
@@ -236,36 +245,81 @@ class RelayConnection {
      * Handle agent:ready response
      */
     handleAgentReady(message) {
-        const agentCard = document.getElementById('agentCard');
-        const agentRoleDisplay = document.getElementById('agentRoleDisplay');
-        const agentSpawnSection = document.getElementById('agentSpawnSection');
+        const role = message.agentId;
+        const workspace = message.workspace || '';
 
-        if (!agentCard || !agentRoleDisplay) {
-            this.logger.error('Agent card elements not found');
-            return;
+        // Add agent to Map
+        this.agents.set(role, {
+            role: role,
+            status: 'ready',
+            messages: [],
+            workspace: workspace
+        });
+
+        // Add welcome message to agent's messages
+        const agent = this.agents.get(role);
+        if (agent) {
+            agent.messages.push({
+                sender: 'agent',
+                content: `Hi! I'm ${role}. I'm here to help. Send me a message to get started!`,
+                timestamp: new Date()
+            });
         }
 
-        // Hide spawn section, show agent card
-        if (agentSpawnSection) {
-            agentSpawnSection.style.display = 'none';
-        }
+        // Render agent cards
+        this.renderAgentCards();
 
-        agentCard.style.display = 'block';
-        agentRoleDisplay.textContent = message.agentId;
-        this.currentAgentRole = message.agentId;
-
-        // Add welcome message from agent
-        this.displayMessage('agent', `Hi! I'm ${message.agentId}. I'm here to help. Send me a message to get started!`);
-
-        this.logger.debug('Agent UI displayed for agentId:', message.agentId);
+        // Keep spawn section visible for multi-agent support
+        this.logger.debug('Agent added to Map for agentId:', role);
     }
 
     /**
      * Handle agent:response message
      */
     handleAgentResponse(message) {
-        this.displayMessage('agent', message.content);
-        this.logger.debug('Agent response displayed');
+        const role = message.agentId;
+        const agent = this.agents.get(role);
+
+        if (agent) {
+            agent.messages.push({
+                sender: 'agent',
+                content: message.content,
+                timestamp: new Date()
+            });
+
+            // If this is the currently open chat, render messages
+            if (this.currentChatRole === role) {
+                this.displayMessage('agent', message.content);
+            }
+
+            // Update agent cards to reflect new message count
+            this.renderAgentCards();
+        }
+
+        this.logger.debug('Agent response processed for role:', role);
+    }
+
+    /**
+     * Handle agent:terminated message
+     */
+    handleAgentTerminated(message) {
+        const role = message.agentId;
+        this.logger.info('Agent terminated from server:', role);
+
+        // Remove agent from Map
+        this.agents.delete(role);
+
+        // If this was the current chat, close it
+        if (this.currentChatRole === role) {
+            this.currentChatRole = null;
+            const agentCard = document.getElementById('agentCard');
+            if (agentCard) {
+                agentCard.style.display = 'none';
+            }
+        }
+
+        // Re-render agent cards
+        this.renderAgentCards();
     }
 
     /**
@@ -418,6 +472,16 @@ class RelayConnection {
             return false;
         }
 
+        // Add to agent's message history
+        const agent = this.agents.get(role);
+        if (agent) {
+            agent.messages.push({
+                sender: 'user',
+                content: content,
+                timestamp: new Date()
+            });
+        }
+
         const message = {
             type: 'agent:message',
             version: '1.0',
@@ -428,6 +492,9 @@ class RelayConnection {
 
         // Display user message immediately
         this.displayMessage('user', content);
+
+        // Update agent cards to reflect new message count
+        this.renderAgentCards();
 
         this.logger.debug('Sending agent message:', message);
         return this.sendMessage(message);
@@ -450,6 +517,111 @@ class RelayConnection {
         };
 
         this.logger.info('Ending session:', message);
+        return this.sendMessage(message);
+    }
+
+    /**
+     * Render agent cards in the UI
+     */
+    renderAgentCards() {
+        const container = document.getElementById('agentCards');
+        if (!container) {
+            this.logger.error('Agent cards container not found');
+            return;
+        }
+
+        // Clear existing cards
+        container.innerHTML = '';
+
+        // Render each agent
+        this.agents.forEach((agent, role) => {
+            const card = document.createElement('div');
+            card.className = 'agent-card-item';
+            card.innerHTML = `
+                <div class="agent-card-info">
+                    <span class="agent-card-role">Agent: ${role}</span>
+                    <span class="agent-card-status ${agent.status}">${agent.status}</span>
+                    <span>Messages: ${agent.messages.length}</span>
+                </div>
+                <div class="agent-card-actions">
+                    <button data-role="${role}" title="Terminate agent">&times;</button>
+                </div>
+            `;
+
+            // Click card to show chat (but not the button)
+            card.addEventListener('click', (e) => {
+                if (!e.target.closest('button')) {
+                    this.showAgentChat(role);
+                }
+            });
+
+            // Click terminate button
+            const terminateBtn = card.querySelector('button');
+            if (terminateBtn) {
+                terminateBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    this.terminateAgentCard(role);
+                });
+            }
+
+            container.appendChild(card);
+        });
+
+        this.logger.debug('Rendered', this.agents.size, 'agent cards');
+    }
+
+    /**
+     * Show chat interface for a specific agent
+     */
+    showAgentChat(role) {
+        const agent = this.agents.get(role);
+        if (!agent) {
+            this.logger.error('Agent not found:', role);
+            return;
+        }
+
+        this.currentChatRole = role;
+
+        // Show agent card with chat
+        const agentCard = document.getElementById('agentCard');
+        const agentRoleDisplay = document.getElementById('agentRoleDisplay');
+
+        if (agentCard && agentRoleDisplay) {
+            agentCard.style.display = 'block';
+            agentRoleDisplay.textContent = role;
+        }
+
+        // Render all messages for this agent
+        const messageHistory = document.getElementById('messageHistory');
+        if (messageHistory) {
+            messageHistory.innerHTML = '';
+            agent.messages.forEach(msg => {
+                this.displayMessage(msg.sender, msg.content);
+            });
+        }
+
+        this.logger.debug('Showing chat for agent:', role);
+    }
+
+    /**
+     * Terminate a specific agent from card UI
+     */
+    terminateAgentCard(role) {
+        this.logger.info('Terminating agent from card:', role);
+
+        if (!this.userSessionId) {
+            this.logger.error('Cannot terminate agent: no session');
+            return false;
+        }
+
+        const message = {
+            type: 'agent:terminate',
+            version: '1.0',
+            userSessionId: this.userSessionId,
+            agentId: role
+        };
+
+        this.logger.info('Sending agent:terminate:', message);
         return this.sendMessage(message);
     }
 
@@ -563,6 +735,8 @@ class RelayConnection {
         this.isConnected = false;
         this.userSessionId = null;
         this.currentAgentRole = null;
+        this.currentChatRole = null;
+        this.agents.clear();
         this.updateConnectionStatus('disconnected', 'Disconnected');
     }
 }
@@ -970,7 +1144,7 @@ class App {
             return;
         }
 
-        const role = this.connection.currentAgentRole;
+        const role = this.connection.currentChatRole || this.connection.currentAgentRole;
         if (!role) {
             this.logger.error('No active agent');
             return;
