@@ -120,6 +120,7 @@ class RelayConnection {
     public userSessionId: string | null;
     private reconnectTimeout: number | null;
     private currentChatRole: string | null;
+    public currentAgentRole: string | null; // Currently selected agent for single-agent card view
     private wsUrl: string;
 
     // Map-based state for multiple agents: role → { role, status, messages, workspace }
@@ -137,6 +138,7 @@ class RelayConnection {
         this.userSessionId = null;
         this.reconnectTimeout = null;
         this.currentChatRole = null;
+        this.currentAgentRole = null;
 
         // Map-based state for multiple agents
         this.agents = new Map<string, AgentState>();
@@ -372,6 +374,7 @@ class RelayConnection {
         // If this was the current chat, close it
         if (this.currentChatRole === role) {
             this.currentChatRole = null;
+            this.currentAgentRole = null;
             const agentCard = document.getElementById('agentCard');
             if (agentCard) {
                 agentCard.style.display = 'none';
@@ -705,6 +708,7 @@ class RelayConnection {
         }
 
         this.currentChatRole = role;
+        this.currentAgentRole = role; // Track currently displayed agent
 
         // Update chat header with agent name
         const chatAgentName = document.getElementById('chatAgentName');
@@ -739,6 +743,7 @@ class RelayConnection {
             chatContainer.style.display = 'none';
         }
         this.currentChatRole = null;
+        this.currentAgentRole = null; // Clear currently displayed agent
         this.logger.debug('Chat closed');
     }
 
@@ -779,7 +784,7 @@ class RelayConnection {
      * Send message from chat interface
      */
     sendChatMessage() {
-        const input = document.getElementById('chatInput');
+        const input = document.getElementById('chatInput') as HTMLInputElement;
         if (!input) {
             this.logger.error('Chat input not found');
             return;
@@ -803,7 +808,7 @@ class RelayConnection {
             timestamp: new Date()
         });
 
-        // Send to server
+        // Send to server via sendMessage (includes connection checks)
         const message = {
             type: 'agent:message',
             version: '1.0',
@@ -813,7 +818,13 @@ class RelayConnection {
         };
 
         this.logger.debug('Sending message via chat interface:', message);
-        this.ws.send(JSON.stringify(message));
+        const success = this.sendMessage(message);
+
+        if (!success) {
+            this.logger.error('Failed to send chat message');
+            // Optionally notify user of send failure
+            return;
+        }
 
         // Clear input and re-render
         input.value = '';
