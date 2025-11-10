@@ -8,6 +8,7 @@
  */
 class ModalManager {
     constructor(modalId) {
+        this.logger = new Logger('ModalManager');
         this.modal = document.getElementById(modalId);
         this.overlay = null;
         this.confirmBtn = null;
@@ -16,7 +17,7 @@ class ModalManager {
         this.onCancel = null;
 
         if (!this.modal) {
-            console.error('[ModalManager] Modal not found:', modalId);
+            this.logger.error('Modal not found:', modalId);
             return;
         }
 
@@ -85,6 +86,7 @@ class ModalManager {
 
 class RelayConnection {
     constructor() {
+        this.logger = new Logger('RelayConnection');
         this.ws = null;
         this.isConnected = false;
         this.shouldReconnect = true;
@@ -100,7 +102,7 @@ class RelayConnection {
         const host = window.location.host;
         this.wsUrl = `${protocol}//${host}/ws`;
 
-        console.log('[RelayConnection] Initialized with URL:', this.wsUrl);
+        this.logger.info('Initialized with URL:', this.wsUrl);
     }
 
     /**
@@ -108,18 +110,18 @@ class RelayConnection {
      */
     connect() {
         if (this.ws && (this.ws.readyState === WebSocket.CONNECTING || this.ws.readyState === WebSocket.OPEN)) {
-            console.log('[RelayConnection] Already connected or connecting');
+            this.logger.debug('Already connected or connecting');
             return;
         }
 
-        console.log('[RelayConnection] Connecting to relay...');
+        this.logger.info('Connecting to relay...');
         this.updateConnectionStatus('connecting', 'Connecting...');
 
         try {
             this.ws = new WebSocket(this.wsUrl);
             this.setupEventHandlers();
         } catch (error) {
-            console.error('[RelayConnection] Failed to create WebSocket:', error);
+            this.logger.error('Failed to create WebSocket:', error);
             this.updateConnectionStatus('disconnected', 'Connection failed');
             this.scheduleReconnect();
         }
@@ -130,7 +132,7 @@ class RelayConnection {
      */
     setupEventHandlers() {
         this.ws.onopen = (event) => {
-            console.log('[RelayConnection] Connected to relay', event);
+            this.logger.info('Connected to relay', event);
             this.isConnected = true;
             this.reconnectAttempts = 0;
             this.reconnectDelay = 1000;
@@ -138,17 +140,17 @@ class RelayConnection {
         };
 
         this.ws.onmessage = (event) => {
-            console.log('[RelayConnection] Message received:', event.data);
+            this.logger.debug('Message received:', event.data);
             this.handleMessage(event.data);
         };
 
         this.ws.onerror = (event) => {
-            console.error('[RelayConnection] WebSocket error:', event);
+            this.logger.error('WebSocket error:', event);
             this.updateConnectionStatus('error', 'Connection error');
         };
 
         this.ws.onclose = (event) => {
-            console.log('[RelayConnection] Connection closed:', {
+            this.logger.info('Connection closed:', {
                 code: event.code,
                 reason: event.reason,
                 wasClean: event.wasClean
@@ -168,39 +170,39 @@ class RelayConnection {
     handleMessage(data) {
         try {
             const message = JSON.parse(data);
-            console.log('[RelayConnection] Parsed message:', message);
+            this.logger.debug('Parsed message:', message);
 
             switch (message.type) {
                 case 'connection:established':
-                    console.log('[RelayConnection] Handshake received:', message);
+                    this.logger.info('Handshake received:', message);
                     break;
 
                 case 'session:created':
-                    console.log('[RelayConnection] Session created:', message.userSessionId);
+                    this.logger.info('Session created:', message.userSessionId);
                     this.userSessionId = message.userSessionId;
                     this.handleSessionCreated(message);
                     break;
 
                 case 'agent:ready':
-                    console.log('[RelayConnection] Agent ready:', message);
+                    this.logger.info('Agent ready:', message);
                     this.handleAgentReady(message);
                     break;
 
                 case 'agent:response':
-                    console.log('[RelayConnection] Agent response:', message);
+                    this.logger.debug('Agent response:', message);
                     this.handleAgentResponse(message);
                     break;
 
                 case 'error':
-                    console.error('[RelayConnection] Server error:', message);
+                    this.logger.error('Server error:', message);
                     this.handleError(message);
                     break;
 
                 default:
-                    console.log('[RelayConnection] Unknown message type:', message.type);
+                    this.logger.warn('Unknown message type:', message.type);
             }
         } catch (error) {
-            console.error('[RelayConnection] Failed to parse message:', error, data);
+            this.logger.error('Failed to parse message:', error, data);
         }
     }
 
@@ -214,7 +216,7 @@ class RelayConnection {
         const welcomeCard = document.getElementById('welcomeCard');
 
         if (!sessionInfoCard || !sessionIdEl || !sessionStatusEl) {
-            console.error('[RelayConnection] Session UI elements not found');
+            this.logger.error('Session UI elements not found');
             return;
         }
 
@@ -227,7 +229,7 @@ class RelayConnection {
         sessionIdEl.textContent = message.userSessionId;
         sessionStatusEl.textContent = 'Active';
 
-        console.log('[RelayConnection] Session UI updated');
+        this.logger.debug('Session UI updated');
     }
 
     /**
@@ -239,7 +241,7 @@ class RelayConnection {
         const agentSpawnSection = document.getElementById('agentSpawnSection');
 
         if (!agentCard || !agentRoleDisplay) {
-            console.error('[RelayConnection] Agent card elements not found');
+            this.logger.error('Agent card elements not found');
             return;
         }
 
@@ -255,7 +257,7 @@ class RelayConnection {
         // Add welcome message from agent
         this.displayMessage('agent', `Hi! I'm ${message.agentId}. I'm here to help. Send me a message to get started!`);
 
-        console.log('[RelayConnection] Agent UI displayed for agentId:', message.agentId);
+        this.logger.debug('Agent UI displayed for agentId:', message.agentId);
     }
 
     /**
@@ -263,7 +265,7 @@ class RelayConnection {
      */
     handleAgentResponse(message) {
         this.displayMessage('agent', message.content);
-        console.log('[RelayConnection] Agent response displayed');
+        this.logger.debug('Agent response displayed');
     }
 
     /**
@@ -272,7 +274,7 @@ class RelayConnection {
     displayMessage(sender, content) {
         const messageHistory = document.getElementById('messageHistory');
         if (!messageHistory) {
-            console.error('[RelayConnection] Message history element not found');
+            this.logger.error('Message history element not found');
             return;
         }
 
@@ -303,7 +305,7 @@ class RelayConnection {
      * Handle error messages from server
      */
     handleError(message) {
-        console.error('[RelayConnection] Server error:', message);
+        this.logger.error('Server error:', message);
 
         // Extract error details
         const errorCode = message.error?.code || message.code || 'UNKNOWN_ERROR';
@@ -351,19 +353,19 @@ class RelayConnection {
      * Send a message to the relay
      */
     sendMessage(message) {
-        console.log('[RelayConnection] sendMessage debug - isConnected:', this.isConnected, 'ws:', !!this.ws, 'readyState:', this.ws?.readyState, 'OPEN:', WebSocket.OPEN);
+        this.logger.debug('sendMessage debug - isConnected:', this.isConnected, 'ws:', !!this.ws, 'readyState:', this.ws?.readyState, 'OPEN:', WebSocket.OPEN);
         if (!this.isConnected || !this.ws || this.ws.readyState !== WebSocket.OPEN) {
-            console.error('[RelayConnection] Cannot send message: not connected');
+            this.logger.error('Cannot send message: not connected');
             return false;
         }
 
         try {
             const payload = JSON.stringify(message);
-            console.log('[RelayConnection] Sending message:', payload);
+            this.logger.debug('Sending message:', payload);
             this.ws.send(payload);
             return true;
         } catch (error) {
-            console.error('[RelayConnection] Failed to send message:', error);
+            this.logger.error('Failed to send message:', error);
             return false;
         }
     }
@@ -378,7 +380,7 @@ class RelayConnection {
         };
 
         if (!this.sendMessage(message)) {
-            console.error('[RelayConnection] Failed to send session:create message');
+            this.logger.error('Failed to send session:create message');
             const sessionStatusEl = document.getElementById('sessionStatus');
             if (sessionStatusEl) {
                 sessionStatusEl.textContent = 'Failed to create session';
@@ -391,7 +393,7 @@ class RelayConnection {
      */
     spawnAgent(role, workspace) {
         if (!this.userSessionId) {
-            console.error('[RelayConnection] Cannot spawn agent: no session');
+            this.logger.error('Cannot spawn agent: no session');
             return false;
         }
 
@@ -403,7 +405,7 @@ class RelayConnection {
             workspace: workspace
         };
 
-        console.log('[RelayConnection] Spawning agent:', message);
+        this.logger.info('Spawning agent:', message);
         return this.sendMessage(message);
     }
 
@@ -412,7 +414,7 @@ class RelayConnection {
      */
     sendAgentMessage(role, content) {
         if (!this.userSessionId) {
-            console.error('[RelayConnection] Cannot send message: no session');
+            this.logger.error('Cannot send message: no session');
             return false;
         }
 
@@ -427,7 +429,7 @@ class RelayConnection {
         // Display user message immediately
         this.displayMessage('user', content);
 
-        console.log('[RelayConnection] Sending agent message:', message);
+        this.logger.debug('Sending agent message:', message);
         return this.sendMessage(message);
     }
 
@@ -437,7 +439,7 @@ class RelayConnection {
      */
     endSession() {
         if (!this.userSessionId) {
-            console.error('[RelayConnection] Cannot end session: no session');
+            this.logger.error('Cannot end session: no session');
             return false;
         }
 
@@ -447,7 +449,7 @@ class RelayConnection {
             userSessionId: this.userSessionId
         };
 
-        console.log('[RelayConnection] Ending session:', message);
+        this.logger.info('Ending session:', message);
         return this.sendMessage(message);
     }
 
@@ -457,7 +459,7 @@ class RelayConnection {
      */
     terminateAgent(role) {
         if (!this.userSessionId) {
-            console.error('[RelayConnection] Cannot terminate agent: no session');
+            this.logger.error('Cannot terminate agent: no session');
             return false;
         }
 
@@ -468,7 +470,7 @@ class RelayConnection {
             agentId: role
         };
 
-        console.log('[RelayConnection] Terminating agent:', message);
+        this.logger.info('Terminating agent:', message);
         return this.sendMessage(message);
     }
 
@@ -477,12 +479,12 @@ class RelayConnection {
      */
     scheduleReconnect() {
         if (!this.shouldReconnect) {
-            console.log('[RelayConnection] Reconnection disabled');
+            this.logger.debug('Reconnection disabled');
             return;
         }
 
         if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-            console.error('[RelayConnection] Max reconnection attempts reached');
+            this.logger.error('Max reconnection attempts reached');
             this.updateConnectionStatus('failed', 'Connection failed');
             return;
         }
@@ -490,11 +492,11 @@ class RelayConnection {
         this.reconnectAttempts++;
         const delay = Math.min(this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1), this.maxReconnectDelay);
 
-        console.log(`[RelayConnection] Scheduling reconnect attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts} in ${delay}ms`);
+        this.logger.info(`Scheduling reconnect attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts} in ${delay}ms`);
         this.updateConnectionStatus('reconnecting', `Reconnecting in ${Math.round(delay / 1000)}s...`);
 
         this.reconnectTimeout = setTimeout(() => {
-            console.log('[RelayConnection] Attempting to reconnect...');
+            this.logger.info('Attempting to reconnect...');
             this.connect();
         }, delay);
     }
@@ -528,7 +530,7 @@ class RelayConnection {
             disconnectBtn.style.display = (state === 'connected') ? 'flex' : 'none';
         }
 
-        console.log('[RelayConnection] Status updated:', state, text);
+        this.logger.debug('Status updated:', state, text);
     }
 
     /**
@@ -537,7 +539,7 @@ class RelayConnection {
      * @param {string} reason - Human-readable close reason
      */
     disconnect(code = 1000, reason = 'Client disconnected') {
-        console.log('[RelayConnection] Disconnecting...', code, reason);
+        this.logger.info('Disconnecting...', code, reason);
         this.shouldReconnect = false;
 
         if (this.reconnectTimeout) {
@@ -552,7 +554,7 @@ class RelayConnection {
                     // Some browsers don't support reason parameter, so just use code
                     this.ws.close(code);
                 } catch (e) {
-                    console.error('[RelayConnection] Error closing WebSocket:', e);
+                    this.logger.error('Error closing WebSocket:', e);
                 }
             }
             this.ws = null;
@@ -570,6 +572,7 @@ class RelayConnection {
  */
 class App {
     constructor() {
+        this.logger = new Logger('App');
         this.connection = new RelayConnection();
         this.connectionCheckInterval = null;
         this.connectionCheckTimeout = null;
@@ -584,13 +587,13 @@ class App {
     }
 
     init() {
-        console.log('[App] Initializing Ourocodus PWA');
+        this.logger.info('Initializing Ourocodus PWA');
 
         // Setup New Project button handler
         const newProjectBtn = document.getElementById('newProjectBtn');
         if (newProjectBtn) {
             newProjectBtn.addEventListener('click', () => {
-                console.log('[App] New Project button clicked');
+                this.logger.debug('New Project button clicked');
                 this.handleNewProject();
             });
         }
@@ -599,7 +602,7 @@ class App {
         const spawnAgentBtn = document.getElementById('spawnAgentBtn');
         if (spawnAgentBtn) {
             spawnAgentBtn.addEventListener('click', () => {
-                console.log('[App] Spawn Agent button clicked');
+                this.logger.debug('Spawn Agent button clicked');
                 this.handleSpawnAgent();
             });
         }
@@ -608,7 +611,7 @@ class App {
         const sendMessageBtn = document.getElementById('sendMessageBtn');
         if (sendMessageBtn) {
             sendMessageBtn.addEventListener('click', () => {
-                console.log('[App] Send Message button clicked');
+                this.logger.debug('Send Message button clicked');
                 this.handleSendMessage();
             });
         }
@@ -628,14 +631,14 @@ class App {
         const disconnectBtn = document.getElementById('disconnectBtn');
         if (disconnectBtn) {
             disconnectBtn.addEventListener('click', () => {
-                console.log('[App] Disconnect button clicked');
+                this.logger.debug('Disconnect button clicked');
                 this.disconnectModal.show({
                     onConfirm: () => {
-                        console.log('[App] Disconnect confirmed');
+                        this.logger.debug('Disconnect confirmed');
                         this.handleDisconnect();
                     },
                     onCancel: () => {
-                        console.log('[App] Disconnect cancelled');
+                        this.logger.debug('Disconnect cancelled');
                     }
                 });
             });
@@ -645,14 +648,14 @@ class App {
         const endSessionBtn = document.getElementById('endSessionBtn');
         if (endSessionBtn) {
             endSessionBtn.addEventListener('click', () => {
-                console.log('[App] End Session button clicked');
+                this.logger.debug('End Session button clicked');
                 this.endSessionModal.show({
                     onConfirm: () => {
-                        console.log('[App] End Session confirmed');
+                        this.logger.debug('End Session confirmed');
                         this.handleEndSession();
                     },
                     onCancel: () => {
-                        console.log('[App] End Session cancelled');
+                        this.logger.debug('End Session cancelled');
                     }
                 });
             });
@@ -662,14 +665,14 @@ class App {
         const terminateAgentBtn = document.getElementById('terminateAgentBtn');
         if (terminateAgentBtn) {
             terminateAgentBtn.addEventListener('click', () => {
-                console.log('[App] Terminate Agent button clicked');
+                this.logger.debug('Terminate Agent button clicked');
                 this.terminateAgentModal.show({
                     onConfirm: () => {
-                        console.log('[App] Terminate Agent confirmed');
+                        this.logger.debug('Terminate Agent confirmed');
                         this.handleTerminateAgent();
                     },
                     onCancel: () => {
-                        console.log('[App] Terminate Agent cancelled');
+                        this.logger.debug('Terminate Agent cancelled');
                     },
                     updateContent: (modal) => {
                         // Update role display in modal
@@ -682,11 +685,11 @@ class App {
             });
         }
 
-        console.log('[App] Initialization complete');
+        this.logger.info('Initialization complete');
     }
 
     handleDisconnect() {
-        console.log('[App] Disconnecting from relay...');
+        this.logger.info('Disconnecting from relay...');
 
         // Disable disconnect button to prevent double-clicks
         const disconnectBtn = document.getElementById('disconnectBtn');
@@ -698,7 +701,7 @@ class App {
         // Note: Server will still cleanup session/agents on disconnect
         this.connection.disconnect(1000, 'User disconnected');
 
-        console.log('[App] Disconnect complete');
+        this.logger.info('Disconnect complete');
 
         // Re-enable after a delay (button will be hidden anyway once disconnected)
         setTimeout(() => {
@@ -709,7 +712,7 @@ class App {
     }
 
     handleEndSession() {
-        console.log('[App] Ending session and resetting...');
+        this.logger.info('Ending session and resetting...');
 
         // Disable end session button to prevent double-clicks
         const endSessionBtn = document.getElementById('endSessionBtn');
@@ -720,9 +723,9 @@ class App {
         // Try to send session:end message (Phase 3 feature)
         // If server doesn't support it yet, will get error but we still disconnect
         if (this.connection.endSession()) {
-            console.log('[App] session:end message sent');
+            this.logger.info('session:end message sent');
         } else {
-            console.log('[App] Could not send session:end (may not be connected)');
+            this.logger.warn('Could not send session:end (may not be connected)');
         }
 
         // Give server a moment to process, then disconnect
@@ -733,16 +736,16 @@ class App {
             // Reset all UI state
             this.resetUI();
 
-            console.log('[App] End session complete');
+            this.logger.info('End session complete');
         }, 100);
     }
 
     handleTerminateAgent() {
-        console.log('[App] Terminating agent...');
+        this.logger.info('Terminating agent...');
 
         const role = this.connection.currentAgentRole;
         if (!role) {
-            console.error('[App] No agent to terminate');
+            this.logger.error('No agent to terminate');
             return;
         }
 
@@ -755,9 +758,9 @@ class App {
         // Try to send agent:terminate message (Phase 3 feature)
         // If server doesn't support it yet, will get error but we still update UI
         if (this.connection.terminateAgent(role)) {
-            console.log('[App] agent:terminate message sent for agentId:', role);
+            this.logger.info('agent:terminate message sent for agentId:', role);
         } else {
-            console.log('[App] Could not send agent:terminate (may not be connected)');
+            this.logger.warn('Could not send agent:terminate (may not be connected)');
         }
 
         // Update UI to hide agent card and show spawn section
@@ -799,7 +802,7 @@ class App {
             // Clear current agent role
             this.connection.currentAgentRole = null;
 
-            console.log('[App] Agent terminated and UI updated');
+            this.logger.info('Agent terminated and UI updated');
         }, 100);
     }
 
@@ -864,7 +867,7 @@ class App {
             this.connectionCheckTimeout = null;
         }
 
-        console.log('[App] UI reset complete');
+        this.logger.debug('UI reset complete');
     }
 
     handleNewProject() {
@@ -872,12 +875,12 @@ class App {
 
         // Reentrancy guard: prevent multiple simultaneous connection attempts
         if (this.isConnecting) {
-            console.log('[App] Connection attempt already in progress, ignoring click');
+            this.logger.debug('Connection attempt already in progress, ignoring click');
             return;
         }
 
         if (!this.connection.isConnected) {
-            console.log('[App] Not connected, initiating connection...');
+            this.logger.info('Not connected, initiating connection...');
             this.isConnecting = true;
             btn.disabled = true;
             btn.textContent = 'Connecting...';
@@ -895,7 +898,7 @@ class App {
                     this.connectionCheckTimeout = null;
                     this.isConnecting = false;
 
-                    console.log('[App] Connected, creating session...');
+                    this.logger.info('Connected, creating session...');
                     this.connection.createSession();
                     btn.disabled = false;
                     btn.innerHTML = '<span class="btn-icon">+</span> New Project';
@@ -911,13 +914,13 @@ class App {
                 this.isConnecting = false;
 
                 if (!this.connection.isConnected) {
-                    console.error('[App] Connection timeout');
+                    this.logger.error('Connection timeout');
                     btn.disabled = false;
                     btn.innerHTML = '<span class="btn-icon">+</span> New Project';
                 }
             }, 10000);
         } else {
-            console.log('[App] Already connected, creating session...');
+            this.logger.info('Already connected, creating session...');
             this.connection.createSession();
         }
     }
@@ -928,7 +931,7 @@ class App {
         const btn = document.getElementById('spawnAgentBtn');
 
         if (!roleInput || !workspaceInput) {
-            console.error('[App] Agent spawn inputs not found');
+            this.logger.error('Agent spawn inputs not found');
             return;
         }
 
@@ -944,10 +947,10 @@ class App {
         btn.textContent = 'Spawning...';
 
         if (this.connection.spawnAgent(role, workspace)) {
-            console.log('[App] Agent spawn initiated');
+            this.logger.info('Agent spawn initiated');
             // Button will be re-enabled when agent:ready is received
         } else {
-            console.error('[App] Failed to spawn agent');
+            this.logger.error('Failed to spawn agent');
             btn.disabled = false;
             btn.innerHTML = '<span class="btn-icon">🤖</span> Spawn Agent';
         }
@@ -958,7 +961,7 @@ class App {
         const btn = document.getElementById('sendMessageBtn');
 
         if (!messageInput) {
-            console.error('[App] Message input not found');
+            this.logger.error('Message input not found');
             return;
         }
 
@@ -969,7 +972,7 @@ class App {
 
         const role = this.connection.currentAgentRole;
         if (!role) {
-            console.error('[App] No active agent');
+            this.logger.error('No active agent');
             return;
         }
 
@@ -977,7 +980,7 @@ class App {
         messageInput.disabled = true;
 
         if (this.connection.sendAgentMessage(role, content)) {
-            console.log('[App] Message sent');
+            this.logger.debug('Message sent');
             messageInput.value = '';
             // Re-enable after a short delay
             setTimeout(() => {
@@ -986,7 +989,7 @@ class App {
                 messageInput.focus();
             }, 500);
         } else {
-            console.error('[App] Failed to send message');
+            this.logger.error('Failed to send message');
             btn.disabled = false;
             messageInput.disabled = false;
         }
