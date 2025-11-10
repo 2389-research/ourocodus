@@ -285,7 +285,7 @@ func (s *Server) handleAgentSpawn(ctx context.Context, conn WebSocketConn, rawMe
 		errorCode, errorMessage, recoverable := s.mapError(err)
 
 		// Override generic message for spawn-specific context
-		if errors.Is(err, container.ErrContainerSetupFailed) && strings.Contains(err.Error(), "No such image") {
+		if errors.Is(err, container.ErrContainerSetupFailed) && strings.Contains(strings.ToLower(err.Error()), "no such image") {
 			errorCode = "AGENT_SPAWN_FAILED"
 			errorMessage = "Failed to spawn agent: Docker image 'ourocodus/agent:latest' not found. Build it with: make agent-image"
 		} else if errorCode == "INTERNAL_ERROR" {
