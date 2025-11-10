@@ -26,6 +26,7 @@ self.addEventListener('install', (event) => {
       })
       .catch(err => {
         console.error('[SW] Failed to precache assets:', err);
+        throw err; // Rethrow to fail install so previous worker stays active
       })
   );
 

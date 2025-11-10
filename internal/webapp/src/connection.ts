@@ -508,9 +508,6 @@ export class RelayConnection {
             content: content
         };
 
-        // Display user message immediately
-        this.displayMessage('user', content);
-
         // Update agent cards to reflect new message count
         this.renderAgentCards();
 
@@ -555,32 +552,48 @@ export class RelayConnection {
         this.agents.forEach((agent, role) => {
             const card = document.createElement('div');
             card.className = 'agent-card-item';
-            card.innerHTML = `
-                <div class="agent-card-info">
-                    <span class="agent-card-role">Agent: ${role}</span>
-                    <span class="agent-card-status ${agent.status}">${agent.status}</span>
-                    <span>Messages: ${agent.messages.length}</span>
-                </div>
-                <div class="agent-card-actions">
-                    <button data-role="${role}" title="Terminate agent">&times;</button>
-                </div>
-            `;
+
+            // Create info section using DOM APIs to prevent XSS
+            const info = document.createElement('div');
+            info.className = 'agent-card-info';
+
+            const roleEl = document.createElement('span');
+            roleEl.className = 'agent-card-role';
+            roleEl.textContent = `Agent: ${role}`;
+
+            const statusEl = document.createElement('span');
+            statusEl.className = `agent-card-status ${agent.status}`;
+            statusEl.textContent = agent.status;
+
+            const countEl = document.createElement('span');
+            countEl.textContent = `Messages: ${agent.messages.length}`;
+
+            info.append(roleEl, statusEl, countEl);
+
+            // Create actions section
+            const actions = document.createElement('div');
+            actions.className = 'agent-card-actions';
+
+            const terminateBtn = document.createElement('button');
+            terminateBtn.setAttribute('data-role', role);
+            terminateBtn.setAttribute('title', 'Terminate agent');
+            terminateBtn.textContent = '×';
+
+            actions.appendChild(terminateBtn);
+            card.append(info, actions);
 
             // Click card to show chat (but not the button)
             card.addEventListener('click', (e) => {
-                if (!e.target.closest('button')) {
+                if (!(e.target instanceof HTMLElement && e.target.closest('button'))) {
                     this.showAgentChat(role);
                 }
             });
 
             // Click terminate button
-            const terminateBtn = card.querySelector('button');
-            if (terminateBtn) {
-                terminateBtn.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    this.terminateAgentCard(role);
-                });
-            }
+            terminateBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.terminateAgentCard(role);
+            });
 
             container.appendChild(card);
         });
