@@ -52,12 +52,12 @@ func main() {
 	if updated != html {
 		// Create backup
 		backupPath := htmlPath + ".bak"
-		if err := os.WriteFile(backupPath, []byte(html), 0600); err != nil {
+		if err := os.WriteFile(backupPath, []byte(html), 0o600); err != nil {
 			fmt.Fprintf(os.Stderr, "Error creating backup: %v\n", err)
 			os.Exit(1)
 		}
 
-		if err := os.WriteFile(htmlPath, []byte(updated), 0600); err != nil {
+		if err := os.WriteFile(htmlPath, []byte(updated), 0o600); err != nil {
 			fmt.Fprintf(os.Stderr, "Error writing HTML: %v\n", err)
 			os.Exit(1)
 		}

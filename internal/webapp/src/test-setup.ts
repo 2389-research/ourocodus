@@ -13,7 +13,7 @@ class MockCloseEvent extends Event {
 }
 
 // Install CloseEvent mock globally
-(global as any).CloseEvent = MockCloseEvent;
+(globalThis as any).CloseEvent = MockCloseEvent;
 
 // Mock WebSocket
 class MockWebSocket {
@@ -85,18 +85,18 @@ const localStorageMock = {
   length: 0,
 };
 
-(global as any).localStorage = localStorageMock;
+(globalThis as any).localStorage = localStorageMock;
 
 // Install WebSocket mock globally
-(global as any).WebSocket = MockWebSocket;
+(globalThis as any).WebSocket = MockWebSocket;
 
 // Mock navigator.serviceWorker (if it doesn't exist)
-if (typeof (global as any).navigator === 'undefined') {
-  (global as any).navigator = {
+if (typeof (globalThis as any).navigator === 'undefined') {
+  (globalThis as any).navigator = {
     serviceWorker: undefined,
   };
-} else if (!(global as any).navigator.serviceWorker) {
-  Object.defineProperty((global as any).navigator, 'serviceWorker', {
+} else if (!(globalThis as any).navigator.serviceWorker) {
+  Object.defineProperty((globalThis as any).navigator, 'serviceWorker', {
     value: undefined,
     writable: true,
     configurable: true,
@@ -104,6 +104,6 @@ if (typeof (global as any).navigator === 'undefined') {
 }
 
 // Mock window.app
-if (typeof (global as any).window === 'undefined') {
-  (global as any).window = global;
+if (typeof (globalThis as any).window === 'undefined') {
+  (globalThis as any).window = globalThis;
 }

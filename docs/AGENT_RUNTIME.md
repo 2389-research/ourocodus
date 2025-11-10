@@ -417,7 +417,8 @@ docker login
 ```bash
 # Build image locally if not in registry
 cd /path/to/ourocodus
-docker build -t ourocodus/agent:latest -f containers/agent/Dockerfile .
+make agent-image
+# (equivalent to: docker build -t ourocodus/agent:latest -f Dockerfile.agent .)
 ```
 
 **Firewall/Proxy Issues:**

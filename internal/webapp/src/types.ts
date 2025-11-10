@@ -109,19 +109,15 @@ export interface WebSocketConn {
     readyState: number;
 }
 
+type AppType = import('./ui/state').App;
+
 // Global window declarations
 declare global {
     interface Window {
         Logger: typeof Logger;
-        app?: App;
+        app?: AppType;
     }
 }
 
 // Re-export for convenience
 export type { Logger };
-
-// Placeholder for App class (will be defined in app.ts)
-export interface App {
-    connection: any; // Will be RelayConnection
-    init(): void;
-}

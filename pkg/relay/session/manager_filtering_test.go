@@ -16,7 +16,9 @@ func TestList(t *testing.T) {
 	session1, _ := manager.CreateUserSession(ctx, &mockWebSocket{})
 
 	// Terminate one session
-	manager.TerminateUserSession(ctx, session1.GetID())
+	if _, err := manager.TerminateUserSession(ctx, session1.GetID()); err != nil {
+		t.Fatalf("Failed to terminate session: %v", err)
+	}
 
 	// Create another active session
 	idGen := &mockIDGenerator{nextID: "session-2"}

@@ -20,6 +20,7 @@ export ANTHROPIC_API_KEY=sk-...
 
 # Build and run
 make build
+make agent-image   # Build local Docker image for relay-managed agents
 make run
 
 # Open WebSocket endpoint
@@ -160,6 +161,10 @@ make stop
 # Clean build artifacts
 make clean
 # → Removes: bin/ directory
+
+# Build agent Docker image (required before spawning agents)
+make agent-image
+# → Runs: docker build -t ourocodus/agent:latest -f Dockerfile.agent .
 ```text
 
 ### Project Structure

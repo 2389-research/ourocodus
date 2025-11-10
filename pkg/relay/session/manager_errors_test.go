@@ -59,7 +59,7 @@ func TestSpawnAgent_TerminatedSession(t *testing.T) {
 		t.Fatalf("Failed to create session: %v", err)
 	}
 	sessionID := session.GetID()
-	if err := manager.TerminateUserSession(ctx, sessionID); err != nil {
+	if _, err := manager.TerminateUserSession(ctx, sessionID); err != nil {
 		t.Fatalf("Failed to terminate session: %v", err)
 	}
 

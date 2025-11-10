@@ -85,7 +85,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := os.WriteFile(manifestPath, manifestJSON, 0600); err != nil {
+	if err := os.WriteFile(manifestPath, manifestJSON, 0o600); err != nil {
 		fmt.Fprintf(os.Stderr, "Error writing manifest: %v\n", err)
 		os.Exit(1)
 	}

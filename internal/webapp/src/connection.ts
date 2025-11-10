@@ -5,6 +5,8 @@
 import { Logger } from './logger';
 import type { AgentState, SessionCreatedMessage, AgentReadyMessage, AgentResponseMessage, ErrorMessage } from './types';
 
+const SPAWN_BUTTON_DEFAULT = '<span class="btn-icon">🤖</span> Spawn Agent';
+
 export class RelayConnection {
     private logger: Logger;
     public ws: WebSocket | null;
@@ -19,6 +21,7 @@ export class RelayConnection {
     public currentChatRole: string | null;
     public currentAgentRole: string | null; // Currently selected agent for single-agent card view
     private wsUrl: string;
+    private pendingSpawnRole: string | null;
 
     // Map-based state for multiple agents: role → { role, status, messages, workspace }
     public agents: Map<string, AgentState>;
@@ -36,6 +39,7 @@ export class RelayConnection {
         this.reconnectTimeout = null;
         this.currentChatRole = null;
         this.currentAgentRole = null;
+        this.pendingSpawnRole = null;
 
         // Map-based state for multiple agents
         this.agents = new Map<string, AgentState>();
@@ -103,6 +107,7 @@ export class RelayConnection {
                 wasClean: event.wasClean
             });
             this.isConnected = false;
+            this.resetSessionState();
             this.updateConnectionStatus('disconnected', 'Disconnected');
 
             if (this.shouldReconnect) {
@@ -197,6 +202,10 @@ export class RelayConnection {
         sessionIdEl.textContent = message.userSessionId;
         sessionStatusEl.textContent = 'Active';
 
+        // Enable controls that depend on an active session
+        this.setSessionControls(true);
+        this.updateCleanupBanner();
+
         this.logger.info('[UI UPDATE] Session UI updated successfully');
     }
 
@@ -230,6 +239,9 @@ export class RelayConnection {
 
         // Keep spawn section visible for multi-agent support
         this.logger.debug('Agent added to Map for agentId:', role);
+
+        this.pendingSpawnRole = null;
+        this.resetSpawnButton();
     }
 
     /**
@@ -288,14 +300,17 @@ export class RelayConnection {
     handleSessionEnded(message: any): void {
         this.logger.info('Session ended, all agents terminated:', message);
 
-        // Clear all agents
-        this.agents.clear();
+        const cleanupStatus = message.cleanupStatus || 'complete';
+        this.resetSessionState(cleanupStatus);
 
-        // Close chat if open
-        this.closeChat();
-
-        // Re-render agent cards (will show empty and hide terminate all button)
-        this.renderAgentCards();
+        if (cleanupStatus && cleanupStatus !== 'complete') {
+            const recoverable = cleanupStatus === 'partial';
+            this.showErrorNotification(
+                'SESSION_CLEANUP',
+                `Session cleanup reported as ${cleanupStatus}. Review relay logs before starting a new session.`,
+                recoverable
+            );
+        }
     }
 
     /**
@@ -344,6 +359,12 @@ export class RelayConnection {
 
         // Show error in a prominent way
         this.showErrorNotification(errorCode, errorMessage, recoverable);
+
+        if (errorCode === 'AGENT_SPAWN_FAILED' || (recoverable && this.pendingSpawnRole)) {
+            this.logger.info('Resetting spawn button after agent spawn error');
+            this.pendingSpawnRole = null;
+            this.resetSpawnButton();
+        }
     }
 
     /**
@@ -478,7 +499,13 @@ export class RelayConnection {
         };
 
         this.logger.info('Spawning agent:', message);
-        return this.sendMessage(message);
+        const sent = this.sendMessage(message);
+        if (sent) {
+            this.pendingSpawnRole = role;
+        } else {
+            this.pendingSpawnRole = null;
+        }
+        return sent;
     }
 
     /**
@@ -898,10 +925,114 @@ export class RelayConnection {
         }
 
         this.isConnected = false;
+        this.resetSessionState();
+        this.updateConnectionStatus('disconnected', 'Disconnected');
+    }
+
+    private resetSessionState(cleanupStatus?: string): void {
+        this.logger.info('[UI UPDATE] Resetting session state', {
+            cleanupStatus
+        });
+
+        this.agents.clear();
         this.userSessionId = null;
         this.currentAgentRole = null;
         this.currentChatRole = null;
-        this.agents.clear();
-        this.updateConnectionStatus('disconnected', 'Disconnected');
+        this.pendingSpawnRole = null;
+
+        this.closeChat();
+        this.renderAgentCards();
+        this.setSessionControls(false);
+
+        const sessionInfoCard = document.getElementById('sessionInfo');
+        if (sessionInfoCard) {
+            sessionInfoCard.style.display = 'none';
+        }
+
+        const welcomeCard = document.getElementById('welcomeCard');
+        if (welcomeCard) {
+            welcomeCard.style.display = 'block';
+        }
+
+        const sessionIdEl = document.getElementById('userSessionId');
+        if (sessionIdEl) {
+            sessionIdEl.textContent = '-';
+        }
+
+        const sessionStatusEl = document.getElementById('sessionStatus');
+        if (sessionStatusEl) {
+            sessionStatusEl.textContent = cleanupStatus ? `Ended (${cleanupStatus})` : 'No active session';
+        }
+
+        this.updateCleanupBanner(cleanupStatus);
+
+        const newProjectBtn = document.getElementById('newProjectBtn') as HTMLButtonElement | null;
+        if (newProjectBtn) {
+            newProjectBtn.disabled = false;
+            newProjectBtn.innerHTML = '<span class="btn-icon">+</span> New Project';
+        }
+    }
+
+    private updateCleanupBanner(cleanupStatus?: string): void {
+        const bannerId = 'cleanupStatusBanner';
+        let banner = document.getElementById(bannerId);
+
+        if (!cleanupStatus || cleanupStatus === 'complete') {
+            if (banner) {
+                banner.remove();
+            }
+            return;
+        }
+
+        if (!banner) {
+            banner = document.createElement('div');
+            banner.id = bannerId;
+            banner.className = 'cleanup-status-banner';
+            banner.style.cssText = 'margin-top:12px;padding:12px;border:1px solid #f6ad55;background:#fff7ed;border-radius:8px;font-size:0.9rem;';
+            const welcomeCard = document.getElementById('welcomeCard');
+            if (welcomeCard) {
+                welcomeCard.insertAdjacentElement('afterbegin', banner);
+            } else {
+                document.body.appendChild(banner);
+            }
+        }
+
+        banner.textContent = `Previous session cleanup reported as ${cleanupStatus}. Check relay logs before starting a new session.`;
+    }
+
+    private setSessionControls(enabled: boolean): void {
+        const endSessionBtn = document.getElementById('endSessionBtn') as HTMLButtonElement | null;
+        if (endSessionBtn) {
+            endSessionBtn.disabled = !enabled;
+            endSessionBtn.textContent = 'End Session';
+        }
+
+        const spawnAgentBtn = document.getElementById('spawnAgentBtn') as HTMLButtonElement | null;
+        if (spawnAgentBtn) {
+            if (!enabled) {
+                spawnAgentBtn.innerHTML = SPAWN_BUTTON_DEFAULT;
+            }
+            spawnAgentBtn.disabled = !enabled;
+        }
+
+        const terminateAgentBtn = document.getElementById('terminateAgentBtn') as HTMLButtonElement | null;
+        if (terminateAgentBtn) {
+            terminateAgentBtn.disabled = !enabled;
+        }
+
+        const sendMessageBtn = document.getElementById('sendMessageBtn') as HTMLButtonElement | null;
+        if (sendMessageBtn) {
+            sendMessageBtn.disabled = !enabled;
+        }
+    }
+
+    private resetSpawnButton(): void {
+        const spawnAgentBtn = document.getElementById('spawnAgentBtn') as HTMLButtonElement | null;
+        if (!spawnAgentBtn) {
+            return;
+        }
+
+        spawnAgentBtn.innerHTML = SPAWN_BUTTON_DEFAULT;
+        spawnAgentBtn.disabled = !this.userSessionId;
     }
 }

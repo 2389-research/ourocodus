@@ -1,4 +1,4 @@
-.PHONY: all build test smoke-relay smoke-session smoke-all test-e2e demo interactive run stop clean lint fmt check pre-commit nats-start nats-stop nats-logs nats-health assets assets-check tailwind-download
+.PHONY: all build test smoke-relay smoke-session smoke-all test-e2e demo interactive run stop clean lint fmt check pre-commit nats-start nats-stop nats-logs nats-health assets assets-check tailwind-download agent-image
 
 # Default target: build and test
 all: build test
@@ -109,6 +109,11 @@ build: assets
 	go build -o bin/echo-agent ./cmd/echo-agent
 	go build -o bin/event-logger ./cmd/event-logger
 	@echo "Build complete. Binaries in bin/"
+
+# Build the agent Docker image used by relay-managed spawns
+agent-image:
+	@echo "Building Docker image ourocodus/agent:latest..."
+	docker build -t ourocodus/agent:latest -f Dockerfile.agent .
 
 # Run unit tests
 test:

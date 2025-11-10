@@ -68,9 +68,13 @@ func TestTerminateUserSession_CleanerError(t *testing.T) {
 	}
 	sessionID := session.GetID()
 
-	err = manager.TerminateUserSession(ctx, sessionID)
+	summary, err := manager.TerminateUserSession(ctx, sessionID)
 	if err != nil {
 		t.Fatalf("Expected no error (cleaner error logged), got: %v", err)
+	}
+
+	if summary.CleanupStatus != CleanupStatusPartial {
+		t.Fatalf("Expected cleanup status partial, got %s", summary.CleanupStatus)
 	}
 
 	// Session should still be removed
