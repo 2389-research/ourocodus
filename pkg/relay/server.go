@@ -302,7 +302,7 @@ func (s *Server) handleAgentSpawn(ctx context.Context, conn WebSocketConn, rawMe
 		return !recoverable // Close if non-recoverable
 	}
 
-	s.logger.Printf("Agent spawned: userSession=%s agentID=%s", msg.UserSessionID, msg.AgentID)
+	s.logger.Printf("[RELAY] Agent spawned: userSession=%s agentID=%s", msg.UserSessionID, msg.AgentID)
 
 	// Send agent:ready response
 	response := NewAgentReadyMessage(msg.UserSessionID, msg.AgentID)
@@ -346,7 +346,7 @@ func (s *Server) handleAgentMessage(ctx context.Context, conn WebSocketConn, raw
 
 	_ = ctx // TODO: Pass context to ACP client when timeout/cancellation support is implemented in ACPClient.SendMessage
 
-	s.logger.Printf("Routing message to agent: userSession=%s agentID=%s",
+	s.logger.Printf("[RELAY] Routing message to agent: userSession=%s agentID=%s",
 		msg.UserSessionID, msg.AgentID)
 
 	// Get agent from user session
@@ -422,7 +422,7 @@ func (s *Server) handleAgentMessage(ctx context.Context, conn WebSocketConn, raw
 		return false // Keep connection open for retry
 	}
 
-	s.logger.Printf("Agent response received: userSession=%s agentID=%s",
+	s.logger.Printf("[RELAY] Agent response received: userSession=%s agentID=%s",
 		msg.UserSessionID, msg.AgentID)
 
 	// Type assert response to *acp.AgentMessage and extract content
@@ -477,12 +477,12 @@ func (s *Server) handleSessionEnd(ctx context.Context, conn WebSocketConn, rawMe
 		return s.handleValidationError(conn, validationErr)
 	}
 
-	s.logger.Printf("Terminating user session: %s", msg.UserSessionID)
+	s.logger.Printf("[RELAY] Terminating user session: %s", msg.UserSessionID)
 
 	// Optional: capture session to log agent count prior to termination
 	userSession := s.sessionManager.Get(msg.UserSessionID)
 	if userSession != nil {
-		s.logger.Printf("Session has %d agents before termination", len(userSession.ListAgents()))
+		s.logger.Printf("[RELAY] Session has %d agents before termination", len(userSession.ListAgents()))
 	}
 
 	// Terminate session (this will terminate all agents)
@@ -499,7 +499,7 @@ func (s *Server) handleSessionEnd(ctx context.Context, conn WebSocketConn, rawMe
 		return !recoverable
 	}
 
-	s.logger.Printf("User session terminated: %s, agents terminated: %d (failures=%d, cleanup=%s)",
+	s.logger.Printf("[RELAY] User session terminated: %s, agents terminated: %d (failures=%d, cleanup=%s)",
 		msg.UserSessionID, summary.AgentsTerminated, summary.AgentFailures, summary.CleanupStatus)
 
 	// Send session:ended response
@@ -526,7 +526,7 @@ func (s *Server) handleAgentTerminate(ctx context.Context, conn WebSocketConn, r
 		return s.handleValidationError(conn, validationErr)
 	}
 
-	s.logger.Printf("Terminating agent: userSession=%s agentID=%s", msg.UserSessionID, msg.AgentID)
+	s.logger.Printf("[RELAY] Terminating agent: userSession=%s agentID=%s", msg.UserSessionID, msg.AgentID)
 
 	// Terminate the agent
 	err = s.sessionManager.TerminateAgent(ctx, msg.UserSessionID, msg.AgentID)
@@ -542,7 +542,7 @@ func (s *Server) handleAgentTerminate(ctx context.Context, conn WebSocketConn, r
 		return !recoverable
 	}
 
-	s.logger.Printf("Agent terminated: userSession=%s agentID=%s", msg.UserSessionID, msg.AgentID)
+	s.logger.Printf("[RELAY] Agent terminated: userSession=%s agentID=%s", msg.UserSessionID, msg.AgentID)
 
 	// Send agent:terminated response
 	// Workspace is always cleaned during termination, so workspaceCleaned is true
@@ -569,7 +569,7 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	s.logger.Printf("WebSocket connection established from %s", r.RemoteAddr)
+	s.logger.Printf("[SERVER] WebSocket connection established from %s", r.RemoteAddr)
 
 	// Send handshake
 	if err := s.sendHandshake(conn); err != nil {

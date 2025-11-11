@@ -105,9 +105,9 @@ func NewSessionManager(logger Logger, clock Clock, idGen IDGenerator, natsClient
 		publisherClock := clock // relay.Clock returns string, which is what NATSEventPublisher needs
 
 		publisher = NewNATSEventPublisher(natsClient, publisherIDGen, publisherClock, publisherLogger)
-		logger.Printf("NATS event publisher initialized")
+		logger.Printf("[NATS] Event publisher initialized")
 	} else {
-		logger.Printf("NATS event publishing disabled (no NATS_URL configured)")
+		logger.Printf("[NATS] Event publishing disabled (no NATS_URL configured)")
 	}
 
 	return session.NewManager(store, sessionIDGen, sessionClock, cleaner, sessionLogger, clientFactory, baseWorkspaceDir, publisher, launcherFactory), nil

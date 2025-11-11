@@ -96,7 +96,7 @@ func (l *ContainerAttachProcessLauncher) Start(ctx context.Context, cfg acp.Proc
 		_, err := stdcopy.StdCopy(stdoutWriter, stderrWriter, attachResp.Reader)
 		stdoutWriter.CloseWithError(err)
 		if closer, ok := stderrWriter.(io.Closer); ok {
-			closer.Close()
+			_ = closer.Close()
 		}
 	}()
 
@@ -123,7 +123,7 @@ func (t *containerAttachTransport) Write(p []byte) (int, error) {
 func (t *containerAttachTransport) Close() error {
 	// Close stdout pipe
 	if t.stdout != nil {
-		t.stdout.Close()
+		_ = t.stdout.Close()
 	}
 	// Close hijacked connection
 	t.hijackedResp.Close()

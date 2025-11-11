@@ -74,6 +74,10 @@ func (s *stubExecService) ExecInContainer(ctx context.Context, containerID strin
 	return s.stream, s.err
 }
 
+func (s *stubExecService) GetDockerClient() containersession.DockerClient {
+	return nil
+}
+
 type nopWriteCloser struct {
 	io.Writer
 }

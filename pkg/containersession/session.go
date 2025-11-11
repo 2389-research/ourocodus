@@ -21,16 +21,16 @@ const (
 
 // ContainerSession represents a single container session with lifecycle management
 type ContainerSession struct {
-	id                 string
-	containerID        string
-	workspacePath      string
-	labels             map[string]string
-	state              SessionState
-	createdAt          time.Time
-	startedAt          *time.Time
-	stoppedAt          *time.Time
-	errorMsg           string
-	skipOutputLogging  bool // Skip attaching for output logging
+	id                string
+	containerID       string
+	workspacePath     string
+	labels            map[string]string
+	state             SessionState
+	createdAt         time.Time
+	startedAt         *time.Time
+	stoppedAt         *time.Time
+	errorMsg          string
+	skipOutputLogging bool // Skip attaching for output logging
 
 	// Synchronization
 	mu sync.RWMutex

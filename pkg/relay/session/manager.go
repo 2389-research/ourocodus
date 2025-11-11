@@ -141,7 +141,7 @@ func (m *Manager) CreateUserSession(ctx context.Context, ws WebSocketConn) (*Use
 		}
 	}
 
-	m.logger.Printf("User session created: id=%s state=ACTIVE agents=0", userSessionID)
+	m.logger.Printf("[SESSION] User session created: id=%s state=ACTIVE agents=0", userSessionID)
 	return userSession, nil
 }
 
@@ -377,7 +377,7 @@ func (m *Manager) SpawnAgent(ctx context.Context, userSessionID, agentID, worksp
 		}
 	}
 
-	m.logger.Printf("Agent spawned: session=%s agentID=%s state=ACTIVE", userSessionID, agentID)
+	m.logger.Printf("[SESSION] Agent spawned: session=%s agentID=%s state=ACTIVE", userSessionID, agentID)
 	return nil
 }
 
@@ -433,7 +433,7 @@ func (m *Manager) TerminateAgent(ctx context.Context, userSessionID, agentID str
 		return nil
 	}
 
-	m.logger.Printf("Terminating agent: session=%s agentID=%s", userSessionID, agentID)
+	m.logger.Printf("[SESSION] Terminating agent: session=%s agentID=%s", userSessionID, agentID)
 
 	// NEW: Stop container if launcher exists
 	key := launcherKey(userSessionID, agentID)
@@ -485,7 +485,7 @@ func (m *Manager) TerminateAgent(ctx context.Context, userSessionID, agentID str
 		}
 	}
 
-	m.logger.Printf("Agent terminated: session=%s agentID=%s", userSessionID, agentID)
+	m.logger.Printf("[SESSION] Agent terminated: session=%s agentID=%s", userSessionID, agentID)
 	return nil
 }
 
@@ -507,14 +507,14 @@ func (m *Manager) TerminateUserSession(ctx context.Context, userSessionID string
 	userSession.setState(StateTerminated)
 	userSession.mu.Unlock()
 
-	m.logger.Printf("Terminating user session: id=%s", userSessionID)
+	m.logger.Printf("[SESSION] Terminating user session: id=%s", userSessionID)
 
 	// Get all agents
 	agents := userSession.ListAgents()
 
 	// Terminate all agents in parallel with timeout
 	if len(agents) > 0 {
-		m.logger.Printf("Terminating %d agents in parallel: session=%s", len(agents), userSessionID)
+		m.logger.Printf("[SESSION] Terminating %d agents in parallel: session=%s", len(agents), userSessionID)
 
 		var wg sync.WaitGroup
 		agentTimeout := DefaultAgentTerminationTimeout
@@ -598,9 +598,9 @@ func (m *Manager) TerminateUserSession(ctx context.Context, userSessionID string
 
 		select {
 		case <-done:
-			m.logger.Printf("All agents terminated: session=%s", userSessionID)
+			m.logger.Printf("[SESSION] All agents terminated: session=%s", userSessionID)
 		case <-ctx.Done():
-			m.logger.Printf("Session termination timeout: session=%s", userSessionID)
+			m.logger.Printf("[SESSION] Session termination timeout: session=%s", userSessionID)
 			summary.CleanupStatus = CleanupStatusPartial
 			summary.addError("session termination timeout before all agents completed")
 		}
@@ -639,7 +639,7 @@ func (m *Manager) TerminateUserSession(ctx context.Context, userSessionID string
 		}
 	}
 
-	m.logger.Printf("User session terminated: id=%s", userSessionID)
+	m.logger.Printf("[SESSION] User session terminated: id=%s", userSessionID)
 	return summary, nil
 }
 

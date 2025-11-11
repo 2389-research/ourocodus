@@ -327,9 +327,9 @@ func TestCreateContainerLauncher_WithoutLogger(t *testing.T) {
 	if launcher == nil {
 		t.Fatal("Expected launcher, got nil")
 	}
-	// Verify it's a ContainerExecProcessLauncher
-	if _, ok := launcher.(*ContainerExecProcessLauncher); !ok {
-		t.Error("Expected ContainerExecProcessLauncher type")
+	// Verify it's a ContainerAttachProcessLauncher
+	if _, ok := launcher.(*ContainerAttachProcessLauncher); !ok {
+		t.Error("Expected ContainerAttachProcessLauncher type")
 	}
 }
 
@@ -358,7 +358,7 @@ func TestCreateContainerLauncher_WithLogger(t *testing.T) {
 	if len(logger.messages) == 0 {
 		t.Fatal("Expected logger to be called")
 	}
-	expectedMsg := "[ACP] Using container exec launcher for session=session-1 agent=agent-1 container=container-123"
+	expectedMsg := "[ACP] Using container attach launcher for session=session-1 agent=agent-1 container=container-123"
 	if logger.messages[0] != expectedMsg {
 		t.Errorf("Expected log message: %q, got: %q", expectedMsg, logger.messages[0])
 	}
@@ -439,8 +439,8 @@ func TestSelectLauncher_ContainerMode_Success(t *testing.T) {
 	if launcher == nil {
 		t.Fatal("Expected launcher, got nil")
 	}
-	if _, ok := launcher.(*ContainerExecProcessLauncher); !ok {
-		t.Error("Expected ContainerExecProcessLauncher type")
+	if _, ok := launcher.(*ContainerAttachProcessLauncher); !ok {
+		t.Error("Expected ContainerAttachProcessLauncher type")
 	}
 }
 
@@ -673,4 +673,8 @@ type mockContainerExecService struct{}
 
 func (m *mockContainerExecService) ExecInContainer(ctx context.Context, containerID string, cfg containersession.ExecConfig) (*containersession.ExecAttachment, error) {
 	return nil, nil
+}
+
+func (m *mockContainerExecService) GetDockerClient() containersession.DockerClient {
+	return nil
 }

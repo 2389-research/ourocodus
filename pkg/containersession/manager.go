@@ -153,7 +153,7 @@ func (m *Manager) CreateContainerSession(ctx context.Context, imageName string, 
 	}
 
 	session.SetContainerID(resp.ID)
-	m.logger.Printf("Container session created: id=%s container=%s state=PENDING", sessionID, resp.ID)
+	m.logger.Printf("[CONTAINER] Session created: id=%s container=%s state=PENDING", sessionID, resp.ID)
 
 	return session, nil
 }
@@ -301,7 +301,7 @@ func (m *Manager) CreateContainerSessionWithConfig(ctx context.Context, config C
 	}
 
 	session.SetContainerID(resp.ID)
-	m.logger.Printf("Container session created: id=%s container=%s state=PENDING mounts=%d",
+	m.logger.Printf("[CONTAINER] Session created: id=%s container=%s state=PENDING mounts=%d",
 		sessionID, resp.ID, len(mounts))
 
 	return session, nil
@@ -646,7 +646,7 @@ func (m *Manager) StartContainerSession(ctx context.Context, sessionID string) e
 	}
 
 	session.MarkStarted(m.clock.Now())
-	m.logger.Printf("Container session started: id=%s container=%s state=RUNNING", sessionID, containerID)
+	m.logger.Printf("[CONTAINER] Session started: id=%s container=%s state=RUNNING", sessionID, containerID)
 
 	return nil
 }
@@ -717,7 +717,7 @@ func (m *Manager) StopContainerSession(ctx context.Context, sessionID string) er
 	}
 
 	session.MarkStopped(m.clock.Now())
-	m.logger.Printf("Container session stopped: id=%s container=%s state=STOPPED", sessionID, containerID)
+	m.logger.Printf("[CONTAINER] Session stopped: id=%s container=%s state=STOPPED", sessionID, containerID)
 
 	return nil
 }
