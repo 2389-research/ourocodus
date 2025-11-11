@@ -84,7 +84,7 @@ func TestContainerExecProcessLauncher_SmokeTest(t *testing.T) {
 	// Create test workspace
 	workspaceDir := t.TempDir()
 	testFile := filepath.Join(workspaceDir, "test.txt")
-	require.NoError(t, os.WriteFile(testFile, []byte("hello from host\n"), 0644))
+	require.NoError(t, os.WriteFile(testFile, []byte("hello from host\n"), 0o644))
 
 	// Create container session manager
 	containerManager := containersession.NewManager(
@@ -214,7 +214,7 @@ func TestContainerExecProcessLauncher_WithEchoAgent(t *testing.T) {
 	// Copy echo-agent to workspace
 	src, err := os.ReadFile(echoAgentPath)
 	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(containerEchoAgent, src, 0755))
+	require.NoError(t, os.WriteFile(containerEchoAgent, src, 0o755))
 
 	// Create container session manager
 	containerManager := containersession.NewManager(

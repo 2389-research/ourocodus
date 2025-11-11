@@ -110,7 +110,7 @@ func (m *Manager) ExecInContainer(ctx context.Context, containerID string, cfg E
 	closeFn := func() error {
 		// Cancel context to signal goroutine cleanup
 		copyCancel()
-		
+
 		// Close resources in correct order
 		// Note: attachResp.Reader is a *bufio.Reader without Close method
 		// The underlying connection is closed by attachResp.Close()

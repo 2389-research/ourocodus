@@ -39,8 +39,7 @@ func (l *ContainerExecProcessLauncher) WithWorkspacePath(path string) *Container
 	return l
 }
 
-// Start implements acp.ProcessLauncher.
-// rewriteWorkspaceArg rewrites --workspace arguments from host paths to container paths.
+// rewriteWorkspaceArg rewrites --workspace arguments to use the container mount path.
 // This is critical for container mode: ACP receives host workspace paths (e.g. /Users/dev/workspaces/session-123)
 // but these paths don't exist inside the container where the workspace is mounted at containerPath (e.g. /workspace).
 //
@@ -49,7 +48,7 @@ func (l *ContainerExecProcessLauncher) WithWorkspacePath(path string) *Container
 //   - "--workspace=/host/path" → "--workspace=/workspace"
 //
 // Args without --workspace are returned unchanged.
-func rewriteWorkspaceArg(args []string, hostPath, containerPath string) []string {
+func rewriteWorkspaceArg(args []string, containerPath string) []string {
 	if len(args) == 0 {
 		return args
 	}
@@ -58,26 +57,26 @@ func rewriteWorkspaceArg(args []string, hostPath, containerPath string) []string
 	i := 0
 	for i < len(args) {
 		arg := args[i]
-		
+
 		// Handle "--workspace=/path" format
 		if strings.HasPrefix(arg, "--workspace=") {
 			result = append(result, "--workspace="+containerPath)
 			i++
 			continue
 		}
-		
+
 		// Handle "--workspace /path" format (two separate args)
 		if arg == "--workspace" && i+1 < len(args) {
 			result = append(result, "--workspace", containerPath)
 			i += 2 // Skip both --workspace and the path
 			continue
 		}
-		
+
 		// Pass through all other args unchanged
 		result = append(result, arg)
 		i++
 	}
-	
+
 	return result
 }
 
@@ -106,7 +105,7 @@ func (l *ContainerExecProcessLauncher) Start(ctx context.Context, cfg acp.Proces
 	// CRITICAL: Rewrite workspace arguments from host paths to container paths
 	// ACP receives host workspace path (e.g. /Users/dev/workspaces/session-123)
 	// but inside the container the workspace is mounted at a different location (e.g. /workspace)
-	rewrittenArgs := rewriteWorkspaceArg(cfg.CommandArgs, cfg.Workspace, workspacePath)
+	rewrittenArgs := rewriteWorkspaceArg(cfg.CommandArgs, workspacePath)
 
 	command := buildExecCommand(cfg.CommandPath, rewrittenArgs)
 	env := mergeEnvMaps(cfg.Env, map[string]string{
