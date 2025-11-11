@@ -235,6 +235,7 @@ func (m *Manager) CreateContainerSessionWithConfig(ctx context.Context, config C
 
 	// Create session in PENDING state
 	session := NewContainerSession(sessionID, workspacePath, labels, now)
+	session.skipOutputLogging = config.SkipOutputLogging
 
 	// Store session (with TOCTOU prevention)
 	m.mu.Lock()
@@ -626,20 +627,22 @@ func (m *Manager) StartContainerSession(ctx context.Context, sessionID string) e
 		return fmt.Errorf("failed to start container: %w", err)
 	}
 
-	// Attach to container I/O
-	attachResp, err := m.dockerClient.ContainerAttach(ctx, containerID, container.AttachOptions{
-		Stream: true,
-		Stdin:  false,
-		Stdout: true,
-		Stderr: true,
-		Logs:   true,
-	})
-	if err != nil {
-		m.logger.Printf("Container attach failed: session=%s container=%s error=%v", sessionID, containerID, err)
-		// Continue even if attach fails - container is still running
-	} else {
-		// Start goroutines to demux stdout/stderr
-		go m.handleContainerOutput(sessionID, containerID, attachResp.Reader)
+	// Attach to container I/O for logging (unless external attachment is used)
+	if !session.skipOutputLogging {
+		attachResp, err := m.dockerClient.ContainerAttach(ctx, containerID, container.AttachOptions{
+			Stream: true,
+			Stdin:  false,
+			Stdout: true,
+			Stderr: true,
+			Logs:   true,
+		})
+		if err != nil {
+			m.logger.Printf("Container attach failed: session=%s container=%s error=%v", sessionID, containerID, err)
+			// Continue even if attach fails - container is still running
+		} else {
+			// Start goroutines to demux stdout/stderr
+			go m.handleContainerOutput(sessionID, containerID, attachResp.Reader)
+		}
 	}
 
 	session.MarkStarted(m.clock.Now())

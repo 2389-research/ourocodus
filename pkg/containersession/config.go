@@ -32,4 +32,9 @@ type CreateConfig struct {
 
 	// Labels are additional labels to add to the container beyond the default session labels (optional)
 	Labels map[string]string
+
+	// SkipOutputLogging skips attaching to stdout/stderr for logging (optional, default false)
+	// Set to true when using external stdio attachment (e.g., ACP container attach mode)
+	// to avoid competing for the same streams.
+	SkipOutputLogging bool
 }
