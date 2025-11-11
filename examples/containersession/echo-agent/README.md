@@ -184,9 +184,9 @@ This pattern is useful for:
 
 ## Next Steps
 
-- See `examples/containersession/basic/` for simpler lifecycle example
-- See `examples/containersession/multi/` for concurrent sessions
 - See `pkg/containersession/manager.go` for full I/O implementation details
+- See `docs/CONTAINERIZED_ACP.md` for how this integrates with the relay system
+- See `cmd/echo-agent/main.go` for the production ACP JSON-RPC implementation
 
 ## Platform Support
 
