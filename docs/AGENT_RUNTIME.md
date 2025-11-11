@@ -194,8 +194,23 @@ The following environment variables control agent runtime behavior:
 | Variable | Required | Purpose | Example |
 |----------|----------|---------|---------|
 | `ANTHROPIC_API_KEY` | Yes | API key for Claude Code agents | `sk-ant-api03-...` |
+| `OUROCODUS_ACP_RUNTIME` | No | Where ACP processes run (default: `host`) | `host` or `container` |
 | `OUROCODUS_ACP_BINARY` | No | Custom ACP binary path (for testing) | `/path/to/echo-agent` |
 | `DOCKER_HOST` | No | Docker daemon connection | `unix:///var/run/docker.sock` |
+
+**Runtime Mode Details:**
+
+- **`OUROCODUS_ACP_RUNTIME=host`** (default): ACP runs as host process via `os/exec.Command`
+  - Standard mode for development and production
+  - Lower overhead, direct filesystem access
+  - No container required for ACP process itself
+
+- **`OUROCODUS_ACP_RUNTIME=container`**: ACP runs inside agent containers via `docker exec`
+  - Enhanced isolation mode
+  - ACP process runs inside existing agent container
+  - Requires container session manager and active container
+  - Workspace paths automatically rewritten for container mounts
+  - See [docs/ACP.md](../docs/ACP.md) for launcher selection logic
 
 **Setting Environment Variables:**
 

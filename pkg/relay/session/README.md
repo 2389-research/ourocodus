@@ -186,11 +186,63 @@ type Store interface {
 }
 
 type ClientFactory interface {
-    NewClient(workspace string) (ACPClient, error)
+    NewClient(ctx context.Context, runtime *AgentRuntimeContext) (ACPClient, error)
 }
 ```
 
 Future phases can swap implementations without changing callers.
+
+### 5. Runtime Context and Container Integration
+
+Each ACP client receives runtime context containing session/agent metadata and optional container information:
+
+```go
+type AgentRuntimeContext struct {
+    SessionID   string  // User session identifier
+    AgentID     string  // Agent role (e.g., "coder", "reviewer")
+    Workspace   string  // Absolute path to workspace on host
+    ContainerID string  // Docker container ID (optional, for container mode)
+}
+
+func (c *AgentRuntimeContext) HasContainer() bool {
+    return c != nil && c.ContainerID != ""
+}
+```
+
+**ACP Launcher Selection:**
+
+The `ACPClientFactory` automatically selects the appropriate launcher based on environment and runtime context:
+
+- **Host Mode** (default): `HostProcessLauncher` spawns ACP as host process via `os/exec`
+  - Selected when: `OUROCODUS_ACP_RUNTIME` unset or set to `"host"`
+  - Behavior: Direct process spawn, standard workspace access
+
+- **Container Mode**: `ContainerExecProcessLauncher` runs ACP inside agent containers via `docker exec`
+  - Selected when: `OUROCODUS_ACP_RUNTIME=container` AND runtime has container ID
+  - Behavior: Exec into existing container, workspace path rewriting for container mounts
+  - Requires: `ContainerExecService` (typically `containersession.Manager`)
+
+**Workspace Path Rewriting:**
+
+In container mode, workspace arguments are automatically rewritten:
+- Host path: `/Users/dev/workspaces/session-123`
+- Container path: `/workspace` (standard mount point)
+- Handled by: `rewriteWorkspaceArg()` in `container_exec_process_launcher.go`
+
+**Example Configuration:**
+
+```bash
+# Host mode (default)
+export ANTHROPIC_API_KEY=sk-...
+./relay
+
+# Container mode
+export ANTHROPIC_API_KEY=sk-...
+export OUROCODUS_ACP_RUNTIME=container
+./relay
+```
+
+See [../../../docs/ACP.md](../../../docs/ACP.md) for complete launcher selection documentation.
 
 ## Thread Safety
 
