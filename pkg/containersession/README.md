@@ -187,6 +187,94 @@ reattached, _ := manager2.AttachContainerSession(ctx, sessionID)
 // reattached is connected to the same running container
 ```
 
+### Container Exec Operations
+
+`ExecInContainer` runs commands inside existing containers with full stdio access. This is useful for:
+
+- Running ACP processes inside agent containers (`ContainerExecProcessLauncher`)
+- Executing diagnostic commands
+- Running build/test commands in isolated environments
+
+**Requirements:**
+- Container must exist and be running
+- Command array required (e.g., `[]string{"/bin/sh", "-c", "echo hello"}`)
+- Returns `*ExecAttachment` with stdin/stdout/stderr streams
+
+**Example:**
+
+```go
+// Execute command inside container
+execCfg := containersession.ExecConfig{
+    Command:    []string{"/workspace/echo-agent"},
+    Env:        map[string]string{"ANTHROPIC_API_KEY": apiKey},
+    WorkingDir: "/workspace",
+    User:       "", // Empty = container default user
+}
+
+attachment, err := manager.ExecInContainer(ctx, containerID, execCfg)
+if err != nil {
+    log.Fatal(err)
+}
+defer attachment.Close()
+
+// Read stdout
+buf := make([]byte, 1024)
+n, err := attachment.Stdout().Read(buf)
+
+// Write stdin
+_, err = attachment.Stdin().Write([]byte("hello\n"))
+
+// Read stderr
+errBuf := make([]byte, 1024)
+n, err = attachment.Stderr().Read(errBuf)
+```
+
+**ExecAttachment API:**
+
+```go
+type ExecAttachment struct {
+    ExecID string  // Docker exec instance ID
+}
+
+func (a *ExecAttachment) Stdin() io.WriteCloser   // Write to process stdin
+func (a *ExecAttachment) Stdout() io.ReadCloser   // Read from process stdout
+func (a *ExecAttachment) Stderr() io.ReadCloser   // Read from process stderr
+func (a *ExecAttachment) Close() error             // Close all streams and cleanup
+```
+
+**Resource Management:**
+
+- `Close()` must be called to cleanup resources (goroutines, connections)
+- Goroutine multiplexes Docker attach response into separate stdout/stderr
+- Context cancellation supported via `ctx` parameter
+- Thread-safe: multiple goroutines can read/write concurrently
+
+**Use Cases:**
+
+1. **ACP Container Mode:** Run ACP inside existing agent containers
+   ```go
+   // Relay spawns container, then execs ACP inside it
+   container, _ := manager.CreateContainerSession(ctx, "agent:latest", []string{"sleep", "infinity"})
+   manager.StartContainerSession(ctx, container.ID())
+
+   // Later: exec ACP inside running container
+   execCfg := containersession.ExecConfig{
+       Command: []string{"claude-code-acp", "--workspace", "/workspace"},
+       Env:     map[string]string{"ANTHROPIC_API_KEY": apiKey},
+   }
+   attachment, _ := manager.ExecInContainer(ctx, container.ContainerID(), execCfg)
+   ```
+
+2. **Diagnostic Commands:** Inspect container state
+   ```go
+   execCfg := containersession.ExecConfig{
+       Command: []string{"/bin/sh", "-c", "ps aux"},
+   }
+   attachment, _ := manager.ExecInContainer(ctx, containerID, execCfg)
+   output, _ := io.ReadAll(attachment.Stdout())
+   fmt.Printf("Processes:\n%s", output)
+   ```
+
 ### Label Conventions
 
 Containers are labeled with:
@@ -290,6 +378,43 @@ Returns all tracked sessions.
 #### `SetStopTimeout(seconds int)`
 
 Configures graceful shutdown timeout (default: 30 seconds).
+
+#### `ExecInContainer(ctx, containerID, cfg) (*ExecAttachment, error)`
+
+Executes a command inside an existing running container and returns stdio streams.
+
+**Parameters:**
+- `ctx`: Context for cancellation and timeouts
+- `containerID`: Docker container ID (not session ID)
+- `cfg`: ExecConfig with Command, Env, WorkingDir, User
+
+**Returns:**
+- `*ExecAttachment`: Stdio streams (stdin/stdout/stderr)
+- `error`: Non-nil if container not found, not running, or exec fails
+
+**ExecConfig Fields:**
+```go
+type ExecConfig struct {
+    Command    []string          // Required: command and args
+    Env        map[string]string // Optional: environment variables
+    WorkingDir string           // Optional: working directory
+    User       string           // Optional: user (default: container user)
+}
+```
+
+**Example:**
+```go
+cfg := containersession.ExecConfig{
+    Command:    []string{"claude-code-acp", "--workspace", "/workspace"},
+    Env:        map[string]string{"ANTHROPIC_API_KEY": "sk-..."},
+    WorkingDir: "/workspace",
+}
+attachment, err := manager.ExecInContainer(ctx, containerID, cfg)
+if err != nil {
+    log.Fatal(err)
+}
+defer attachment.Close()
+```
 
 ### ContainerSession
 

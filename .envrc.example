@@ -6,4 +6,56 @@ export GOPATH="${HOME}/go"
 export PATH="${GOPATH}/bin:${PATH}"
 
 # Project-specific environment variables can be added here
+
+# Anthropic API key (required for Claude Code integration)
 # export ANTHROPIC_API_KEY=your-key-here
+
+# Workspace Base Directory (optional, default: "./workspaces")
+# Base directory where session workspaces are created
+# Each session gets a subdirectory: ${WORKSPACE_BASE_DIR}/session-{session-id}
+# Security: Path is validated to prevent directory traversal attacks
+# export WORKSPACE_BASE_DIR=./workspaces
+
+# ACP Execution Mode (optional, default: "host")
+# Controls where claude-code-acp process runs
+# Values: "host" (default) | "container"
+#
+# Host mode (default):
+#   - ACP runs as a host process via os/exec
+#   - No Docker required
+#   - Workspace path is the host filesystem path
+#   - Example: export OUROCODUS_ACP_RUNTIME=host
+#
+# Container mode:
+#   - ACP runs inside agent containers via docker exec
+#   - Requires Docker and containerized agents
+#   - Workspace mounted at /workspace inside container
+#   - Requires container session manager to be wired
+#   - Example: export OUROCODUS_ACP_RUNTIME=container
+#
+# export OUROCODUS_ACP_RUNTIME=host
+
+# Custom ACP Binary Path (optional, for testing)
+# Override the default claude-code-acp binary location
+# Useful for testing with echo-agent or custom ACP implementations
+#
+# Examples:
+#   # Use echo-agent for testing
+#   export OUROCODUS_ACP_BINARY=./bin/echo-agent
+#
+#   # Use custom ACP build
+#   export OUROCODUS_ACP_BINARY=/path/to/custom-acp
+#
+# export OUROCODUS_ACP_BINARY=/path/to/echo-agent
+
+# Docker Environment (for container mode)
+# If using Colima instead of Docker Desktop, mise will detect it automatically
+# Colima socket: ~/.colima/default/docker.sock
+# Docker Desktop socket: /var/run/docker.sock (default)
+#
+# To explicitly set Docker host:
+# export DOCKER_HOST=unix://${HOME}/.colima/default/docker.sock
+
+# NATS Configuration (optional, for event publishing)
+# If not set, NATS event publishing is disabled
+# export NATS_URL=nats://localhost:4222

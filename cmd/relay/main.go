@@ -67,14 +67,14 @@ func main() {
 	ctx := context.Background()
 
 	// Initialize Docker and agent dependencies
-	dockerClient, launcherFactory := initializeAgentInfrastructure(ctx, logger, clock, idGen)
+	dockerClient, launcherFactory, containerManager := initializeAgentInfrastructure(ctx, logger, clock, idGen)
 	defer func() { _ = dockerClient.Close() }()
 
 	// Initialize NATS client if configured
 	natsClient := initializeNATS()
 
-	// Create session manager with launcher factory
-	sessionManager, err := relay.NewSessionManager(logger, clock, idGen, natsClient, launcherFactory)
+	// Create session manager with launcher factory and container manager
+	sessionManager, err := relay.NewSessionManager(logger, clock, idGen, natsClient, launcherFactory, containerManager)
 	if err != nil {
 		log.Fatalf("Failed to create session manager: %v", err)
 	}
@@ -149,7 +149,7 @@ func main() {
 }
 
 // initializeAgentInfrastructure sets up Docker, worktree, credentials, and launcher factory
-func initializeAgentInfrastructure(ctx context.Context, logger *relay.StdLogger, clock *relay.SystemClock, idGen *relay.UUIDGenerator) (*client.Client, agent.LauncherFactory) {
+func initializeAgentInfrastructure(ctx context.Context, logger *relay.StdLogger, clock *relay.SystemClock, idGen *relay.UUIDGenerator) (*client.Client, agent.LauncherFactory, *containersession.Manager) {
 	// Get configuration from environment
 	workspaceDir := os.Getenv("WORKSPACE_DIR")
 	if workspaceDir == "" {
@@ -246,7 +246,7 @@ func initializeAgentInfrastructure(ctx context.Context, logger *relay.StdLogger,
 		log.Printf("WARN: Failed to cleanup orphaned containers: %v", err)
 	}
 
-	return dockerClient, launcherFactory
+	return dockerClient, launcherFactory, containerManager
 }
 
 // initializeNATS creates a NATS client if NATS_URL is configured

@@ -41,6 +41,13 @@ make run
   - Example: `export OUROCODUS_ACP_BINARY=./bin/echo-agent`
   - Useful for: Running demos/tests without an API key, testing custom agent implementations
 
+- `OUROCODUS_ACP_RUNTIME` - Where ACP processes run (default: `host`)
+  - Values: `host` (default) | `container`
+  - `host`: ACP runs as host process via os/exec (standard mode)
+  - `container`: ACP runs inside agent containers via docker exec (isolation mode)
+  - Example: `export OUROCODUS_ACP_RUNTIME=container`
+  - See [docs/ACP.md](docs/ACP.md) for detailed launcher selection logic
+
 ## Architecture
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for Phase 1 vs Long-term design.
@@ -65,11 +72,16 @@ See [docs/SECURITY.md](docs/SECURITY.md) for threat models and mitigation strate
 
 ### Core Dependencies
 
-- **[Packnplay](https://github.com/obra/packnplay) v1.0.2** - Docker containerization and git worktree management
-  - Used for: Containerized agent runtime, automatic worktree management, credential mounting
+- **Docker SDK for Go** - Container lifecycle management via `pkg/containersession`
+  - Used for: Agent containerization, workspace isolation, exec operations
+  - Current: Direct Docker SDK usage with custom container session manager
+  - License: Apache 2.0
+
+- **[Packnplay](https://github.com/obra/packnplay) v1.0.2** - *Future integration (planned)*
+  - Status: Dependency imported but not yet actively used (placeholder in `pkg/agent/packnplay`)
+  - Planned for: Advanced git worktree management and credential mounting patterns
   - License: MIT
   - Version pinning: Explicitly pinned to stable releases for reliability
-  - Updating: `go get github.com/obra/packnplay@vX.Y.Z && go mod tidy`
 
 See [NOTICE](NOTICE) for complete third-party license information.
 

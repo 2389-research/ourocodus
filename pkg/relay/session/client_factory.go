@@ -1,23 +1,33 @@
 package session
 
 import (
+	"context"
+	"fmt"
 	"os"
 
 	"github.com/2389-research/ourocodus/pkg/acp"
 )
 
-// ACPClientFactory implements ClientFactory using pkg/acp.Client
-// Reads ANTHROPIC_API_KEY from environment and spawns claude-code-acp processes
-// Optionally reads OUROCODUS_ACP_BINARY to override the default ACP binary path
+// ACPClientFactory implements ClientFactory using pkg/acp.Client with runtime-based launcher selection.
+// Reads ANTHROPIC_API_KEY from environment and spawns claude-code-acp processes.
+// Optionally reads OUROCODUS_ACP_BINARY to override the default ACP binary path.
+// Optionally reads OUROCODUS_ACP_RUNTIME to select execution mode (host or container).
 type ACPClientFactory struct {
-	apiKey        string
-	acpBinaryPath string // Optional custom ACP binary path (for testing)
+	apiKey              string
+	acpBinaryPath       string
+	containerSessionMgr ContainerExecService // Optional: enables container exec mode
+	logger              Logger               // Optional: for runtime logging
 }
 
-// NewACPClientFactory creates a new ACP client factory
-// Reads ANTHROPIC_API_KEY from environment (required)
-// Optionally reads OUROCODUS_ACP_BINARY to use a custom ACP binary (e.g., echo-agent for testing)
-func NewACPClientFactory() (*ACPClientFactory, error) {
+// NewACPClientFactory creates a new ACP client factory.
+// Reads ANTHROPIC_API_KEY from environment (required).
+// Optionally reads OUROCODUS_ACP_BINARY to use a custom ACP binary (e.g., echo-agent for testing).
+// Optionally reads OUROCODUS_ACP_RUNTIME to select execution mode (host or container).
+//
+// Parameters:
+//   - containerSessionMgr: Optional container session manager for container exec mode. If nil, only host mode is available.
+//   - logger: Optional logger for runtime diagnostics. If nil, no logging is performed.
+func NewACPClientFactory(containerSessionMgr ContainerExecService, logger Logger) (*ACPClientFactory, error) {
 	apiKey := os.Getenv("ANTHROPIC_API_KEY")
 	if apiKey == "" {
 		return nil, ErrMissingAnthropicAPIKey
@@ -27,8 +37,10 @@ func NewACPClientFactory() (*ACPClientFactory, error) {
 	acpBinaryPath := os.Getenv("OUROCODUS_ACP_BINARY")
 
 	return &ACPClientFactory{
-		apiKey:        apiKey,
-		acpBinaryPath: acpBinaryPath,
+		apiKey:              apiKey,
+		acpBinaryPath:       acpBinaryPath,
+		containerSessionMgr: containerSessionMgr,
+		logger:              logger,
 	}, nil
 }
 
@@ -37,24 +49,122 @@ func (f *ACPClientFactory) GetACPBinaryPath() string {
 	return f.acpBinaryPath
 }
 
-// NewClient spawns a new ACP process in the given workspace
-// Uses custom binary path if OUROCODUS_ACP_BINARY was set, otherwise defaults to claude-code-acp
-func (f *ACPClientFactory) NewClient(workspace string) (ACPClient, error) {
-	var client *acp.Client
-	var err error
+// NewClient spawns a new ACP process using the appropriate launcher based on runtime context.
+// Launcher selection:
+//   - If OUROCODUS_ACP_RUNTIME=container and runtime has container ID: uses ContainerExecProcessLauncher
+//   - Otherwise: uses HostProcessLauncher (default)
+//
+// Uses custom binary path if OUROCODUS_ACP_BINARY was set, otherwise defaults to claude-code-acp.
+func (f *ACPClientFactory) NewClient(ctx context.Context, runtime *AgentRuntimeContext) (ACPClient, error) {
+	if runtime == nil {
+		return nil, fmt.Errorf("runtime context is required")
+	}
+	workspace := runtime.Workspace
+	if workspace == "" {
+		return nil, fmt.Errorf("workspace is required")
+	}
+
+	// Select launcher based on runtime context and feature flag
+	launcher, err := f.selectLauncher(runtime)
+	if err != nil {
+		return nil, fmt.Errorf("failed to select launcher: %w", err)
+	}
+
+	// Build client options
+	opts := []acp.ClientOption{
+		acp.WithProcessLauncher(launcher),
+		acp.WithLaunchContext(ctx), // Enable cancellation for launcher operations
+	}
 
 	if f.acpBinaryPath != "" {
-		// Use custom binary (e.g., echo-agent for testing)
-		client, err = acp.NewClient(workspace, f.apiKey, acp.WithCommand(f.acpBinaryPath))
-	} else {
-		// Use default claude-code-acp binary
-		client, err = acp.NewClient(workspace, f.apiKey)
+		opts = append(opts, acp.WithCommand(f.acpBinaryPath))
 	}
 
+	client, err := acp.NewClient(workspace, f.apiKey, opts...)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create ACP client: %w", err)
 	}
+
 	return &acpClientAdapter{client: client}, nil
+}
+
+// getRuntimeMode reads and validates the OUROCODUS_ACP_RUNTIME environment variable.
+// Returns "host" (default), "container", or an error for invalid values.
+func getRuntimeMode() (string, error) {
+	mode := os.Getenv("OUROCODUS_ACP_RUNTIME")
+	if mode == "" {
+		return "host", nil // default
+	}
+	if mode == "host" || mode == "container" {
+		return mode, nil
+	}
+	return "", fmt.Errorf("invalid OUROCODUS_ACP_RUNTIME value: %q (must be 'host' or 'container')", mode)
+}
+
+// validateContainerPrerequisites checks if all prerequisites for container execution are met.
+// Returns an error if runtime is nil, container ID is missing, or container session manager is unavailable.
+func validateContainerPrerequisites(runtime *AgentRuntimeContext, containerSessionMgr ContainerExecService) error {
+	if runtime == nil {
+		return fmt.Errorf("container runtime requested but runtime context is nil")
+	}
+	if !runtime.HasContainer() {
+		return fmt.Errorf("container runtime requested but no container ID in runtime context (session=%s agent=%s)",
+			runtime.SessionID, runtime.AgentID)
+	}
+	if containerSessionMgr == nil {
+		return fmt.Errorf("container runtime requested but container session manager not available (session=%s agent=%s)",
+			runtime.SessionID, runtime.AgentID)
+	}
+	return nil
+}
+
+// createHostLauncher creates a host process launcher and logs the decision if logger is available.
+func (f *ACPClientFactory) createHostLauncher(runtime *AgentRuntimeContext) acp.ProcessLauncher {
+	if f.logger != nil {
+		f.logger.Printf("[ACP] Using host process launcher for session=%s agent=%s",
+			runtime.SessionID, runtime.AgentID)
+	}
+	return &acp.HostProcessLauncher{}
+}
+
+// createContainerLauncher creates a container exec launcher configured for the runtime context.
+// Logs the decision if logger is available.
+func (f *ACPClientFactory) createContainerLauncher(runtime *AgentRuntimeContext) acp.ProcessLauncher {
+	if f.logger != nil {
+		f.logger.Printf("[ACP] Using container exec launcher for session=%s agent=%s container=%s",
+			runtime.SessionID, runtime.AgentID, runtime.ContainerID)
+	}
+
+	launcher := NewContainerExecProcessLauncher(
+		f.containerSessionMgr,
+		runtime.ContainerID,
+	)
+
+	// Configure workspace path mapping
+	// Container workspace path should match the mount point (standard: /workspace)
+	return launcher.WithWorkspacePath(DefaultContainerWorkspacePath)
+}
+
+// selectLauncher chooses between host and container execution based on runtime context and environment.
+// This is the main orchestrator that delegates to specialized functions for clarity and testability.
+func (f *ACPClientFactory) selectLauncher(runtime *AgentRuntimeContext) (acp.ProcessLauncher, error) {
+	mode, err := getRuntimeMode()
+	if err != nil {
+		return nil, fmt.Errorf("%w (session=%s agent=%s)", err, runtime.SessionID, runtime.AgentID)
+	}
+
+	switch mode {
+	case "host":
+		return f.createHostLauncher(runtime), nil
+	case "container":
+		if err := validateContainerPrerequisites(runtime, f.containerSessionMgr); err != nil {
+			return nil, err
+		}
+		return f.createContainerLauncher(runtime), nil
+	default:
+		// Should never reach here due to getRuntimeMode validation
+		return nil, fmt.Errorf("unexpected runtime mode: %q (session=%s agent=%s)", mode, runtime.SessionID, runtime.AgentID)
+	}
 }
 
 // acpClientAdapter adapts pkg/acp.Client to ACPClient interface
@@ -75,17 +185,31 @@ func (a *acpClientAdapter) Close() error {
 // FakeClientFactory implements ClientFactory for testing
 // Returns mock clients without spawning real processes
 type FakeClientFactory struct {
-	clientFunc func(workspace string) (ACPClient, error)
+	clientFunc func(ctx context.Context, runtime *AgentRuntimeContext) (ACPClient, error)
 }
 
-// NewFakeClientFactory creates a fake client factory for testing
+// NewFakeClientFactory creates a fake client factory for testing using only workspace input.
 func NewFakeClientFactory(clientFunc func(workspace string) (ACPClient, error)) *FakeClientFactory {
 	return &FakeClientFactory{
-		clientFunc: clientFunc,
+		clientFunc: func(_ context.Context, runtime *AgentRuntimeContext) (ACPClient, error) {
+			workspace := ""
+			if runtime != nil {
+				workspace = runtime.Workspace
+			}
+			return clientFunc(workspace)
+		},
 	}
 }
 
+// NewRuntimeFakeClientFactory creates a fake factory using the full runtime context.
+func NewRuntimeFakeClientFactory(clientFunc func(ctx context.Context, runtime *AgentRuntimeContext) (ACPClient, error)) *FakeClientFactory {
+	return &FakeClientFactory{clientFunc: clientFunc}
+}
+
 // NewClient returns a mock client from the provided function
-func (f *FakeClientFactory) NewClient(workspace string) (ACPClient, error) {
-	return f.clientFunc(workspace)
+func (f *FakeClientFactory) NewClient(ctx context.Context, runtime *AgentRuntimeContext) (ACPClient, error) {
+	if f.clientFunc == nil {
+		return nil, fmt.Errorf("fake client factory not configured")
+	}
+	return f.clientFunc(ctx, runtime)
 }

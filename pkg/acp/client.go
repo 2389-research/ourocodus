@@ -2,27 +2,23 @@ package acp
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
-	"os/exec"
 	"sync"
-	"time"
 )
 
-// Client manages communication with a single claude-code-acp process
+// Client manages communication with a single claude-code-acp runtime transport.
 type Client struct {
-	cmd      *exec.Cmd
-	stdin    io.WriteCloser
-	stdout   io.ReadCloser
-	stderr   io.ReadCloser
-	scanner  *bufio.Scanner
-	logger   Logger
-	closedMu sync.RWMutex
-	reqMu    sync.Mutex // Protects entire request/response cycle
-	nextID   int
-	closed   bool
+	transport Transport
+	stderr    io.Reader
+	scanner   *bufio.Scanner
+	logger    Logger
+	closedMu  sync.RWMutex
+	reqMu     sync.Mutex // Protects entire request/response cycle
+	nextID    int
+	closed    bool
 }
 
 // ClientOption configures a Client
@@ -32,6 +28,9 @@ type clientConfig struct {
 	commandPath string
 	commandArgs []string
 	logger      Logger
+	launcher    ProcessLauncher
+	env         map[string]string
+	launchCtx   context.Context
 }
 
 // WithCommand sets a custom command path and args for the ACP process
@@ -54,6 +53,26 @@ func WithLogger(logger Logger) ClientOption {
 	}
 }
 
+// WithLaunchContext sets the context used for launching the ACP process.
+// This enables cancellation and timeouts for docker exec operations.
+// If not provided, defaults to context.Background().
+func WithLaunchContext(ctx context.Context) ClientOption {
+	return func(c *clientConfig) {
+		if ctx == nil {
+			c.launchCtx = context.Background()
+			return
+		}
+		c.launchCtx = ctx
+	}
+}
+
+// WithProcessLauncher overrides the default host launcher (used for custom runtimes).
+func WithProcessLauncher(launcher ProcessLauncher) ClientOption {
+	return func(c *clientConfig) {
+		c.launcher = launcher
+	}
+}
+
 // NewClient spawns a claude-code-acp process and returns a client to communicate with it
 func NewClient(workspace string, apiKey string, opts ...ClientOption) (*Client, error) {
 	if workspace == "" {
@@ -66,8 +85,9 @@ func NewClient(workspace string, apiKey string, opts ...ClientOption) (*Client, 
 	// Apply options
 	cfg := &clientConfig{
 		commandPath: "claude-code-acp",
-		commandArgs: []string{"--workspace", workspace},
 		logger:      noOpLogger{},
+		launcher:    &HostProcessLauncher{},
+		launchCtx:   context.Background(),
 	}
 	for _, opt := range opts {
 		opt(cfg)
@@ -75,68 +95,110 @@ func NewClient(workspace string, apiKey string, opts ...ClientOption) (*Client, 
 	if cfg.logger == nil {
 		cfg.logger = noOpLogger{}
 	}
+	if len(cfg.commandArgs) == 0 {
+		cfg.commandArgs = []string{"--workspace", workspace}
+	}
+	if cfg.launcher == nil {
+		cfg.launcher = &HostProcessLauncher{}
+	}
+	if cfg.env == nil {
+		cfg.env = make(map[string]string)
+	}
+	if cfg.launchCtx == nil {
+		cfg.launchCtx = context.Background()
+	}
 
-	// Create command to spawn ACP process
-	// #nosec G204 -- Command path is intentionally configurable via ClientOption for testing and custom installations
-	cmd := exec.Command(cfg.commandPath, cfg.commandArgs...)
+	launchCfg := ProcessLaunchConfig{
+		Workspace:   workspace,
+		APIKey:      apiKey,
+		CommandPath: cfg.commandPath,
+		CommandArgs: cfg.commandArgs,
+		Env:         cloneEnvMap(cfg.env),
+	}
 
-	// Run the process within the workspace for relative path operations
-	cmd.Dir = workspace
-
-	// Set API key via environment variable
-	cmd.Env = append(os.Environ(), fmt.Sprintf("ANTHROPIC_API_KEY=%s", apiKey))
-
-	// Setup stdin pipe
-	stdin, err := cmd.StdinPipe()
+	transport, err := cfg.launcher.Start(cfg.launchCtx, launchCfg)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create stdin pipe: %w", err)
+		return nil, err
 	}
 
-	// Setup stdout pipe
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		_ = stdin.Close()
-		return nil, fmt.Errorf("failed to create stdout pipe: %w", err)
+	return newClientFromTransport(transport, cfg.logger)
+}
+
+// NewClientFromTransport constructs a client using an existing transport implementation.
+//
+// This function is useful when you want to provide a custom transport instead of having
+// the client spawn a new process. Common use cases include:
+//
+// - Testing: Provide a mock transport for unit testing ACP protocol handling
+// - Custom transports: Use websockets, network sockets, or other custom IPC mechanisms
+// - Process reuse: Connect to an already-running ACP process without spawning a new one
+// - Advanced scenarios: Pre-configure the transport with specific security or logging requirements
+//
+// Parameters:
+//   - transport: An existing Transport implementation (stdin/stdout/stderr streams). Must not be nil.
+//   - opts: Optional configuration via ClientOption functions (e.g., WithLogger)
+//
+// Returns:
+//   - *Client: Configured ACP client ready to send/receive messages
+//   - error: Non-nil if transport is nil or client initialization fails
+//
+// Example - Testing:
+//
+//	mockTransport := &MockTransport{...}
+//	client, err := acp.NewClientFromTransport(mockTransport, acp.WithLogger(logger))
+//
+// Example - Reusing a process:
+//
+//	existingTransport := &ProcessTransport{cmd: runningCmd}
+//	client, err := acp.NewClientFromTransport(existingTransport)
+func NewClientFromTransport(transport Transport, opts ...ClientOption) (*Client, error) {
+	if transport == nil {
+		return nil, fmt.Errorf("transport is required")
 	}
 
-	// Setup stderr pipe for debugging
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		_ = stdin.Close()
-		_ = stdout.Close()
-		return nil, fmt.Errorf("failed to create stderr pipe: %w", err)
+	cfg := &clientConfig{logger: noOpLogger{}}
+	for _, opt := range opts {
+		opt(cfg)
+	}
+	if cfg.logger == nil {
+		cfg.logger = noOpLogger{}
 	}
 
-	// Start the process
-	if err := cmd.Start(); err != nil {
-		_ = stdin.Close()
-		_ = stdout.Close()
-		_ = stderr.Close()
-		return nil, fmt.Errorf("failed to start %q: %w", cfg.commandPath, err)
-	}
+	return newClientFromTransport(transport, cfg.logger)
+}
 
+func newClientFromTransport(transport Transport, logger Logger) (*Client, error) {
 	client := &Client{
-		cmd:     cmd,
-		stdin:   stdin,
-		stdout:  stdout,
-		stderr:  stderr,
-		scanner: bufio.NewScanner(stdout),
-		logger:  cfg.logger,
-		nextID:  1,
-		closed:  false,
+		transport: transport,
+		stderr:    transport.Stderr(),
+		scanner:   bufio.NewScanner(transport),
+		logger:    logger,
+		nextID:    1,
 	}
 
-	// Allow large JSON messages (init 64KB, max 5MB)
 	client.scanner.Buffer(make([]byte, 64*1024), 5*1024*1024)
 
-	// Start goroutine to log stderr (for debugging)
 	go client.logStderr()
 
 	return client, nil
 }
 
+func cloneEnvMap(src map[string]string) map[string]string {
+	if len(src) == 0 {
+		return map[string]string{}
+	}
+	clone := make(map[string]string, len(src))
+	for k, v := range src {
+		clone[k] = v
+	}
+	return clone
+}
+
 // logStderr reads stderr and logs it for debugging purposes
 func (c *Client) logStderr() {
+	if c.stderr == nil {
+		return
+	}
 	scanner := bufio.NewScanner(c.stderr)
 	for scanner.Scan() {
 		c.logger.Printf("[ACP stderr] %s", scanner.Text())
@@ -189,7 +251,7 @@ func (c *Client) SendMessage(content string) (*AgentMessage, error) {
 
 	// Write request to stdin (with newline as delimiter)
 	data = append(data, '\n')
-	if _, err = c.stdin.Write(data); err != nil {
+	if _, err = c.transport.Write(data); err != nil {
 		return nil, fmt.Errorf("failed to write request: %w", err)
 	}
 
@@ -256,34 +318,11 @@ func (c *Client) Close() error {
 	c.closed = true
 	c.closedMu.Unlock()
 
-	// Close stdin to signal the process to exit
-	if err := c.stdin.Close(); err != nil {
-		return fmt.Errorf("failed to close stdin: %w", err)
-	}
-
-	// Wait for process to exit with a timeout; force-kill if it hangs
-	done := make(chan error, 1)
-	go func() { done <- c.cmd.Wait() }()
-
-	select {
-	case err := <-done:
-		// Process exited normally
-		if err != nil {
-			// Process may exit with non-zero status, which is acceptable
-			// Only return error if it's a system error, not exit status
-			if _, ok := err.(*exec.ExitError); !ok {
-				return fmt.Errorf("failed to wait for process: %w", err)
-			}
+	if c.transport != nil {
+		if err := c.transport.Close(); err != nil {
+			return fmt.Errorf("failed to close transport: %w", err)
 		}
-	case <-time.After(5 * time.Second):
-		// Process didn't exit in time, force kill it
-		_ = c.cmd.Process.Kill()
-		<-done // Wait for goroutine to finish
 	}
-
-	// Close remaining pipes
-	_ = c.stdout.Close()
-	_ = c.stderr.Close()
 
 	return nil
 }

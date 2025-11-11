@@ -55,17 +55,25 @@ func (m *integrationMockACPClient) GetMessages() []string {
 
 // integrationMockClientFactory creates mock ACP clients for integration testing
 type integrationMockClientFactory struct {
-	clientFunc func(workspace string) (session.ACPClient, error)
-	callCount  int
-	mu         sync.Mutex
+	clientFunc  func(workspace string) (session.ACPClient, error)
+	runtimeFunc func(ctx context.Context, runtime *session.AgentRuntimeContext) (session.ACPClient, error)
+	callCount   int
+	mu          sync.Mutex
 }
 
-func (m *integrationMockClientFactory) NewClient(workspace string) (session.ACPClient, error) {
+func (m *integrationMockClientFactory) NewClient(ctx context.Context, runtime *session.AgentRuntimeContext) (session.ACPClient, error) {
 	m.mu.Lock()
 	m.callCount++
 	m.mu.Unlock()
 
+	if m.runtimeFunc != nil {
+		return m.runtimeFunc(ctx, runtime)
+	}
 	if m.clientFunc != nil {
+		workspace := ""
+		if runtime != nil {
+			workspace = runtime.Workspace
+		}
 		return m.clientFunc(workspace)
 	}
 	return &integrationMockACPClient{}, nil
