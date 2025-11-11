@@ -1,4 +1,4 @@
-.PHONY: all build test smoke-relay smoke-session smoke-all test-e2e demo interactive run stop clean lint fmt check pre-commit nats-start nats-stop nats-logs nats-health assets assets-check tailwind-download agent-image
+.PHONY: all build test smoke-relay smoke-session smoke-all test-e2e demo interactive run stop clean lint fmt check pre-commit nats-start nats-stop nats-logs nats-health assets assets-check tailwind-download acp-binary agent-image
 
 # Default target: build and test
 all: build test
@@ -110,8 +110,16 @@ build: assets
 	go build -o bin/event-logger ./cmd/event-logger
 	@echo "Build complete. Binaries in bin/"
 
+# Build ACP binary for inclusion in agent Docker image
+# Cross-compile for Linux since the binary runs inside a Linux container
+acp-binary:
+	@echo "Building ACP binary (echo-agent) for Linux..."
+	@mkdir -p bin
+	GOOS=linux GOARCH=amd64 go build -o bin/acp ./cmd/echo-agent
+	@echo "ACP binary built: bin/acp (linux/amd64)"
+
 # Build the agent Docker image used by relay-managed spawns
-agent-image:
+agent-image: acp-binary
 	@echo "Building Docker image ourocodus/agent:latest..."
 	docker build -t ourocodus/agent:latest -f Dockerfile.agent .
 

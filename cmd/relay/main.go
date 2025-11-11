@@ -110,9 +110,9 @@ func main() {
 
 	// Start server in goroutine
 	go func() {
-		log.Printf("Relay server starting on port %d", port)
-		log.Printf("PWA available at: http://localhost:%d/", port)
-		log.Printf("WebSocket endpoint: ws://localhost:%d/ws", port)
+		log.Printf("[SERVER] Relay server starting on port %d", port)
+		log.Printf("[SERVER] PWA available at: http://localhost:%d/", port)
+		log.Printf("[SERVER] WebSocket endpoint: ws://localhost:%d/ws", port)
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("Server error: %v", err)
 		}
@@ -123,7 +123,7 @@ func main() {
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 	<-sigChan
 
-	log.Println("Shutdown signal received, gracefully stopping server...")
+	log.Println("[SHUTDOWN] Signal received, gracefully stopping server...")
 
 	// Create shutdown context with timeout
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
@@ -131,21 +131,47 @@ func main() {
 
 	// Attempt graceful HTTP server shutdown
 	if err := httpServer.Shutdown(shutdownCtx); err != nil {
-		log.Printf("Server shutdown error: %v", err)
+		log.Printf("[SHUTDOWN] Server shutdown error: %v", err)
 		os.Exit(1)
+	}
+	log.Println("[SHUTDOWN] HTTP server stopped")
+
+	// Cleanup all active sessions (agents, containers, worktrees, credentials)
+	log.Println("[SHUTDOWN] Cleaning up active sessions...")
+	activeSessions := sessionManager.List(nil) // nil filter = all sessions
+	if len(activeSessions) > 0 {
+		log.Printf("[SHUTDOWN] Found %d active session(s) to terminate", len(activeSessions))
+
+		successCount := 0
+		failCount := 0
+		for _, session := range activeSessions {
+			sessionID := session.GetID()
+			log.Printf("[SHUTDOWN] Terminating session: %s", sessionID)
+
+			if _, err := sessionManager.TerminateUserSession(shutdownCtx, sessionID); err != nil {
+				log.Printf("[SHUTDOWN] WARN: Failed to terminate session %s: %v", sessionID, err)
+				failCount++
+			} else {
+				successCount++
+			}
+		}
+
+		log.Printf("[SHUTDOWN] Session cleanup complete: %d succeeded, %d failed", successCount, failCount)
+	} else {
+		log.Println("[SHUTDOWN] No active sessions to clean up")
 	}
 
 	// Drain NATS connection if available
 	if natsClient != nil {
-		log.Println("Draining NATS connection...")
+		log.Println("[SHUTDOWN] Draining NATS connection...")
 		if err := natsClient.Drain(shutdownCtx); err != nil {
-			log.Printf("NATS drain error: %v", err)
+			log.Printf("[SHUTDOWN] NATS drain error: %v", err)
 		} else {
-			log.Println("NATS connection drained successfully")
+			log.Println("[SHUTDOWN] NATS connection drained successfully")
 		}
 	}
 
-	log.Println("Server stopped")
+	log.Println("[SHUTDOWN] Server stopped")
 }
 
 // initializeAgentInfrastructure sets up Docker, worktree, credentials, and launcher factory
@@ -183,14 +209,14 @@ func initializeAgentInfrastructure(ctx context.Context, logger *relay.StdLogger,
 	if _, err := dockerClient.Ping(ctx); err != nil {
 		log.Fatalf("Docker daemon is not accessible: %v", err)
 	}
-	log.Printf("Docker client initialized successfully")
+	log.Printf("[INIT] Docker client initialized successfully")
 
 	// Initialize worktree manager
 	worktreeManager, err := worktree.NewAgentWorktreeManager(repoPath)
 	if err != nil {
 		log.Fatalf("Failed to create worktree manager: %v", err)
 	}
-	log.Printf("Worktree manager initialized")
+	log.Printf("[INIT] Worktree manager initialized")
 
 	// Initialize credential mounter
 	credsDir := fmt.Sprintf("%s/credentials", workspaceDir)
@@ -198,7 +224,7 @@ func initializeAgentInfrastructure(ctx context.Context, logger *relay.StdLogger,
 		log.Fatalf("Failed to create credentials directory: %v", err)
 	}
 	credMounter := container.NewAgentCredentialMounter(credsDir)
-	log.Printf("Credential mounter initialized")
+	log.Printf("[INIT] Credential mounter initialized")
 
 	// Initialize container session manager (with adapters)
 	containerManager := containersession.NewManager(
@@ -208,7 +234,7 @@ func initializeAgentInfrastructure(ctx context.Context, logger *relay.StdLogger,
 		&loggerAdapter{logger: logger},
 		workspaceDir,
 	)
-	log.Printf("Container session manager initialized")
+	log.Printf("[INIT] Container session manager initialized")
 
 	// Get resource limits from environment or use defaults
 	cpuCores := int64(2)
@@ -239,11 +265,11 @@ func initializeAgentInfrastructure(ctx context.Context, logger *relay.StdLogger,
 		},
 	}
 	launcherFactory := agent.NewDefaultLauncherFactory(factoryConfig)
-	log.Printf("Launcher factory initialized")
+	log.Printf("[INIT] Launcher factory initialized")
 
 	// Cleanup orphaned containers on startup
 	if err := cleanupOrphanedContainers(ctx, dockerClient); err != nil {
-		log.Printf("WARN: Failed to cleanup orphaned containers: %v", err)
+		log.Printf("[CLEANUP] WARN: Failed to cleanup orphaned containers: %v", err)
 	}
 
 	return dockerClient, launcherFactory, containerManager
@@ -253,11 +279,11 @@ func initializeAgentInfrastructure(ctx context.Context, logger *relay.StdLogger,
 func initializeNATS() nats.Client {
 	natsURL := os.Getenv("NATS_URL")
 	if natsURL == "" {
-		log.Printf("NATS_URL not set, event publishing disabled")
+		log.Printf("[NATS] NATS_URL not set, event publishing disabled")
 		return nil
 	}
 
-	log.Printf("Connecting to NATS at %s...", natsURL)
+	log.Printf("[NATS] Connecting to NATS at %s...", natsURL)
 
 	natsClient, err := nats.NewClient(
 		nats.WithURL(natsURL),
@@ -266,7 +292,7 @@ func initializeNATS() nats.Client {
 	if err != nil {
 		log.Fatalf("Failed to connect to NATS: %v", err)
 	}
-	log.Printf("Connected to NATS successfully")
+	log.Printf("[NATS] Connected to NATS successfully")
 
 	return natsClient
 }
@@ -285,32 +311,38 @@ func cleanupOrphanedContainers(ctx context.Context, cli *client.Client) error {
 	}
 
 	if len(containers) == 0 {
-		log.Println("No orphaned containers found")
+		log.Println("[CLEANUP] No orphaned containers found")
 		return nil
 	}
 
-	log.Printf("Found %d orphaned container(s), cleaning up...", len(containers))
+	log.Printf("[CLEANUP] Found %d orphaned container(s), cleaning up...", len(containers))
 
 	for _, cont := range containers {
+		// Safe truncation for logging
+		shortID := cont.ID
+		if len(shortID) > 12 {
+			shortID = shortID[:12]
+		}
+
 		// Check container age (Created is Unix timestamp in seconds)
 		created := time.Unix(cont.Created, 0)
 		age := time.Since(created)
 
 		if age < 1*time.Hour {
-			log.Printf("Skipping recent container %s (age: %v)", cont.ID[:12], age)
+			log.Printf("[CLEANUP] Skipping recent container %s (age: %v)", shortID, age)
 			continue
 		}
 
 		// Stop and remove
 		timeout := 10
 		if err := cli.ContainerStop(ctx, cont.ID, dockercontainer.StopOptions{Timeout: &timeout}); err != nil {
-			log.Printf("WARN: Failed to stop orphaned container %s: %v", cont.ID[:12], err)
+			log.Printf("[CLEANUP] WARN: Failed to stop orphaned container %s: %v", shortID, err)
 		}
 
 		if err := cli.ContainerRemove(ctx, cont.ID, dockercontainer.RemoveOptions{Force: true}); err != nil {
-			log.Printf("WARN: Failed to remove orphaned container %s: %v", cont.ID[:12], err)
+			log.Printf("[CLEANUP] WARN: Failed to remove orphaned container %s: %v", shortID, err)
 		} else {
-			log.Printf("Cleaned up orphaned container: %s", cont.ID[:12])
+			log.Printf("[CLEANUP] Cleaned up orphaned container: %s", shortID)
 		}
 	}
 

@@ -18,6 +18,10 @@ type SpawnConfig struct {
 	// Command is the command to run in the container (e.g., []string{"/bin/bash"})
 	Command []string
 
+	// Entrypoint overrides the Docker image ENTRYPOINT (optional)
+	// If nil, uses the image's ENTRYPOINT. If empty slice, clears the ENTRYPOINT.
+	Entrypoint []string
+
 	// GitSSHKey is the SSH private key data for git operations (optional)
 	GitSSHKey []byte
 

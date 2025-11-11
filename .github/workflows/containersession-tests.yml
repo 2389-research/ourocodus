@@ -26,7 +26,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.23'
+          go-version: '1.24'
           cache: true
 
       - name: Run unit tests
@@ -52,7 +52,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.23'
+          go-version: '1.24'
           cache: true
 
       - name: Pull Ubuntu image
@@ -81,7 +81,7 @@ jobs:
 
     strategy:
       matrix:
-        example: [basic, echo-agent, multi]
+        example: [echo-agent]
 
     steps:
       - name: Checkout code
@@ -90,7 +90,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.23'
+          go-version: '1.24'
           cache: true
 
       - name: Pull Ubuntu image

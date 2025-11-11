@@ -153,7 +153,7 @@ func (m *Manager) CreateContainerSession(ctx context.Context, imageName string, 
 	}
 
 	session.SetContainerID(resp.ID)
-	m.logger.Printf("Container session created: id=%s container=%s state=PENDING", sessionID, resp.ID)
+	m.logger.Printf("[CONTAINER] Session created: id=%s container=%s state=PENDING", sessionID, resp.ID)
 
 	return session, nil
 }
@@ -235,6 +235,7 @@ func (m *Manager) CreateContainerSessionWithConfig(ctx context.Context, config C
 
 	// Create session in PENDING state
 	session := NewContainerSession(sessionID, workspacePath, labels, now)
+	session.skipOutputLogging = config.SkipOutputLogging
 
 	// Store session (with TOCTOU prevention)
 	m.mu.Lock()
@@ -247,10 +248,21 @@ func (m *Manager) CreateContainerSessionWithConfig(ctx context.Context, config C
 
 	// Build container config
 	containerConfig := &container.Config{
-		Image:  config.ImageName,
-		Cmd:    config.Command,
-		Labels: labels,
-		Env:    config.Env,
+		Image:        config.ImageName,
+		Cmd:          config.Command,
+		Labels:       labels,
+		Env:          config.Env,
+		OpenStdin:    true,  // Keep stdin open even when not attached
+		StdinOnce:    false, // Don't close stdin after first attach
+		AttachStdin:  true,  // Enable stdin attachment
+		AttachStdout: true,  // Enable stdout attachment
+		AttachStderr: true,  // Enable stderr attachment
+		Tty:          false, // No TTY (we need raw streams for JSON-RPC)
+	}
+
+	// Override entrypoint if specified (nil = use image default, empty slice = clear entrypoint)
+	if config.Entrypoint != nil {
+		containerConfig.Entrypoint = config.Entrypoint
 	}
 
 	// Build host config with mounts
@@ -289,7 +301,7 @@ func (m *Manager) CreateContainerSessionWithConfig(ctx context.Context, config C
 	}
 
 	session.SetContainerID(resp.ID)
-	m.logger.Printf("Container session created: id=%s container=%s state=PENDING mounts=%d",
+	m.logger.Printf("[CONTAINER] Session created: id=%s container=%s state=PENDING mounts=%d",
 		sessionID, resp.ID, len(mounts))
 
 	return session, nil
@@ -615,24 +627,26 @@ func (m *Manager) StartContainerSession(ctx context.Context, sessionID string) e
 		return fmt.Errorf("failed to start container: %w", err)
 	}
 
-	// Attach to container I/O
-	attachResp, err := m.dockerClient.ContainerAttach(ctx, containerID, container.AttachOptions{
-		Stream: true,
-		Stdin:  false,
-		Stdout: true,
-		Stderr: true,
-		Logs:   true,
-	})
-	if err != nil {
-		m.logger.Printf("Container attach failed: session=%s container=%s error=%v", sessionID, containerID, err)
-		// Continue even if attach fails - container is still running
-	} else {
-		// Start goroutines to demux stdout/stderr
-		go m.handleContainerOutput(sessionID, containerID, attachResp.Reader)
+	// Attach to container I/O for logging (unless external attachment is used)
+	if !session.skipOutputLogging {
+		attachResp, err := m.dockerClient.ContainerAttach(ctx, containerID, container.AttachOptions{
+			Stream: true,
+			Stdin:  false,
+			Stdout: true,
+			Stderr: true,
+			Logs:   true,
+		})
+		if err != nil {
+			m.logger.Printf("Container attach failed: session=%s container=%s error=%v", sessionID, containerID, err)
+			// Continue even if attach fails - container is still running
+		} else {
+			// Start goroutines to demux stdout/stderr
+			go m.handleContainerOutput(sessionID, containerID, attachResp.Reader)
+		}
 	}
 
 	session.MarkStarted(m.clock.Now())
-	m.logger.Printf("Container session started: id=%s container=%s state=RUNNING", sessionID, containerID)
+	m.logger.Printf("[CONTAINER] Session started: id=%s container=%s state=RUNNING", sessionID, containerID)
 
 	return nil
 }
@@ -703,7 +717,7 @@ func (m *Manager) StopContainerSession(ctx context.Context, sessionID string) er
 	}
 
 	session.MarkStopped(m.clock.Now())
-	m.logger.Printf("Container session stopped: id=%s container=%s state=STOPPED", sessionID, containerID)
+	m.logger.Printf("[CONTAINER] Session stopped: id=%s container=%s state=STOPPED", sessionID, containerID)
 
 	return nil
 }
@@ -725,4 +739,9 @@ func (m *Manager) ListContainerSessions() []*ContainerSession {
 		sessions = append(sessions, session)
 	}
 	return sessions
+}
+
+// GetDockerClient returns the Docker client used by this manager
+func (m *Manager) GetDockerClient() DockerClient {
+	return m.dockerClient
 }

@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/2389-research/ourocodus/pkg/containersession"
+	"github.com/2389-research/ourocodus/pkg/runtime"
 	"github.com/2389-research/ourocodus/pkg/worktree"
 )
 
@@ -196,15 +197,21 @@ func (l *AgentContainerLauncher) createContainerWithMounts(
 		"agent-id":        config.AgentID,
 	}
 
+	// Check if we're using container attach mode (where ACP runs as main process)
+	// In this mode, we skip the manager's output logging to avoid competing for stdio streams
+	skipOutputLogging := runtime.IsContainerMode()
+
 	// Create container session with custom configuration
 	// Pass the worktree path as WorkspaceDir so the Manager uses it instead of creating its own
 	sess, err := l.containerMgr.CreateContainerSessionWithConfig(ctx, containersession.CreateConfig{
-		ImageName:    config.ImageName,
-		Command:      config.Command,
-		WorkspaceDir: wt.Path(),  // Use the AgentWorktree path
-		CustomMounts: credMounts, // Add credential mounts
-		Env:          config.Env,
-		Labels:       labels,
+		ImageName:         config.ImageName,
+		Command:           config.Command,
+		Entrypoint:        config.Entrypoint,
+		WorkspaceDir:      wt.Path(),  // Use the AgentWorktree path
+		CustomMounts:      credMounts, // Add credential mounts
+		Env:               config.Env,
+		Labels:            labels,
+		SkipOutputLogging: skipOutputLogging, // Skip if using container attach mode
 	})
 	if err != nil {
 		return nil, err

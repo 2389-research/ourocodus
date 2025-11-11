@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/2389-research/ourocodus/pkg/agent"
+	"github.com/2389-research/ourocodus/pkg/runtime"
 )
 
 const (
@@ -141,7 +142,7 @@ func (m *Manager) CreateUserSession(ctx context.Context, ws WebSocketConn) (*Use
 		}
 	}
 
-	m.logger.Printf("User session created: id=%s state=ACTIVE agents=0", userSessionID)
+	m.logger.Printf("[SESSION] User session created: id=%s state=ACTIVE agents=0", userSessionID)
 	return userSession, nil
 }
 
@@ -210,7 +211,8 @@ func (m *Manager) SpawnAgent(ctx context.Context, userSessionID, agentID, worksp
 	}
 	userSession.mu.Unlock()
 
-	m.logger.Printf("Spawning agent: session=%s agentID=%s workspace=%s", userSessionID, agentID, absPath)
+	m.logger.Printf("[SESSION] Starting agent spawn process: session=%s agent=%s", userSessionID, agentID)
+	m.logger.Printf("[SESSION] ├─ Workspace path: %s", absPath)
 
 	// Create workspace directory if needed (I/O - no lock held)
 	// Use 0o700 for strict workspace isolation (owner-only access)
@@ -246,13 +248,37 @@ func (m *Manager) SpawnAgent(ctx context.Context, userSessionID, agentID, worksp
 	// NEW: Create launcher via factory if available
 	var handle agent.AgentHandle
 	if m.launcherFactory != nil {
-		launcherConfig := agent.LauncherConfig{
-			AgentID:   agentID,
-			ImageName: "ourocodus/agent:latest", // TODO: make configurable
-			Command:   []string{"/bin/bash"},    // TODO: make configurable
-			Workspace: absPath,
-			// Credentials will be added in next task
+		// Select container command based on runtime mode
+		command := []string{"/bin/bash"} // Default: interactive shell for host mode
+
+		if runtime.IsContainerMode() {
+			// Container mode: Use image default (ENTRYPOINT ["/usr/local/bin/acp"])
+			// ContainerAttachProcessLauncher will attach to the container's stdio
+			// where ACP runs as the main process. The CMD from image provides default args.
+			command = []string{"--workspace", "/workspace"} // Args for ACP
+			m.logger.Printf("[SESSION] ├─ Runtime mode: CONTAINER (ACP runs as main process, stdio attached)")
+			m.logger.Printf("[SESSION] ├─ Container command (ACP args): %v", command)
+		} else {
+			m.logger.Printf("[SESSION] ├─ Runtime mode: HOST (ACP will run directly on host)")
+			m.logger.Printf("[SESSION] ├─ Container command: %v", command)
 		}
+
+		// Get API key from client factory for container environment
+		var anthropicKey string
+		if acpFactory, ok := m.clientFactory.(*ACPClientFactory); ok {
+			anthropicKey = acpFactory.GetAPIKey()
+		}
+
+		launcherConfig := agent.LauncherConfig{
+			AgentID:      agentID,
+			ImageName:    "ourocodus/agent:latest", // TODO: make configurable
+			Command:      command,
+			Workspace:    absPath,
+			AnthropicKey: anthropicKey,
+			// Git credentials will be added in future task
+		}
+
+		m.logger.Printf("[SESSION] ├─ Creating container launcher (image: %s)", launcherConfig.ImageName)
 
 		launcher, err := m.launcherFactory.CreateLauncher(ctx, agentID, launcherConfig)
 		if err != nil {
@@ -262,11 +288,13 @@ func (m *Manager) SpawnAgent(ctx context.Context, userSessionID, agentID, worksp
 			agentSession.setError(err.Error())
 			agentSession.mu.Unlock()
 
-			m.logger.Printf("Failed to create launcher: session=%s agentID=%s error=%v", userSessionID, agentID, err)
+			m.logger.Printf("[SESSION] ✗ Failed to create launcher: %v", err)
 			return fmt.Errorf("failed to create launcher: %w", err)
 		}
+		m.logger.Printf("[SESSION] ✓ Launcher created successfully")
 
 		// NEW: Spawn agent container
+		m.logger.Printf("[SESSION] ├─ Spawning agent container...")
 		spawnConfig := &agent.SpawnConfig{
 			Role:      agentID,
 			Image:     launcherConfig.ImageName,
@@ -282,9 +310,10 @@ func (m *Manager) SpawnAgent(ctx context.Context, userSessionID, agentID, worksp
 			agentSession.setError(err.Error())
 			agentSession.mu.Unlock()
 
-			m.logger.Printf("Failed to spawn container: session=%s agentID=%s error=%v", userSessionID, agentID, err)
+			m.logger.Printf("[SESSION] ✗ Container spawn failed: %v", err)
 			return fmt.Errorf("failed to spawn agent: %w", err)
 		}
+		m.logger.Printf("[SESSION] ✓ Container spawned (id: %s)", handle.ContainerID())
 
 		// NEW: Store launcher and handle
 		key := launcherKey(userSessionID, agentID)
@@ -293,7 +322,7 @@ func (m *Manager) SpawnAgent(ctx context.Context, userSessionID, agentID, worksp
 		m.handles[key] = handle
 		m.launchersMu.Unlock()
 
-		m.logger.Printf("Agent container spawned: session=%s agentID=%s container=%s", userSessionID, agentID, handle.ContainerID())
+		// Container details logged, workspace is already logged above
 	}
 
 	runtimeCtx := &AgentRuntimeContext{
@@ -303,11 +332,16 @@ func (m *Manager) SpawnAgent(ctx context.Context, userSessionID, agentID, worksp
 	}
 	if handle != nil {
 		runtimeCtx.ContainerID = handle.ContainerID()
+		m.logger.Printf("[SESSION] ├─ Creating ACP client for container %s", handle.ContainerID())
+	} else {
+		m.logger.Printf("[SESSION] ├─ Creating ACP client for host process")
 	}
 
 	// Spawn ACP client (I/O - no lock held)
 	acpClient, err := m.clientFactory.NewClient(ctx, runtimeCtx)
 	if err != nil {
+		m.logger.Printf("[SESSION] ✗ Failed to create ACP client: %v", err)
+
 		// Cleanup launcher on client creation failure
 		if m.launcherFactory != nil {
 			key := launcherKey(userSessionID, agentID)
@@ -319,6 +353,7 @@ func (m *Manager) SpawnAgent(ctx context.Context, userSessionID, agentID, worksp
 			m.launchersMu.Unlock()
 
 			if launcher != nil && handle != nil {
+				m.logger.Printf("[SESSION] ├─ Cleaning up container after ACP client failure")
 				_ = launcher.Stop(ctx, handle)
 			}
 		}
@@ -329,9 +364,9 @@ func (m *Manager) SpawnAgent(ctx context.Context, userSessionID, agentID, worksp
 		agentSession.setError(err.Error())
 		agentSession.mu.Unlock()
 
-		m.logger.Printf("Agent spawn failed: session=%s agentID=%s error=%v", userSessionID, agentID, err)
 		return fmt.Errorf("failed to spawn ACP client: %w", err)
 	}
+	m.logger.Printf("[SESSION] ✓ ACP client created successfully")
 
 	// Transition agent to ACTIVE
 	agentSession.mu.Lock()
@@ -340,6 +375,8 @@ func (m *Manager) SpawnAgent(ctx context.Context, userSessionID, agentID, worksp
 	agentSession.setAgentLastActive(m.clock.Now())
 	agentSession.mu.Unlock()
 
+	m.logger.Printf("[SESSION] ✓ Agent '%s' is now ACTIVE (session: %s)", agentID, userSessionID)
+
 	// Publish agent.spawned event (synchronous, errors logged but non-fatal)
 	if m.publisher != nil {
 		if err := m.publisher.PublishAgentSpawned(ctx, userSessionID, agentID, absPath); err != nil {
@@ -347,7 +384,7 @@ func (m *Manager) SpawnAgent(ctx context.Context, userSessionID, agentID, worksp
 		}
 	}
 
-	m.logger.Printf("Agent spawned: session=%s agentID=%s state=ACTIVE", userSessionID, agentID)
+	m.logger.Printf("[SESSION] Agent spawned: session=%s agentID=%s state=ACTIVE", userSessionID, agentID)
 	return nil
 }
 
@@ -403,7 +440,7 @@ func (m *Manager) TerminateAgent(ctx context.Context, userSessionID, agentID str
 		return nil
 	}
 
-	m.logger.Printf("Terminating agent: session=%s agentID=%s", userSessionID, agentID)
+	m.logger.Printf("[SESSION] Terminating agent: session=%s agentID=%s", userSessionID, agentID)
 
 	// NEW: Stop container if launcher exists
 	key := launcherKey(userSessionID, agentID)
@@ -455,7 +492,7 @@ func (m *Manager) TerminateAgent(ctx context.Context, userSessionID, agentID str
 		}
 	}
 
-	m.logger.Printf("Agent terminated: session=%s agentID=%s", userSessionID, agentID)
+	m.logger.Printf("[SESSION] Agent terminated: session=%s agentID=%s", userSessionID, agentID)
 	return nil
 }
 
@@ -477,14 +514,14 @@ func (m *Manager) TerminateUserSession(ctx context.Context, userSessionID string
 	userSession.setState(StateTerminated)
 	userSession.mu.Unlock()
 
-	m.logger.Printf("Terminating user session: id=%s", userSessionID)
+	m.logger.Printf("[SESSION] Terminating user session: id=%s", userSessionID)
 
 	// Get all agents
 	agents := userSession.ListAgents()
 
 	// Terminate all agents in parallel with timeout
 	if len(agents) > 0 {
-		m.logger.Printf("Terminating %d agents in parallel: session=%s", len(agents), userSessionID)
+		m.logger.Printf("[SESSION] Terminating %d agents in parallel: session=%s", len(agents), userSessionID)
 
 		var wg sync.WaitGroup
 		agentTimeout := DefaultAgentTerminationTimeout
@@ -568,9 +605,9 @@ func (m *Manager) TerminateUserSession(ctx context.Context, userSessionID string
 
 		select {
 		case <-done:
-			m.logger.Printf("All agents terminated: session=%s", userSessionID)
+			m.logger.Printf("[SESSION] All agents terminated: session=%s", userSessionID)
 		case <-ctx.Done():
-			m.logger.Printf("Session termination timeout: session=%s", userSessionID)
+			m.logger.Printf("[SESSION] Session termination timeout: session=%s", userSessionID)
 			summary.CleanupStatus = CleanupStatusPartial
 			summary.addError("session termination timeout before all agents completed")
 		}
@@ -609,7 +646,7 @@ func (m *Manager) TerminateUserSession(ctx context.Context, userSessionID string
 		}
 	}
 
-	m.logger.Printf("User session terminated: id=%s", userSessionID)
+	m.logger.Printf("[SESSION] User session terminated: id=%s", userSessionID)
 	return summary, nil
 }
 

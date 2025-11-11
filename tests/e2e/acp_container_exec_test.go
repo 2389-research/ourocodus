@@ -152,7 +152,7 @@ func TestContainerExecProcessLauncher_SmokeTest(t *testing.T) {
 	}
 
 	// Create ContainerExecProcessLauncher
-	launcher := session.NewContainerExecProcessLauncher(containerManager, actualContainerID).
+	launcher := session.NewContainerExecProcessLauncher(containerManager, actualContainerID, nil).
 		WithWorkspacePath("/workspace")
 
 	t.Log("Testing command execution inside container via ProcessLauncher")
@@ -280,7 +280,7 @@ func TestContainerExecProcessLauncher_WithEchoAgent(t *testing.T) {
 	}
 
 	// Create launcher with echo-agent
-	launcher := session.NewContainerExecProcessLauncher(containerManager, actualContainerID).
+	launcher := session.NewContainerExecProcessLauncher(containerManager, actualContainerID, nil).
 		WithWorkspacePath("/workspace")
 
 	t.Log("Testing echo-agent execution inside container")

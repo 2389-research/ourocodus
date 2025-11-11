@@ -1,50 +1,34 @@
 # Container Session Examples
 
-Comprehensive examples demonstrating the `pkg/containersession` package capabilities for managing isolated Docker container execution environments.
+Examples demonstrating the `pkg/containersession` package for managing isolated Docker container execution environments.
 
 ## Available Examples
 
-### [basic/](basic/) - Single Session Lifecycle
+### [echo-agent/](echo-agent/) - JSON-RPC ACP Agent
 
-The simplest container session example showing the complete lifecycle:
-- Create Manager and container session
-- Start the container
-- Write/read data to/from workspace
-- Stop and cleanup
+The echo-agent example demonstrates running an ACP-compatible agent inside a container with JSON-RPC communication over stdin/stdout.
 
-**Best for**: Learning the basic API and understanding session states.
+**This is the only valid pattern for the relay system** - agents must communicate via JSON-RPC over stdio to work with the relay.
 
-```bash
-go run examples/containersession/basic/main.go
-```
-
-### [echo-agent/](echo-agent/) - Interactive Agent with I/O
-
-Demonstrates running an interactive agent inside a container with bidirectional I/O:
+**What it demonstrates:**
 - Deploy script to workspace
 - Start container with custom command
-- Bidirectional stdin/stdout communication pattern
+- JSON-RPC communication pattern (stdin/stdout)
 - Agent processes messages and responds
 
-**Best for**: Understanding how to run agents that need input/output interaction.
-
+**Run it:**
 ```bash
 go run examples/containersession/echo-agent/main.go
 ```
 
-### [multi/](multi/) - Concurrent Sessions with Coordination
+## Why JSON-RPC Stdio?
 
-Shows multiple container sessions running concurrently and coordinating via shared workspace:
-- Producer session creates tasks
-- Consumer session processes tasks
-- Monitor session tracks progress
-- File-based coordination pattern
+The relay system uses the ACP (Agent Client Protocol) which requires:
+- **JSON-RPC 2.0** over stdin/stdout
+- **Method:** `agent/sendMessage`
+- **Bidirectional streaming**
 
-**Best for**: Learning how multiple isolated containers can work together.
-
-```bash
-go run examples/containersession/multi/main.go
-```
+Any example that doesn't implement this pattern (simple file I/O, sleep containers, etc.) won't work with the relay system.
 
 ## Prerequisites
 
@@ -55,27 +39,11 @@ All examples require:
   - Colima users: `colima start`
   - Docker Desktop users: Ensure it's running
 
-- **Go**: Version 1.23 or later
+- **Go**: Version 1.24 or later
   - Test: `go version`
 
 - **Ubuntu Image**: Will be pulled automatically if not present
   - Pre-pull: `docker pull ubuntu:latest`
-
-## Quick Start
-
-```bash
-# From project root
-cd examples/containersession
-
-# Run basic example
-go run basic/main.go
-
-# Run echo-agent example
-go run echo-agent/main.go
-
-# Run multi-session example
-go run multi/main.go
-```
 
 ## Package Documentation
 
@@ -139,62 +107,6 @@ STOPPED  → StopContainerSession()
 ```
 
 **FAILED** state occurs on errors.
-
-## Common Patterns
-
-### 1. Basic Usage
-
-```go
-session, _ := manager.CreateContainerSession(ctx, "ubuntu:latest", cmd)
-manager.StartContainerSession(ctx, session.ID())
-// ... use session ...
-manager.StopContainerSession(ctx, session.ID())
-```
-
-### 2. Deploying Scripts
-
-```go
-// Copy script to workspace
-scriptPath := filepath.Join(session.WorkspacePath(), "script.sh")
-os.WriteFile(scriptPath, scriptData, 0755)
-
-// Run script in container
-session, _ := manager.CreateContainerSession(ctx, "ubuntu:latest",
-    []string{"/bin/bash", "/workspace/script.sh"})
-```
-
-### 3. Container Reuse
-
-```go
-// First process
-session1, _ := manager.CreateContainerSession(ctx, "ubuntu:latest", cmd)
-sessionID := session1.ID()
-
-// Process restarts...
-
-// Second process reuses container
-session2, _ := manager.AttachContainerSession(ctx, sessionID)
-// session2 connects to same running container
-```
-
-### 4. Concurrent Sessions
-
-```go
-var wg sync.WaitGroup
-
-for i := 0; i < 3; i++ {
-    wg.Add(1)
-    go func() {
-        defer wg.Done()
-        session, _ := manager.CreateContainerSession(ctx, image, cmd)
-        manager.StartContainerSession(ctx, session.ID())
-        // ... do work ...
-        manager.StopContainerSession(ctx, session.ID())
-    }()
-}
-
-wg.Wait()
-```
 
 ## Testing
 
@@ -262,7 +174,7 @@ $env:DOCKER_HOST="tcp://localhost:2375"
 Run examples inside WSL2 where Unix socket behavior matches macOS/Linux:
 ```bash
 # Inside WSL2
-go run examples/containersession/basic/main.go
+go run examples/containersession/echo-agent/main.go
 ```
 
 ## Troubleshooting
@@ -322,10 +234,10 @@ rm -rf workspaces/
 
 ## Next Steps
 
-1. **Read the examples** in order: basic → echo-agent → multi
-2. **Run each example** to see them in action
+1. **Read the echo-agent example** to understand JSON-RPC ACP pattern
+2. **Run the example** to see it in action
 3. **Read the source code** in `pkg/containersession/`
-4. **Write your own** container session application
+4. **Write your own** ACP-compatible agent
 5. **Contribute** improvements or new examples
 
 ## Related Documentation
@@ -333,6 +245,7 @@ rm -rf workspaces/
 - [CONTRIBUTING.md](../../CONTRIBUTING.md) - How to contribute
 - [CLAUDE.md](../../CLAUDE.md) - Development tools guide
 - [README.md](../../README.md) - Project overview
+- [docs/CONTAINERIZED_ACP.md](../../docs/CONTAINERIZED_ACP.md) - Containerized ACP implementation
 
 ## Questions?
 
