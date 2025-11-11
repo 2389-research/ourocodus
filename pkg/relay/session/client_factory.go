@@ -142,7 +142,7 @@ func (f *ACPClientFactory) createContainerLauncher(runtime *AgentRuntimeContext)
 
 	// Configure workspace path mapping
 	// Container workspace path should match the mount point (standard: /workspace)
-	return launcher.WithWorkspacePath("/workspace")
+	return launcher.WithWorkspacePath(DefaultContainerWorkspacePath)
 }
 
 // selectLauncher chooses between host and container execution based on runtime context and environment.

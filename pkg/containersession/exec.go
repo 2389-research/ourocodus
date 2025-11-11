@@ -96,27 +96,35 @@ func (m *Manager) ExecInContainer(ctx context.Context, containerID string, cfg E
 	stdoutReader, stdoutWriter := io.Pipe()
 	stderrReader, stderrWriter := io.Pipe()
 
-	// Create cancellation context for goroutine lifecycle management
-	_, copyCancel := context.WithCancel(context.Background())
-
 	// Goroutine for copying stdout/stderr from docker exec
+	// The goroutine will naturally complete when StdCopy finishes
+	// (when exec process exits or reader is closed)
 	go func() {
-		defer copyCancel() // Ensure context is cancelled when goroutine exits
 		_, copyErr := stdcopy.StdCopy(stdoutWriter, stderrWriter, attachResp.Reader)
 		_ = stdoutWriter.CloseWithError(copyErr)
 		_ = stderrWriter.CloseWithError(copyErr)
 	}()
 
 	closeFn := func() error {
-		// Cancel context to signal goroutine cleanup
-		copyCancel()
-
 		// Close resources in correct order
 		// Note: attachResp.Reader is a *bufio.Reader without Close method
 		// The underlying connection is closed by attachResp.Close()
-		_ = stdoutWriter.Close()
-		_ = stderrWriter.Close()
+
+		// Collect errors for observability
+		var errs []error
+
+		if err := stdoutWriter.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("stdout: %w", err))
+		}
+		if err := stderrWriter.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("stderr: %w", err))
+		}
+
 		attachResp.Close()
+
+		if len(errs) > 0 {
+			return fmt.Errorf("close errors: %v", errs)
+		}
 		return nil
 	}
 

@@ -125,6 +125,32 @@ func NewClient(workspace string, apiKey string, opts ...ClientOption) (*Client, 
 }
 
 // NewClientFromTransport constructs a client using an existing transport implementation.
+//
+// This function is useful when you want to provide a custom transport instead of having
+// the client spawn a new process. Common use cases include:
+//
+// - Testing: Provide a mock transport for unit testing ACP protocol handling
+// - Custom transports: Use websockets, network sockets, or other custom IPC mechanisms
+// - Process reuse: Connect to an already-running ACP process without spawning a new one
+// - Advanced scenarios: Pre-configure the transport with specific security or logging requirements
+//
+// Parameters:
+//   - transport: An existing Transport implementation (stdin/stdout/stderr streams). Must not be nil.
+//   - opts: Optional configuration via ClientOption functions (e.g., WithLogger)
+//
+// Returns:
+//   - *Client: Configured ACP client ready to send/receive messages
+//   - error: Non-nil if transport is nil or client initialization fails
+//
+// Example - Testing:
+//
+//	mockTransport := &MockTransport{...}
+//	client, err := acp.NewClientFromTransport(mockTransport, acp.WithLogger(logger))
+//
+// Example - Reusing a process:
+//
+//	existingTransport := &ProcessTransport{cmd: runningCmd}
+//	client, err := acp.NewClientFromTransport(existingTransport)
 func NewClientFromTransport(transport Transport, opts ...ClientOption) (*Client, error) {
 	if transport == nil {
 		return nil, fmt.Errorf("transport is required")

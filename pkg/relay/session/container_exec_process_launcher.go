@@ -15,6 +15,9 @@ type ContainerExecService interface {
 	ExecInContainer(ctx context.Context, containerID string, cfg containersession.ExecConfig) (*containersession.ExecAttachment, error)
 }
 
+// DefaultContainerWorkspacePath is the standard mount point for workspaces inside agent containers.
+const DefaultContainerWorkspacePath = "/workspace"
+
 // ContainerExecProcessLauncher runs ACP inside an existing agent container via docker exec.
 type ContainerExecProcessLauncher struct {
 	execService   ContainerExecService
@@ -27,7 +30,7 @@ func NewContainerExecProcessLauncher(service ContainerExecService, containerID s
 	return &ContainerExecProcessLauncher{
 		execService:   service,
 		containerID:   containerID,
-		workspacePath: "/workspace",
+		workspacePath: DefaultContainerWorkspacePath,
 	}
 }
 
@@ -94,13 +97,8 @@ func (l *ContainerExecProcessLauncher) Start(ctx context.Context, cfg acp.Proces
 		return nil, fmt.Errorf("API key is required")
 	}
 
-	// Determine container workspace path
+	// Use configured workspace path (set via WithWorkspacePath or defaulted in constructor)
 	workspacePath := l.workspacePath
-	if workspacePath == "" {
-		// Default: assume standard container mount at /workspace
-		// In production, this should be configurable via runtime context
-		workspacePath = "/workspace"
-	}
 
 	// CRITICAL: Rewrite workspace arguments from host paths to container paths
 	// ACP receives host workspace path (e.g. /Users/dev/workspaces/session-123)
