@@ -50,6 +50,11 @@ func (f *ACPClientFactory) GetACPBinaryPath() string {
 	return f.acpBinaryPath
 }
 
+// GetAPIKey returns the Anthropic API key for container environment configuration
+func (f *ACPClientFactory) GetAPIKey() string {
+	return f.apiKey
+}
+
 // NewClient spawns a new ACP process using the appropriate launcher based on runtime context.
 // Launcher selection:
 //   - If OUROCODUS_ACP_RUNTIME=container and runtime has container ID: uses ContainerExecProcessLauncher

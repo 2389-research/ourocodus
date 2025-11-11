@@ -93,7 +93,7 @@ func (l *ContainerAttachProcessLauncher) Start(ctx context.Context, cfg acp.Proc
 				}
 			}
 			// Check for scanner errors
-			if err := scanner.Err(); err != nil && l.logger != nil {
+			if err := scanner.Err(); err != nil {
 				l.logger.Printf("[%s:stderr] Scanner error: %v", shortID, err)
 			}
 		}()

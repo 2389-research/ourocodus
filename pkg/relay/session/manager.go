@@ -263,12 +263,19 @@ func (m *Manager) SpawnAgent(ctx context.Context, userSessionID, agentID, worksp
 			m.logger.Printf("[SESSION] ├─ Container command: %v", command)
 		}
 
+		// Get API key from client factory for container environment
+		var anthropicKey string
+		if acpFactory, ok := m.clientFactory.(*ACPClientFactory); ok {
+			anthropicKey = acpFactory.GetAPIKey()
+		}
+
 		launcherConfig := agent.LauncherConfig{
-			AgentID:   agentID,
-			ImageName: "ourocodus/agent:latest", // TODO: make configurable
-			Command:   command,
-			Workspace: absPath,
-			// Credentials will be added in next task
+			AgentID:      agentID,
+			ImageName:    "ourocodus/agent:latest", // TODO: make configurable
+			Command:      command,
+			Workspace:    absPath,
+			AnthropicKey: anthropicKey,
+			// Git credentials will be added in future task
 		}
 
 		m.logger.Printf("[SESSION] ├─ Creating container launcher (image: %s)", launcherConfig.ImageName)

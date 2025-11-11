@@ -136,9 +136,9 @@ export OUROCODUS_ACP_RUNTIME=container
 make test
 ```
 
-### Container Exec Tests
+### Container Attach Tests
 ```bash
-go test -v ./pkg/relay/session -run TestContainerExec
+go test -v ./pkg/relay/session -run TestContainerAttach
 ```
 
 ### Manual Integration Test
@@ -159,9 +159,8 @@ echo '{"jsonrpc":"2.0","id":1,"method":"agent/sendMessage","params":{"content":"
 - `Makefile` - Added `acp-binary` target, updated `agent-image` dependency
 - `Dockerfile.agent` - Multi-stage build to compile ACP binary, updated entrypoint/cmd
 - `pkg/relay/session/container_attach_process_launcher.go` - **NEW** - Container attach launcher
-- `pkg/relay/session/container_exec_process_launcher.go` - Modified to add logging and accept logger parameter
 - `pkg/relay/session/client_factory.go` - Updated to create ContainerAttachProcessLauncher for container mode
-- `pkg/relay/session/runtime.go` - **NEW** - Shared runtime mode checking functions
+- `pkg/runtime/mode.go` - **NEW** - Shared runtime mode checking functions (moved from pkg/relay/session)
 - `pkg/relay/session/manager.go` - Added logging and uses runtime mode helper functions
 - `pkg/agent/container/launcher.go` - Uses runtime mode helper to check for container attach mode
 - `pkg/containersession/manager.go` - Added skip output logging support for attach mode
@@ -172,12 +171,12 @@ echo '{"jsonrpc":"2.0","id":1,"method":"agent/sendMessage","params":{"content":"
 ## Future Work
 
 - Replace `echo-agent` with actual `claude-code-acp` binary
-- Add metrics for container exec performance
+- Add metrics for container attach performance
 - Implement automatic fallback to host mode on container failures
 - Add container resource limits configuration
 
 ## Related Issues
 
 - #194 - Ship ACP runtime inside agent Docker image (COMPLETE)
-- #195 - Launch ACP process via container exec (COMPLETE)
+- #195 - Launch ACP process via container attach (COMPLETE)
 - #193 - Run ACP client inside spawned container (parent tracking issue)

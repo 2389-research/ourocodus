@@ -130,6 +130,15 @@ func (a *containerLauncherAdapter) Spawn(ctx context.Context, config *SpawnConfi
 		return nil, err
 	}
 
+	// Build environment from SpawnConfig
+	env := convertMapToSlice(config.Environment)
+
+	// Add ANTHROPIC_API_KEY from LauncherConfig if provided
+	// This is critical for containerized ACP mode where the container runs ACP as main process
+	if a.launcherConfig.AnthropicKey != "" {
+		env = append(env, fmt.Sprintf("ANTHROPIC_API_KEY=%s", a.launcherConfig.AnthropicKey))
+	}
+
 	spawnConfig := container.SpawnConfig{
 		AgentID:     a.agentID,                   // Use the unique agentID provided in CreateLauncher
 		ImageName:   config.Image,                // Image from SpawnConfig (runtime decision)
@@ -137,7 +146,7 @@ func (a *containerLauncherAdapter) Spawn(ctx context.Context, config *SpawnConfi
 		Entrypoint:  a.launcherConfig.Entrypoint, // Use Entrypoint from LauncherConfig
 		GitSSHKey:   a.launcherConfig.GitSSHKey,  // Use credentials from LauncherConfig
 		GitHubToken: a.launcherConfig.GitHubToken,
-		Env:         convertMapToSlice(config.Environment),
+		Env:         env,
 	}
 
 	handle, err := launcher.Spawn(ctx, spawnConfig)
