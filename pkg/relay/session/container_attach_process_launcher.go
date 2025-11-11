@@ -1,9 +1,11 @@
 package session
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/2389-research/ourocodus/pkg/acp"
 	"github.com/2389-research/ourocodus/pkg/containersession"
@@ -66,27 +68,47 @@ func (l *ContainerAttachProcessLauncher) Start(ctx context.Context, cfg acp.Proc
 
 	// Create pipes for demultiplexed stdout/stderr
 	stdoutReader, stdoutWriter := io.Pipe()
-	stderrReader, stderrWriter := io.Pipe()
+
+	// Create stderr logging writer if logger is available
+	var stderrWriter io.Writer
+	if l.logger != nil {
+		// Log stderr line by line with [ACP→STDERR] prefix
+		stderrReader, stderrWriterPipe := io.Pipe()
+		stderrWriter = stderrWriterPipe
+
+		go func() {
+			scanner := bufio.NewScanner(stderrReader)
+			for scanner.Scan() {
+				line := strings.TrimSpace(scanner.Text())
+				if line != "" {
+					l.logger.Printf("[%s:stderr] %s", l.containerID[:12], line)
+				}
+			}
+		}()
+	} else {
+		// Discard stderr if no logger
+		stderrWriter = io.Discard
+	}
 
 	// Start demultiplexing goroutine
 	// Docker uses a special stream format when Tty=false that needs to be demultiplexed
 	go func() {
 		_, err := stdcopy.StdCopy(stdoutWriter, stderrWriter, attachResp.Reader)
 		stdoutWriter.CloseWithError(err)
-		stderrWriter.CloseWithError(err)
+		if closer, ok := stderrWriter.(io.Closer); ok {
+			closer.Close()
+		}
 	}()
 
 	return &containerAttachTransport{
 		hijackedResp: attachResp,
 		stdout:       stdoutReader,
-		stderr:       stderrReader,
 	}, nil
 }
 
 type containerAttachTransport struct {
 	hijackedResp types.HijackedResponse
 	stdout       io.ReadCloser
-	stderr       io.ReadCloser
 }
 
 func (t *containerAttachTransport) Read(p []byte) (int, error) {
@@ -99,12 +121,9 @@ func (t *containerAttachTransport) Write(p []byte) (int, error) {
 }
 
 func (t *containerAttachTransport) Close() error {
-	// Close stdout/stderr pipes
+	// Close stdout pipe
 	if t.stdout != nil {
 		t.stdout.Close()
-	}
-	if t.stderr != nil {
-		t.stderr.Close()
 	}
 	// Close hijacked connection
 	t.hijackedResp.Close()
@@ -112,6 +131,7 @@ func (t *containerAttachTransport) Close() error {
 }
 
 func (t *containerAttachTransport) Stderr() io.Reader {
-	// Return demultiplexed stderr stream
-	return t.stderr
+	// Stderr is logged separately, not exposed
+	// ACP protocol doesn't use stderr for JSON-RPC
+	return nil
 }
