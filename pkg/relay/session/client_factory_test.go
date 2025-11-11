@@ -1,6 +1,7 @@
 package session
 
 import (
+	"context"
 	"fmt"
 	"testing"
 )
@@ -10,7 +11,7 @@ func TestACPClientFactory_MissingAPIKey(t *testing.T) {
 	// Unset the key (t.Setenv automatically restores original value)
 	t.Setenv("ANTHROPIC_API_KEY", "")
 
-	_, err := NewACPClientFactory()
+	_, err := NewACPClientFactory(nil, nil)
 	if err == nil {
 		t.Fatal("Expected error when ANTHROPIC_API_KEY not set, got nil")
 	}
@@ -24,7 +25,7 @@ func TestACPClientFactory_WithAPIKey(t *testing.T) {
 	// Set API key (t.Setenv automatically restores original value)
 	t.Setenv("ANTHROPIC_API_KEY", "test-key")
 
-	factory, err := NewACPClientFactory()
+	factory, err := NewACPClientFactory(nil, nil)
 	if err != nil {
 		t.Fatalf("Expected no error with API key set, got: %v", err)
 	}
@@ -45,7 +46,8 @@ func TestFakeClientFactory(t *testing.T) {
 		return expectedClient, nil
 	})
 
-	client, err := factory.NewClient("test-workspace")
+	runtime := &AgentRuntimeContext{Workspace: "test-workspace"}
+	client, err := factory.NewClient(context.Background(), runtime)
 	if err != nil {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
@@ -70,7 +72,8 @@ func TestFakeClientFactory_Error(t *testing.T) {
 		return nil, expectedError
 	})
 
-	client, err := factory.NewClient("test-workspace")
+	runtime := &AgentRuntimeContext{Workspace: "test-workspace"}
+	client, err := factory.NewClient(context.Background(), runtime)
 	if err == nil {
 		t.Fatal("Expected error, got nil")
 	}
@@ -88,7 +91,7 @@ func TestACPClientFactory_CustomBinary(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "test-key")
 	t.Setenv("OUROCODUS_ACP_BINARY", "/path/to/echo-agent")
 
-	factory, err := NewACPClientFactory()
+	factory, err := NewACPClientFactory(nil, nil)
 	if err != nil {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
@@ -103,7 +106,7 @@ func TestACPClientFactory_DefaultBinary(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "test-key")
 	t.Setenv("OUROCODUS_ACP_BINARY", "")
 
-	factory, err := NewACPClientFactory()
+	factory, err := NewACPClientFactory(nil, nil)
 	if err != nil {
 		t.Fatalf("Expected no error, got: %v", err)
 	}

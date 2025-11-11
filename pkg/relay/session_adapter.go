@@ -73,7 +73,9 @@ func NewSessionManager(logger Logger, clock Clock, idGen IDGenerator, natsClient
 	cleaner := session.NewNoOpCleaner()
 
 	// Create ACP client factory (reads ANTHROPIC_API_KEY from environment)
-	clientFactory, err := session.NewACPClientFactory()
+	// Pass nil for containerSessionMgr for now - will be wired properly when container exec is fully integrated
+	// Pass sessionLogger for runtime diagnostics
+	clientFactory, err := session.NewACPClientFactory(nil, sessionLogger)
 	if err != nil {
 		return nil, err
 	}

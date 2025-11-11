@@ -6,4 +6,17 @@ export GOPATH="${HOME}/go"
 export PATH="${GOPATH}/bin:${PATH}"
 
 # Project-specific environment variables can be added here
+
+# Anthropic API key (required for Claude Code integration)
 # export ANTHROPIC_API_KEY=your-key-here
+
+# ACP Execution Mode (optional, default: "host")
+# Controls where claude-code-acp process runs
+# Values: "host" (default) | "container"
+# Set to "container" to run ACP inside agent containers (requires Milestone 3+)
+# export OUROCODUS_ACP_RUNTIME=host
+
+# Custom ACP Binary Path (optional, for testing)
+# Override the default claude-code-acp binary location
+# Useful for testing with echo-agent or custom ACP implementations
+# export OUROCODUS_ACP_BINARY=/path/to/echo-agent

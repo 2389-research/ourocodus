@@ -244,6 +244,7 @@ func (m *Manager) SpawnAgent(ctx context.Context, userSessionID, agentID, worksp
 	userSession.mu.Unlock()
 
 	// NEW: Create launcher via factory if available
+	var handle agent.AgentHandle
 	if m.launcherFactory != nil {
 		launcherConfig := agent.LauncherConfig{
 			AgentID:   agentID,
@@ -273,7 +274,7 @@ func (m *Manager) SpawnAgent(ctx context.Context, userSessionID, agentID, worksp
 			Workspace: absPath,
 		}
 
-		handle, err := launcher.Spawn(ctx, spawnConfig)
+		handle, err = launcher.Spawn(ctx, spawnConfig)
 		if err != nil {
 			// Mark agent as FAILED and cleanup
 			agentSession.mu.Lock()
@@ -295,8 +296,17 @@ func (m *Manager) SpawnAgent(ctx context.Context, userSessionID, agentID, worksp
 		m.logger.Printf("Agent container spawned: session=%s agentID=%s container=%s", userSessionID, agentID, handle.ContainerID())
 	}
 
+	runtimeCtx := &AgentRuntimeContext{
+		SessionID: userSessionID,
+		AgentID:   agentID,
+		Workspace: absPath,
+	}
+	if handle != nil {
+		runtimeCtx.ContainerID = handle.ContainerID()
+	}
+
 	// Spawn ACP client (I/O - no lock held)
-	acpClient, err := m.clientFactory.NewClient(absPath)
+	acpClient, err := m.clientFactory.NewClient(ctx, runtimeCtx)
 	if err != nil {
 		// Cleanup launcher on client creation failure
 		if m.launcherFactory != nil {

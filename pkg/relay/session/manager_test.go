@@ -113,17 +113,25 @@ func (m *mockACPClient) Close() error {
 }
 
 type mockClientFactory struct {
-	clientFunc func(workspace string) (ACPClient, error)
-	callCount  int
-	mu         sync.Mutex
+	clientFunc  func(workspace string) (ACPClient, error)
+	runtimeFunc func(ctx context.Context, runtime *AgentRuntimeContext) (ACPClient, error)
+	callCount   int
+	mu          sync.Mutex
 }
 
-func (m *mockClientFactory) NewClient(workspace string) (ACPClient, error) {
+func (m *mockClientFactory) NewClient(ctx context.Context, runtime *AgentRuntimeContext) (ACPClient, error) {
 	m.mu.Lock()
 	m.callCount++
 	m.mu.Unlock()
 
+	if m.runtimeFunc != nil {
+		return m.runtimeFunc(ctx, runtime)
+	}
 	if m.clientFunc != nil {
+		workspace := ""
+		if runtime != nil {
+			workspace = runtime.Workspace
+		}
 		return m.clientFunc(workspace)
 	}
 	return &mockACPClient{}, nil

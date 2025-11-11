@@ -1,6 +1,7 @@
 package session
 
 import (
+	"context"
 	"sync"
 	"time"
 )
@@ -88,6 +89,21 @@ type AgentSession struct {
 	mu sync.RWMutex
 }
 
+// AgentRuntimeContext describes the runtime environment for an ACP process.
+// It is passed to factories launching transports so they can decide whether
+// to run ACP on the host or inside a container.
+type AgentRuntimeContext struct {
+	SessionID   string
+	AgentID     string
+	Workspace   string
+	ContainerID string
+}
+
+// HasContainer returns true if ACP should run inside a container runtime.
+func (c *AgentRuntimeContext) HasContainer() bool {
+	return c != nil && c.ContainerID != ""
+}
+
 // UserSession represents a user's workspace container (0-N agents)
 // Immutable after creation except for state transitions through Manager
 type UserSession struct {
@@ -121,7 +137,7 @@ type ACPClient interface {
 
 // ClientFactory abstracts ACP client creation for testing
 type ClientFactory interface {
-	NewClient(workspace string) (ACPClient, error)
+	NewClient(ctx context.Context, runtime *AgentRuntimeContext) (ACPClient, error)
 }
 
 // NewUserSession creates a new user session in ACTIVE state
