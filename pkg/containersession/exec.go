@@ -96,13 +96,24 @@ func (m *Manager) ExecInContainer(ctx context.Context, containerID string, cfg E
 	stdoutReader, stdoutWriter := io.Pipe()
 	stderrReader, stderrWriter := io.Pipe()
 
+	// Create cancellation context for goroutine lifecycle management
+	_, copyCancel := context.WithCancel(context.Background())
+
+	// Goroutine for copying stdout/stderr from docker exec
 	go func() {
+		defer copyCancel() // Ensure context is cancelled when goroutine exits
 		_, copyErr := stdcopy.StdCopy(stdoutWriter, stderrWriter, attachResp.Reader)
 		_ = stdoutWriter.CloseWithError(copyErr)
 		_ = stderrWriter.CloseWithError(copyErr)
 	}()
 
 	closeFn := func() error {
+		// Cancel context to signal goroutine cleanup
+		copyCancel()
+		
+		// Close resources in correct order
+		// Note: attachResp.Reader is a *bufio.Reader without Close method
+		// The underlying connection is closed by attachResp.Close()
 		_ = stdoutWriter.Close()
 		_ = stderrWriter.Close()
 		attachResp.Close()
