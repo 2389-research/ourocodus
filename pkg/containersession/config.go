@@ -14,6 +14,10 @@ type CreateConfig struct {
 	// Command is the command to run in the container (required)
 	Command []string
 
+	// Entrypoint overrides the Docker image ENTRYPOINT (optional)
+	// If nil, uses the image's ENTRYPOINT. If empty slice, clears the ENTRYPOINT.
+	Entrypoint []string
+
 	// WorkspaceDir is the workspace directory path. If empty, a default workspace
 	// will be created in baseWorkspaceDir/sessionID and mounted at /workspace
 	WorkspaceDir string

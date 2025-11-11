@@ -253,6 +253,11 @@ func (m *Manager) CreateContainerSessionWithConfig(ctx context.Context, config C
 		Env:    config.Env,
 	}
 
+	// Override entrypoint if specified (nil = use image default, empty slice = clear entrypoint)
+	if config.Entrypoint != nil {
+		containerConfig.Entrypoint = config.Entrypoint
+	}
+
 	// Build host config with mounts
 	mounts := []mount.Mount{
 		{

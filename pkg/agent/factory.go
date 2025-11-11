@@ -32,6 +32,7 @@ type LauncherConfig struct {
 	AgentID        string
 	ImageName      string
 	Command        []string
+	Entrypoint     []string // Optional: overrides Docker image ENTRYPOINT (nil = use default, empty = clear)
 	Workspace      string
 	GitSSHKey      []byte
 	GitHubToken    []byte
@@ -130,10 +131,11 @@ func (a *containerLauncherAdapter) Spawn(ctx context.Context, config *SpawnConfi
 	}
 
 	spawnConfig := container.SpawnConfig{
-		AgentID:     a.agentID,                  // Use the unique agentID provided in CreateLauncher
-		ImageName:   config.Image,               // Image from SpawnConfig (runtime decision)
-		Command:     config.Command,             // Command from SpawnConfig (runtime decision)
-		GitSSHKey:   a.launcherConfig.GitSSHKey, // Use credentials from LauncherConfig
+		AgentID:     a.agentID,                      // Use the unique agentID provided in CreateLauncher
+		ImageName:   config.Image,                   // Image from SpawnConfig (runtime decision)
+		Command:     config.Command,                 // Command from SpawnConfig (runtime decision)
+		Entrypoint:  a.launcherConfig.Entrypoint,    // Use Entrypoint from LauncherConfig
+		GitSSHKey:   a.launcherConfig.GitSSHKey,     // Use credentials from LauncherConfig
 		GitHubToken: a.launcherConfig.GitHubToken,
 		Env:         convertMapToSlice(config.Environment),
 	}

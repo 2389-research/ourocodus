@@ -247,26 +247,34 @@ func (m *Manager) SpawnAgent(ctx context.Context, userSessionID, agentID, worksp
 	// NEW: Create launcher via factory if available
 	var handle agent.AgentHandle
 	if m.launcherFactory != nil {
-		// Select container command based on runtime mode
+		// Select container command and entrypoint based on runtime mode
 		runtimeMode := os.Getenv("OUROCODUS_ACP_RUNTIME")
-		command := []string{"/bin/bash"} // Default: interactive shell for host mode
+		command := []string{"/bin/bash"}     // Default: interactive shell for host mode
+		var entrypoint []string              // nil = use image default
 
 		if runtimeMode == "container" {
 			// Container mode: Keep container alive so ACP can be run via docker exec
 			// ContainerExecProcessLauncher will exec into this container to run ACP
+			//
+			// CRITICAL: Clear the image's ENTRYPOINT by passing empty slice
+			// The Docker image has ENTRYPOINT ["/usr/local/bin/acp"] which would override our command
+			// Without clearing it, our command args would be passed to ACP instead of running as a command
 			command = []string{"sleep", "infinity"}
+			entrypoint = []string{} // Empty slice = clear image ENTRYPOINT
 			m.logger.Printf("[SESSION] ├─ Runtime mode: CONTAINER (ACP will run via docker exec)")
 			m.logger.Printf("[SESSION] ├─ Container command: %v (keeps container alive for exec)", command)
+			m.logger.Printf("[SESSION] ├─ Container entrypoint: cleared (to override image default)")
 		} else {
 			m.logger.Printf("[SESSION] ├─ Runtime mode: HOST (ACP will run directly on host)")
 			m.logger.Printf("[SESSION] ├─ Container command: %v", command)
 		}
 
 		launcherConfig := agent.LauncherConfig{
-			AgentID:   agentID,
-			ImageName: "ourocodus/agent:latest", // TODO: make configurable
-			Command:   command,
-			Workspace: absPath,
+			AgentID:    agentID,
+			ImageName:  "ourocodus/agent:latest", // TODO: make configurable
+			Command:    command,
+			Entrypoint: entrypoint,
+			Workspace:  absPath,
 			// Credentials will be added in next task
 		}
 

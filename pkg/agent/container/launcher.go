@@ -201,6 +201,7 @@ func (l *AgentContainerLauncher) createContainerWithMounts(
 	sess, err := l.containerMgr.CreateContainerSessionWithConfig(ctx, containersession.CreateConfig{
 		ImageName:    config.ImageName,
 		Command:      config.Command,
+		Entrypoint:   config.Entrypoint,
 		WorkspaceDir: wt.Path(),  // Use the AgentWorktree path
 		CustomMounts: credMounts, // Add credential mounts
 		Env:          config.Env,
