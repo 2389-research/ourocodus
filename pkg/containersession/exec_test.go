@@ -29,9 +29,9 @@ func TestExecInContainer_ValidatesInput(t *testing.T) {
 func TestExecInContainer_EnvSorted(t *testing.T) {
 	captured := map[string][]string{}
 	docker := &mockDockerClient{
-		execCreateFn: func(ctx context.Context, containerID string, cfg container.ExecOptions) (types.IDResponse, error) {
+		execCreateFn: func(ctx context.Context, containerID string, cfg container.ExecOptions) (container.ExecCreateResponse, error) {
 			captured[containerID] = cfg.Env
-			return types.IDResponse{ID: "exec-1"}, nil
+			return container.ExecCreateResponse{ID: "exec-1"}, nil
 		},
 		execAttachFn: func(ctx context.Context, execID string, cfg container.ExecAttachOptions) (types.HijackedResponse, error) {
 			pr, pw := net.Pipe()
@@ -84,8 +84,8 @@ func TestExecInContainer_Streams(t *testing.T) {
 	}()
 
 	docker := &mockDockerClient{
-		execCreateFn: func(ctx context.Context, containerID string, cfg container.ExecOptions) (types.IDResponse, error) {
-			return types.IDResponse{ID: "exec-1"}, nil
+		execCreateFn: func(ctx context.Context, containerID string, cfg container.ExecOptions) (container.ExecCreateResponse, error) {
+			return container.ExecCreateResponse{ID: "exec-1"}, nil
 		},
 		execAttachFn: func(ctx context.Context, execID string, cfg container.ExecAttachOptions) (types.HijackedResponse, error) {
 			return types.HijackedResponse{

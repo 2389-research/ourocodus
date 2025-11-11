@@ -23,7 +23,7 @@ type mockDockerClient struct {
 	startFn      func(ctx context.Context, containerID string, options container.StartOptions) error
 	stopFn       func(ctx context.Context, containerID string, options container.StopOptions) error
 	attachFn     func(ctx context.Context, containerID string, options container.AttachOptions) (types.HijackedResponse, error)
-	execCreateFn func(ctx context.Context, containerID string, config container.ExecOptions) (types.IDResponse, error)
+	execCreateFn func(ctx context.Context, containerID string, config container.ExecOptions) (container.ExecCreateResponse, error)
 	execAttachFn func(ctx context.Context, execID string, config container.ExecAttachOptions) (types.HijackedResponse, error)
 	listFn       func(ctx context.Context, options container.ListOptions) ([]container.Summary, error)
 	removeFn     func(ctx context.Context, containerID string, options container.RemoveOptions) error
@@ -58,11 +58,11 @@ func (m *mockDockerClient) ContainerAttach(ctx context.Context, containerID stri
 	return types.HijackedResponse{}, errors.New("not implemented")
 }
 
-func (m *mockDockerClient) ContainerExecCreate(ctx context.Context, containerID string, config container.ExecOptions) (types.IDResponse, error) {
+func (m *mockDockerClient) ContainerExecCreate(ctx context.Context, containerID string, config container.ExecOptions) (container.ExecCreateResponse, error) {
 	if m.execCreateFn != nil {
 		return m.execCreateFn(ctx, containerID, config)
 	}
-	return types.IDResponse{ID: "exec-id"}, nil
+	return container.ExecCreateResponse{ID: "exec-id"}, nil
 }
 
 func (m *mockDockerClient) ContainerExecAttach(ctx context.Context, execID string, config container.ExecAttachOptions) (types.HijackedResponse, error) {

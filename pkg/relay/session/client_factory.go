@@ -87,51 +87,83 @@ func (f *ACPClientFactory) NewClient(ctx context.Context, runtime *AgentRuntimeC
 	return &acpClientAdapter{client: client}, nil
 }
 
+// getRuntimeMode reads and validates the OUROCODUS_ACP_RUNTIME environment variable.
+// Returns "host" (default), "container", or an error for invalid values.
+func getRuntimeMode() (string, error) {
+	mode := os.Getenv("OUROCODUS_ACP_RUNTIME")
+	if mode == "" {
+		return "host", nil // default
+	}
+	if mode == "host" || mode == "container" {
+		return mode, nil
+	}
+	return "", fmt.Errorf("invalid OUROCODUS_ACP_RUNTIME value: %q (must be 'host' or 'container')", mode)
+}
+
+// validateContainerPrerequisites checks if all prerequisites for container execution are met.
+// Returns an error if runtime is nil, container ID is missing, or container session manager is unavailable.
+func validateContainerPrerequisites(runtime *AgentRuntimeContext, containerSessionMgr ContainerExecService) error {
+	if runtime == nil {
+		return fmt.Errorf("container runtime requested but runtime context is nil")
+	}
+	if !runtime.HasContainer() {
+		return fmt.Errorf("container runtime requested but no container ID in runtime context (session=%s agent=%s)",
+			runtime.SessionID, runtime.AgentID)
+	}
+	if containerSessionMgr == nil {
+		return fmt.Errorf("container runtime requested but container session manager not available (session=%s agent=%s)",
+			runtime.SessionID, runtime.AgentID)
+	}
+	return nil
+}
+
+// createHostLauncher creates a host process launcher and logs the decision if logger is available.
+func (f *ACPClientFactory) createHostLauncher(runtime *AgentRuntimeContext) acp.ProcessLauncher {
+	if f.logger != nil {
+		f.logger.Printf("[ACP] Using host process launcher for session=%s agent=%s",
+			runtime.SessionID, runtime.AgentID)
+	}
+	return &acp.HostProcessLauncher{}
+}
+
+// createContainerLauncher creates a container exec launcher configured for the runtime context.
+// Logs the decision if logger is available.
+func (f *ACPClientFactory) createContainerLauncher(runtime *AgentRuntimeContext) acp.ProcessLauncher {
+	if f.logger != nil {
+		f.logger.Printf("[ACP] Using container exec launcher for session=%s agent=%s container=%s",
+			runtime.SessionID, runtime.AgentID, runtime.ContainerID)
+	}
+
+	launcher := NewContainerExecProcessLauncher(
+		f.containerSessionMgr,
+		runtime.ContainerID,
+	)
+
+	// Configure workspace path mapping
+	// Container workspace path should match the mount point (standard: /workspace)
+	return launcher.WithWorkspacePath("/workspace")
+}
+
 // selectLauncher chooses between host and container execution based on runtime context and environment.
+// This is the main orchestrator that delegates to specialized functions for clarity and testability.
 func (f *ACPClientFactory) selectLauncher(runtime *AgentRuntimeContext) (acp.ProcessLauncher, error) {
-	acpRuntime := os.Getenv("OUROCODUS_ACP_RUNTIME")
-
-	// Default to host if not specified or explicitly set to "host"
-	if acpRuntime == "" || acpRuntime == "host" {
-		if f.logger != nil {
-			f.logger.Printf("[ACP] Using host process launcher for session=%s agent=%s",
-				runtime.SessionID, runtime.AgentID)
-		}
-		return &acp.HostProcessLauncher{}, nil
+	mode, err := getRuntimeMode()
+	if err != nil {
+		return nil, fmt.Errorf("%w (session=%s agent=%s)", err, runtime.SessionID, runtime.AgentID)
 	}
 
-	// Container mode requested
-	if acpRuntime == "container" {
-		// Validate prerequisites
-		if !runtime.HasContainer() {
-			return nil, fmt.Errorf("container runtime requested but no container ID in runtime context (session=%s agent=%s)",
-				runtime.SessionID, runtime.AgentID)
+	switch mode {
+	case "host":
+		return f.createHostLauncher(runtime), nil
+	case "container":
+		if err := validateContainerPrerequisites(runtime, f.containerSessionMgr); err != nil {
+			return nil, err
 		}
-		if f.containerSessionMgr == nil {
-			return nil, fmt.Errorf("container runtime requested but container session manager not available (session=%s agent=%s)",
-				runtime.SessionID, runtime.AgentID)
-		}
-
-		if f.logger != nil {
-			f.logger.Printf("[ACP] Using container exec launcher for session=%s agent=%s container=%s",
-				runtime.SessionID, runtime.AgentID, runtime.ContainerID)
-		}
-
-		// Create container exec launcher
-		launcher := NewContainerExecProcessLauncher(
-			f.containerSessionMgr,
-			runtime.ContainerID,
-		)
-
-		// Configure workspace path mapping
-		// Container workspace path should match the mount point (standard: /workspace)
-		launcher = launcher.WithWorkspacePath("/workspace")
-
-		return launcher, nil
+		return f.createContainerLauncher(runtime), nil
+	default:
+		// Should never reach here due to getRuntimeMode validation
+		return nil, fmt.Errorf("unexpected runtime mode: %q (session=%s agent=%s)", mode, runtime.SessionID, runtime.AgentID)
 	}
-
-	return nil, fmt.Errorf("invalid OUROCODUS_ACP_RUNTIME value: %q (must be 'host' or 'container', session=%s agent=%s)",
-		acpRuntime, runtime.SessionID, runtime.AgentID)
 }
 
 // acpClientAdapter adapts pkg/acp.Client to ACPClient interface

@@ -22,7 +22,7 @@ type DockerClient interface {
 	ContainerAttach(ctx context.Context, containerID string,
 		options container.AttachOptions) (types.HijackedResponse, error)
 	ContainerExecCreate(ctx context.Context, containerID string,
-		config container.ExecOptions) (types.IDResponse, error)
+		config container.ExecOptions) (container.ExecCreateResponse, error)
 	ContainerExecAttach(ctx context.Context, execID string,
 		config container.ExecAttachOptions) (types.HijackedResponse, error)
 	ContainerList(ctx context.Context, options container.ListOptions) ([]container.Summary, error)

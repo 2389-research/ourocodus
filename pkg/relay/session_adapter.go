@@ -60,8 +60,9 @@ func (a *SessionLoggerAdapter) Printf(format string, v ...interface{}) {
 //
 // natsClient is optional - if nil, event publishing is disabled.
 // launcherFactory is optional - if nil, container spawning is disabled.
+// containerManager is optional - if nil, ACP can only run in host mode.
 // Caller is responsible for managing NATS client lifecycle (including graceful drain on shutdown).
-func NewSessionManager(logger Logger, clock Clock, idGen IDGenerator, natsClient nats.Client, launcherFactory agent.LauncherFactory) (*session.Manager, error) {
+func NewSessionManager(logger Logger, clock Clock, idGen IDGenerator, natsClient nats.Client, launcherFactory agent.LauncherFactory, containerManager session.ContainerExecService) (*session.Manager, error) {
 	store := session.NewMemoryStore()
 
 	// Adapt relay dependencies to session interfaces
@@ -73,9 +74,9 @@ func NewSessionManager(logger Logger, clock Clock, idGen IDGenerator, natsClient
 	cleaner := session.NewNoOpCleaner()
 
 	// Create ACP client factory (reads ANTHROPIC_API_KEY from environment)
-	// Pass nil for containerSessionMgr for now - will be wired properly when container exec is fully integrated
+	// Pass containerManager for container exec support (optional - if nil, only host mode available)
 	// Pass sessionLogger for runtime diagnostics
-	clientFactory, err := session.NewACPClientFactory(nil, sessionLogger)
+	clientFactory, err := session.NewACPClientFactory(containerManager, sessionLogger)
 	if err != nil {
 		return nil, err
 	}
