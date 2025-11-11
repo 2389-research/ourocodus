@@ -247,10 +247,16 @@ func (m *Manager) CreateContainerSessionWithConfig(ctx context.Context, config C
 
 	// Build container config
 	containerConfig := &container.Config{
-		Image:  config.ImageName,
-		Cmd:    config.Command,
-		Labels: labels,
-		Env:    config.Env,
+		Image:        config.ImageName,
+		Cmd:          config.Command,
+		Labels:       labels,
+		Env:          config.Env,
+		OpenStdin:    true,  // Keep stdin open even when not attached
+		StdinOnce:    false, // Don't close stdin after first attach
+		AttachStdin:  true,  // Enable stdin attachment
+		AttachStdout: true,  // Enable stdout attachment
+		AttachStderr: true,  // Enable stderr attachment
+		Tty:          false, // No TTY (we need raw streams for JSON-RPC)
 	}
 
 	// Override entrypoint if specified (nil = use image default, empty slice = clear entrypoint)
