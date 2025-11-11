@@ -138,6 +138,7 @@ func (f *ACPClientFactory) createContainerLauncher(runtime *AgentRuntimeContext)
 	launcher := NewContainerExecProcessLauncher(
 		f.containerSessionMgr,
 		runtime.ContainerID,
+		f.logger,
 	)
 
 	// Configure workspace path mapping

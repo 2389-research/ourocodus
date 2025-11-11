@@ -11,7 +11,7 @@ import (
 )
 
 func TestContainerExecProcessLauncher_Validates(t *testing.T) {
-	launcher := NewContainerExecProcessLauncher(nil, "")
+	launcher := NewContainerExecProcessLauncher(nil, "", nil)
 	if _, err := launcher.Start(context.Background(), acp.ProcessLaunchConfig{}); err == nil {
 		t.Fatal("expected error when service missing")
 	}
@@ -30,7 +30,7 @@ func TestContainerExecProcessLauncher_Start(t *testing.T) {
 	)
 
 	service := &stubExecService{stream: attachment}
-	launcher := NewContainerExecProcessLauncher(service, "container-123")
+	launcher := NewContainerExecProcessLauncher(service, "container-123", nil)
 
 	transport, err := launcher.Start(context.Background(), acp.ProcessLaunchConfig{CommandPath: "claude-code-acp", CommandArgs: []string{"--workspace", "/workspace"}, APIKey: "key"})
 	if err != nil {

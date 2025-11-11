@@ -23,14 +23,16 @@ type ContainerExecProcessLauncher struct {
 	execService   ContainerExecService
 	containerID   string
 	workspacePath string
+	logger        Logger
 }
 
 // NewContainerExecProcessLauncher constructs a container-based ProcessLauncher.
-func NewContainerExecProcessLauncher(service ContainerExecService, containerID string) *ContainerExecProcessLauncher {
+func NewContainerExecProcessLauncher(service ContainerExecService, containerID string, logger Logger) *ContainerExecProcessLauncher {
 	return &ContainerExecProcessLauncher{
 		execService:   service,
 		containerID:   containerID,
 		workspacePath: DefaultContainerWorkspacePath,
+		logger:        logger,
 	}
 }
 
@@ -84,6 +86,10 @@ func rewriteWorkspaceArg(args []string, containerPath string) []string {
 }
 
 func (l *ContainerExecProcessLauncher) Start(ctx context.Context, cfg acp.ProcessLaunchConfig) (acp.Transport, error) {
+	if l.logger != nil {
+		l.logger.Printf("[ACP→EXEC] Starting ACP via docker exec in container %s", l.containerID[:12])
+	}
+
 	if l.execService == nil {
 		return nil, fmt.Errorf("containersession manager is required")
 	}
@@ -105,10 +111,20 @@ func (l *ContainerExecProcessLauncher) Start(ctx context.Context, cfg acp.Proces
 	// but inside the container the workspace is mounted at a different location (e.g. /workspace)
 	rewrittenArgs := rewriteWorkspaceArg(cfg.CommandArgs, workspacePath)
 
+	if l.logger != nil && len(cfg.CommandArgs) > 0 {
+		l.logger.Printf("[ACP→EXEC] ├─ Rewritten workspace args: %v → %v", cfg.CommandArgs, rewrittenArgs)
+	}
+
 	command := buildExecCommand(cfg.CommandPath, rewrittenArgs)
 	env := mergeEnvMaps(cfg.Env, map[string]string{
 		"ANTHROPIC_API_KEY": cfg.APIKey,
 	})
+
+	if l.logger != nil {
+		l.logger.Printf("[ACP→EXEC] ├─ Exec command: %v", command)
+		l.logger.Printf("[ACP→EXEC] ├─ Working directory: %s", workspacePath)
+		l.logger.Printf("[ACP→EXEC] ├─ Environment variables: %d set (including ANTHROPIC_API_KEY)", len(env))
+	}
 
 	execCfg := containersession.ExecConfig{
 		Command:    command,
@@ -116,9 +132,20 @@ func (l *ContainerExecProcessLauncher) Start(ctx context.Context, cfg acp.Proces
 		WorkingDir: workspacePath,
 	}
 
+	if l.logger != nil {
+		l.logger.Printf("[ACP→EXEC] ├─ Executing docker exec into container %s...", l.containerID[:12])
+	}
+
 	attachment, err := l.execService.ExecInContainer(ctx, l.containerID, execCfg)
 	if err != nil {
+		if l.logger != nil {
+			l.logger.Printf("[ACP→EXEC] ✗ Docker exec failed: %v", err)
+		}
 		return nil, fmt.Errorf("failed to exec ACP command %q in container %s: %w", cfg.CommandPath, l.containerID, err)
+	}
+
+	if l.logger != nil {
+		l.logger.Printf("[ACP→EXEC] ✓ ACP process started successfully in container %s", l.containerID[:12])
 	}
 
 	return &containerExecTransport{attachment: attachment}, nil
