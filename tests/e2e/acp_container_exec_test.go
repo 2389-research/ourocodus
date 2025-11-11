@@ -133,8 +133,23 @@ func TestContainerExecProcessLauncher_SmokeTest(t *testing.T) {
 	// Start container
 	require.NoError(t, dockerClient.ContainerStart(ctx, actualContainerID, container.StartOptions{}))
 
-	// Wait for container to be ready
-	time.Sleep(500 * time.Millisecond)
+	// Wait for container to be ready with proper readiness check
+	{
+		ctxReady, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+		for {
+			inspect, err := dockerClient.ContainerInspect(ctxReady, actualContainerID)
+			require.NoError(t, err)
+			if inspect.State.Running {
+				break
+			}
+			select {
+			case <-ctxReady.Done():
+				t.Fatal("Timeout waiting for container to be ready")
+			case <-time.After(100 * time.Millisecond):
+			}
+		}
+	}
 
 	// Create ContainerExecProcessLauncher
 	launcher := session.NewContainerExecProcessLauncher(containerManager, actualContainerID).
@@ -245,7 +260,24 @@ func TestContainerExecProcessLauncher_WithEchoAgent(t *testing.T) {
 	}()
 
 	require.NoError(t, dockerClient.ContainerStart(ctx, actualContainerID, container.StartOptions{}))
-	time.Sleep(500 * time.Millisecond)
+
+	// Wait for container to be ready with proper readiness check
+	{
+		ctxReady, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+		for {
+			inspect, err := dockerClient.ContainerInspect(ctxReady, actualContainerID)
+			require.NoError(t, err)
+			if inspect.State.Running {
+				break
+			}
+			select {
+			case <-ctxReady.Done():
+				t.Fatal("Timeout waiting for container to be ready")
+			case <-time.After(100 * time.Millisecond):
+			}
+		}
+	}
 
 	// Create launcher with echo-agent
 	launcher := session.NewContainerExecProcessLauncher(containerManager, actualContainerID).
