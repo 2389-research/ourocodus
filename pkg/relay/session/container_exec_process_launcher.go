@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/2389-research/ourocodus/pkg/acp"
 	"github.com/2389-research/ourocodus/pkg/containersession"
@@ -39,6 +40,47 @@ func (l *ContainerExecProcessLauncher) WithWorkspacePath(path string) *Container
 }
 
 // Start implements acp.ProcessLauncher.
+// rewriteWorkspaceArg rewrites --workspace arguments from host paths to container paths.
+// This is critical for container mode: ACP receives host workspace paths (e.g. /Users/dev/workspaces/session-123)
+// but these paths don't exist inside the container where the workspace is mounted at containerPath (e.g. /workspace).
+//
+// Handles both formats:
+//   - "--workspace /host/path" → "--workspace /workspace"
+//   - "--workspace=/host/path" → "--workspace=/workspace"
+//
+// Args without --workspace are returned unchanged.
+func rewriteWorkspaceArg(args []string, hostPath, containerPath string) []string {
+	if len(args) == 0 {
+		return args
+	}
+
+	result := make([]string, 0, len(args))
+	i := 0
+	for i < len(args) {
+		arg := args[i]
+		
+		// Handle "--workspace=/path" format
+		if strings.HasPrefix(arg, "--workspace=") {
+			result = append(result, "--workspace="+containerPath)
+			i++
+			continue
+		}
+		
+		// Handle "--workspace /path" format (two separate args)
+		if arg == "--workspace" && i+1 < len(args) {
+			result = append(result, "--workspace", containerPath)
+			i += 2 // Skip both --workspace and the path
+			continue
+		}
+		
+		// Pass through all other args unchanged
+		result = append(result, arg)
+		i++
+	}
+	
+	return result
+}
+
 func (l *ContainerExecProcessLauncher) Start(ctx context.Context, cfg acp.ProcessLaunchConfig) (acp.Transport, error) {
 	if l.execService == nil {
 		return nil, fmt.Errorf("containersession manager is required")
@@ -49,19 +91,27 @@ func (l *ContainerExecProcessLauncher) Start(ctx context.Context, cfg acp.Proces
 	if cfg.CommandPath == "" {
 		return nil, fmt.Errorf("command path is required")
 	}
+	if cfg.APIKey == "" {
+		return nil, fmt.Errorf("API key is required")
+	}
 
-	command := buildExecCommand(cfg.CommandPath, cfg.CommandArgs)
-	env := mergeEnvMaps(cfg.Env, map[string]string{
-		"ANTHROPIC_API_KEY": cfg.APIKey,
-	})
-
-	// Determine workspace path
+	// Determine container workspace path
 	workspacePath := l.workspacePath
 	if workspacePath == "" {
 		// Default: assume standard container mount at /workspace
 		// In production, this should be configurable via runtime context
 		workspacePath = "/workspace"
 	}
+
+	// CRITICAL: Rewrite workspace arguments from host paths to container paths
+	// ACP receives host workspace path (e.g. /Users/dev/workspaces/session-123)
+	// but inside the container the workspace is mounted at a different location (e.g. /workspace)
+	rewrittenArgs := rewriteWorkspaceArg(cfg.CommandArgs, cfg.Workspace, workspacePath)
+
+	command := buildExecCommand(cfg.CommandPath, rewrittenArgs)
+	env := mergeEnvMaps(cfg.Env, map[string]string{
+		"ANTHROPIC_API_KEY": cfg.APIKey,
+	})
 
 	execCfg := containersession.ExecConfig{
 		Command:    command,

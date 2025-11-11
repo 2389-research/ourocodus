@@ -79,3 +79,81 @@ type nopWriteCloser struct {
 }
 
 func (n nopWriteCloser) Close() error { return nil }
+
+// TestRewriteWorkspaceArg tests the workspace path rewriting function
+func TestRewriteWorkspaceArg(t *testing.T) {
+	tests := []struct {
+		name          string
+		args          []string
+		hostPath      string
+		containerPath string
+		want          []string
+	}{
+		{
+			name:          "rewrites --workspace with space",
+			args:          []string{"--workspace", "/Users/dev/session-123", "--verbose"},
+			hostPath:      "/Users/dev/session-123",
+			containerPath: "/workspace",
+			want:          []string{"--workspace", "/workspace", "--verbose"},
+		},
+		{
+			name:          "rewrites --workspace= format",
+			args:          []string{"--workspace=/Users/dev/session-123", "--verbose"},
+			hostPath:      "/Users/dev/session-123",
+			containerPath: "/workspace",
+			want:          []string{"--workspace=/workspace", "--verbose"},
+		},
+		{
+			name:          "passes through args without workspace",
+			args:          []string{"--verbose", "--debug", "--log-level=info"},
+			hostPath:      "/host/path",
+			containerPath: "/workspace",
+			want:          []string{"--verbose", "--debug", "--log-level=info"},
+		},
+		{
+			name:          "handles empty args",
+			args:          []string{},
+			hostPath:      "/host/path",
+			containerPath: "/workspace",
+			want:          []string{},
+		},
+		{
+			name:          "handles workspace at start",
+			args:          []string{"--workspace", "/host/path"},
+			hostPath:      "/host/path",
+			containerPath: "/workspace",
+			want:          []string{"--workspace", "/workspace"},
+		},
+		{
+			name:          "handles workspace at end",
+			args:          []string{"--verbose", "--workspace", "/host/path"},
+			hostPath:      "/host/path",
+			containerPath: "/workspace",
+			want:          []string{"--verbose", "--workspace", "/workspace"},
+		},
+		{
+			name:          "handles workspace= at end",
+			args:          []string{"--verbose", "--workspace=/host/path"},
+			hostPath:      "/host/path",
+			containerPath: "/workspace",
+			want:          []string{"--verbose", "--workspace=/workspace"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := rewriteWorkspaceArg(tt.args, tt.hostPath, tt.containerPath)
+
+			if len(got) != len(tt.want) {
+				t.Errorf("rewriteWorkspaceArg() length = %d, want %d", len(got), len(tt.want))
+				return
+			}
+
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("rewriteWorkspaceArg()[%d] = %q, want %q", i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
