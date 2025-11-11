@@ -182,47 +182,64 @@ func (m *AgentWorktreeManager) Remove(ctx context.Context, worktreePath string) 
 	}
 
 	// Check context cancellation
-	select {
-	case <-ctx.Done():
+	if ctx.Err() != nil {
 		return ctx.Err()
-	default:
 	}
 
-	// Try to get the branch name before removing
-	// Need to resolve symlinks for path comparison (macOS /tmp -> /private/tmp)
+	// Find the branch name before removing
+	branchName := m.findBranchForWorktree(ctx, worktreePath)
+
+	// Remove worktree and directory
+	if err := m.removeWorktreeAndDir(ctx, worktreePath); err != nil {
+		return err
+	}
+
+	// Clean up branch if found
+	m.removeBranch(ctx, branchName)
+
+	return nil
+}
+
+// findBranchForWorktree finds the git branch associated with a worktree path.
+// Returns empty string if no branch is found.
+func (m *AgentWorktreeManager) findBranchForWorktree(ctx context.Context, worktreePath string) string {
+	// Resolve symlinks for path comparison (macOS /tmp -> /private/tmp)
 	resolvedWorktreePath, err := filepath.EvalSymlinks(worktreePath)
 	if err != nil {
 		resolvedWorktreePath = worktreePath
 	}
 
-	var branchName string
 	cmd := exec.CommandContext(ctx, "git", "worktree", "list", "--porcelain")
 	cmd.Dir = m.repoPath
-	output, listErr := cmd.Output()
-	if listErr == nil {
-		// Parse worktree list to find branch
-		lines := strings.Split(string(output), "\n")
-		var currentPath string
-		for _, line := range lines {
-			if strings.HasPrefix(line, "worktree ") {
-				currentPath = strings.TrimPrefix(line, "worktree ")
-			} else if strings.HasPrefix(line, "branch ") {
-				// Compare paths with symlink resolution
-				resolvedCurrentPath, _ := filepath.EvalSymlinks(currentPath)
-				if resolvedCurrentPath == "" {
-					resolvedCurrentPath = currentPath
-				}
-				if resolvedCurrentPath == resolvedWorktreePath || currentPath == worktreePath {
-					branchName = strings.TrimPrefix(line, "branch refs/heads/")
-					break
-				}
+	output, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+
+	// Parse worktree list to find branch
+	lines := strings.Split(string(output), "\n")
+	var currentPath string
+	for _, line := range lines {
+		if strings.HasPrefix(line, "worktree ") {
+			currentPath = strings.TrimPrefix(line, "worktree ")
+		} else if strings.HasPrefix(line, "branch ") {
+			// Compare paths with symlink resolution
+			resolvedCurrentPath, _ := filepath.EvalSymlinks(currentPath)
+			if resolvedCurrentPath == "" {
+				resolvedCurrentPath = currentPath
+			}
+			if resolvedCurrentPath == resolvedWorktreePath || currentPath == worktreePath {
+				return strings.TrimPrefix(line, "branch refs/heads/")
 			}
 		}
 	}
+	return ""
+}
 
-	// Remove worktree (this also removes the directory)
-	// git worktree remove <path> --force
-	cmd = exec.CommandContext(ctx, "git", "worktree", "remove", worktreePath, "--force")
+// removeWorktreeAndDir removes the worktree from git tracking and ensures the directory is deleted.
+func (m *AgentWorktreeManager) removeWorktreeAndDir(ctx context.Context, worktreePath string) error {
+	// Remove worktree from git tracking
+	cmd := exec.CommandContext(ctx, "git", "worktree", "remove", worktreePath, "--force")
 	cmd.Dir = m.repoPath
 
 	var stderr bytes.Buffer
@@ -230,31 +247,39 @@ func (m *AgentWorktreeManager) Remove(ctx context.Context, worktreePath string) 
 
 	if err := cmd.Run(); err != nil {
 		// Check if worktree doesn't exist (idempotent)
-		if strings.Contains(stderr.String(), "not a working tree") ||
-			strings.Contains(stderr.String(), "does not exist") {
-			// Already removed, not an error
-			return nil
+		if !strings.Contains(stderr.String(), "not a working tree") &&
+			!strings.Contains(stderr.String(), "does not exist") {
+			return fmt.Errorf("failed to remove worktree: %w (stderr: %s)", err, stderr.String())
 		}
-		return fmt.Errorf("failed to remove worktree: %w (stderr: %s)", err, stderr.String())
 	}
 
-	// Remove the branch if we found it
-	// We need to prune the worktree first, then delete the branch
-	if branchName != "" {
-		// Prune worktree references first
-		cmd = exec.CommandContext(ctx, "git", "worktree", "prune")
-		cmd.Dir = m.repoPath
-		_ = cmd.Run() // best effort
-
-		// Now delete the branch
-		// #nosec G204 -- git command with controlled arguments
-		cmd = exec.CommandContext(ctx, "git", "branch", "-D", branchName)
-		cmd.Dir = m.repoPath
-		// Best effort - don't fail if branch removal fails
-		_ = cmd.Run()
+	// Verify the directory was actually removed
+	// If it still exists, remove it manually (happens when git doesn't know about the worktree)
+	if _, err := os.Stat(worktreePath); err == nil {
+		if err := os.RemoveAll(worktreePath); err != nil {
+			return fmt.Errorf("failed to remove worktree directory: %w", err)
+		}
 	}
 
 	return nil
+}
+
+// removeBranch removes a git branch. Best effort - does not return errors.
+func (m *AgentWorktreeManager) removeBranch(ctx context.Context, branchName string) {
+	if branchName == "" {
+		return
+	}
+
+	// Prune worktree references first
+	cmd := exec.CommandContext(ctx, "git", "worktree", "prune")
+	cmd.Dir = m.repoPath
+	_ = cmd.Run() // best effort
+
+	// Delete the branch
+	// #nosec G204 -- git command with controlled arguments
+	cmd = exec.CommandContext(ctx, "git", "branch", "-D", branchName)
+	cmd.Dir = m.repoPath
+	_ = cmd.Run() // best effort
 }
 
 // List returns all worktrees managed by this repository.
