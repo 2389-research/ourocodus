@@ -29,6 +29,204 @@ For Phase 1 implementation details, see pkg/acp/client.go and pkg/relay/session/
 
 ---
 
+## Current Implementation (Phase 1)
+
+### Architecture Overview
+
+Phase 1 uses **direct stdio communication** with ACP processes. The relay spawns `claude-code-acp` processes and communicates via stdin/stdout.
+
+```
+PWA (WebSocket) ←→ Relay ←→ Session Manager ←→ ACP Client Factory ←→ ProcessLauncher ←→ ACP Process
+```
+
+### Transport Abstraction
+
+The system uses a pluggable transport architecture (pkg/acp/transport.go):
+
+```go
+// Transport represents bidirectional communication to an ACP runtime
+type Transport interface {
+    io.Reader
+    io.Writer
+    io.Closer
+    Stderr() io.Reader
+}
+
+// ProcessLauncher starts ACP runtimes and returns transports
+type ProcessLauncher interface {
+    Start(ctx context.Context, cfg ProcessLaunchConfig) (Transport, error)
+}
+```
+
+**Two launcher implementations:**
+
+1. **HostProcessLauncher** (default) - Spawns ACP as host process via `os/exec`
+2. **ContainerExecProcessLauncher** (opt-in) - Runs ACP inside existing agent containers via `docker exec`
+
+### Launcher Selection Flow
+
+The launcher is selected at runtime based on configuration:
+
+```
+main.go
+  └─> NewSessionManager(containerManager)
+       └─> NewACPClientFactory(containerManager, logger)
+            └─> factory.NewClient(runtime)
+                 └─> selectLauncher(runtime)
+                      ├─> getRuntimeMode() // Reads OUROCODUS_ACP_RUNTIME
+                      ├─> validateContainerPrerequisites()
+                      └─> createHostLauncher() OR createContainerLauncher()
+```
+
+**Key functions (pkg/relay/session/client_factory.go):**
+
+- `getRuntimeMode()` - Validates `OUROCODUS_ACP_RUNTIME` env var (defaults to "host")
+- `validateContainerPrerequisites()` - Checks container ID and manager availability
+- `selectLauncher()` - Orchestrates launcher selection based on runtime context
+
+### Configuration
+
+#### Environment Variables
+
+**OUROCODUS_ACP_RUNTIME** (optional, default: "host")
+- Controls where `claude-code-acp` process runs
+- Values: `"host"` (default) | `"container"`
+- Set to `"container"` to run ACP inside agent containers
+
+**OUROCODUS_ACP_BINARY** (optional, default: "claude-code-acp")
+- Override the default ACP binary location
+- Useful for testing with echo-agent or custom implementations
+- Example: `/path/to/echo-agent`
+
+**ANTHROPIC_API_KEY** (required)
+- API key for Claude Code integration
+- Read by ACPClientFactory on initialization
+
+#### Host Mode (Default)
+
+```bash
+# .envrc
+export ANTHROPIC_API_KEY=your-key-here
+# OUROCODUS_ACP_RUNTIME defaults to "host"
+```
+
+```
+Relay → Session Manager → ACP Client Factory → HostProcessLauncher
+                                                    └─> os/exec: claude-code-acp
+```
+
+#### Container Mode
+
+```bash
+# .envrc
+export ANTHROPIC_API_KEY=your-key-here
+export OUROCODUS_ACP_RUNTIME=container
+```
+
+```
+Relay → Session Manager → ACP Client Factory → ContainerExecProcessLauncher
+                                                    └─> docker exec: /workspace/claude-code-acp
+```
+
+**Prerequisites for container mode:**
+- Agent container must be running (spawned by relay)
+- Workspace mounted at `/workspace` inside container
+- ContainerSessionManager available (initialized in main.go)
+
+### Runtime Context
+
+Each ACP client receives runtime context with session/agent metadata:
+
+```go
+type AgentRuntimeContext struct {
+    SessionID   string  // User session identifier
+    AgentID     string  // Agent role (e.g., "coder", "reviewer")
+    Workspace   string  // Absolute path to workspace on host
+    ContainerID string  // Docker container ID (empty for host mode)
+}
+
+func (c *AgentRuntimeContext) HasContainer() bool {
+    return c != nil && c.ContainerID != ""
+}
+```
+
+### Error Handling
+
+The launcher selection validates prerequisites before creating clients:
+
+**Host mode errors:**
+- Missing API key → `ErrMissingAnthropicAPIKey`
+- Missing workspace → `"workspace is required"`
+- Invalid workspace path → `"failed to create ACP client"`
+
+**Container mode errors:**
+- Invalid runtime mode → `"invalid OUROCODUS_ACP_RUNTIME value"`
+- Missing container ID → `"no container ID in runtime context"`
+- Missing container manager → `"container session manager not available"`
+
+### Component Wiring
+
+The container session manager flows through the system:
+
+**main.go:**
+```go
+dockerClient, launcherFactory, containerManager := initializeAgentInfrastructure(...)
+sessionManager, err := relay.NewSessionManager(..., containerManager)
+```
+
+**session_adapter.go:**
+```go
+func NewSessionManager(..., containerManager session.ContainerExecService) {
+    clientFactory, err := session.NewACPClientFactory(containerManager, logger)
+    // ...
+}
+```
+
+**client_factory.go:**
+```go
+type ACPClientFactory struct {
+    apiKey              string
+    acpBinaryPath       string
+    containerSessionMgr ContainerExecService // Enables container exec mode
+    logger              Logger
+}
+```
+
+### Testing
+
+**Unit Tests (pkg/relay/session/client_factory_test.go):**
+- `TestGetRuntimeMode_*` - Runtime mode validation
+- `TestValidateContainerPrerequisites_*` - Prerequisite checks
+- `TestSelectLauncher_*` - Launcher selection logic
+- `TestNewClient_Integration_*` - Full client creation flow
+
+**Smoke Tests (tests/e2e/acp_container_exec_test.go):**
+- `TestContainerExecProcessLauncher_SmokeTest` - Commands execute in containers
+- `TestContainerExecProcessLauncher_WithEchoAgent` - Echo-agent runs in containers
+
+Run integration tests with Docker:
+```bash
+go test -tags=integration ./tests/e2e/...
+```
+
+### Migration Path to Long-term Architecture
+
+Current Phase 1 implementation provides foundation for future enhancements:
+
+1. ✅ **Transport abstraction** - Supports pluggable launchers
+2. ✅ **Container execution** - ACP already runs inside containers via docker exec
+3. 🚧 **NATS integration** - Event publishing exists, not yet used for ACP routing
+4. 🚧 **WebSocket ACP relay** - Future: containers connect to relay, not exec'd
+5. 🚧 **Coordinator** - Future: workflow automation layer
+
+**Phase 1 → Phase 2 transition:**
+- Keep transport abstraction
+- Add WebSocket server to relay (listen for ACP connections from containers)
+- Containers run `claude-code-acp` on startup (not via docker exec)
+- Route messages via NATS instead of direct WebSocket
+
+---
+
 ## Overview (Long-term Vision)
 
 Ourocodus does NOT implement custom AI agents. Instead, it orchestrates **existing ACP-compatible servers** (Claude Code, OpenAI Codex, etc.). The relay routes ACP messages between the PWA/coordinator and these agent processes/containers.
