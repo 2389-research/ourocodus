@@ -111,6 +111,11 @@ func (m *AgentWorktreeManager) Create(ctx context.Context, agentID, baseDir stri
 		return nil, fmt.Errorf("failed to create base directory: %w", err)
 	}
 
+	// Clean up any stale worktree directory/registration before creating
+	if err := m.cleanupStaleWorktree(ctx, worktreePath); err != nil {
+		return nil, fmt.Errorf("failed to cleanup stale worktree: %w", err)
+	}
+
 	// Create worktree with new branch
 	// git worktree add -b <branch> <path>
 	// #nosec G204 -- git command with controlled arguments
@@ -129,6 +134,34 @@ func (m *AgentWorktreeManager) Create(ctx context.Context, agentID, baseDir stri
 		branchName: branchName,
 		createdAt:  time.Now(),
 	}, nil
+}
+
+// cleanupStaleWorktree removes any stale worktree directory/registration at the given path.
+// This is called before creating a new worktree to handle interrupted/failed previous runs.
+// It's idempotent and safe to call even if no stale worktree exists.
+func (m *AgentWorktreeManager) cleanupStaleWorktree(ctx context.Context, worktreePath string) error {
+	// Check if directory exists
+	if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
+		// No stale directory, nothing to clean up
+		return nil
+	}
+
+	// Directory exists - try to remove it from git's worktree tracking
+	// This uses the existing Remove method which handles all cleanup
+	if err := m.Remove(ctx, worktreePath); err != nil {
+		// If Remove fails, try manual cleanup
+		// This can happen if git doesn't know about the directory
+		if err := os.RemoveAll(worktreePath); err != nil {
+			return fmt.Errorf("failed to remove stale directory: %w", err)
+		}
+	}
+
+	// Prune any stale worktree references from git
+	cmd := exec.CommandContext(ctx, "git", "worktree", "prune")
+	cmd.Dir = m.repoPath
+	_ = cmd.Run() // Best effort, ignore errors
+
+	return nil
 }
 
 // Remove removes a git worktree and its associated branch.
