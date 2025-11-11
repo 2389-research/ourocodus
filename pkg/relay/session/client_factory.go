@@ -127,23 +127,24 @@ func (f *ACPClientFactory) createHostLauncher(runtime *AgentRuntimeContext) acp.
 	return &acp.HostProcessLauncher{}
 }
 
-// createContainerLauncher creates a container exec launcher configured for the runtime context.
+// createContainerLauncher creates a container attach launcher configured for the runtime context.
 // Logs the decision if logger is available.
 func (f *ACPClientFactory) createContainerLauncher(runtime *AgentRuntimeContext) acp.ProcessLauncher {
 	if f.logger != nil {
-		f.logger.Printf("[ACP] Using container exec launcher for session=%s agent=%s container=%s",
+		f.logger.Printf("[ACP] Using container attach launcher for session=%s agent=%s container=%s",
 			runtime.SessionID, runtime.AgentID, runtime.ContainerID)
 	}
 
-	launcher := NewContainerExecProcessLauncher(
-		f.containerSessionMgr,
+	// Get Docker client from container session manager
+	dockerClient := f.containerSessionMgr.GetDockerClient()
+
+	launcher := NewContainerAttachProcessLauncher(
+		dockerClient,
 		runtime.ContainerID,
 		f.logger,
 	)
 
-	// Configure workspace path mapping
-	// Container workspace path should match the mount point (standard: /workspace)
-	return launcher.WithWorkspacePath(DefaultContainerWorkspacePath)
+	return launcher
 }
 
 // selectLauncher chooses between host and container execution based on runtime context and environment.

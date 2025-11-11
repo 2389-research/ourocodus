@@ -13,6 +13,7 @@ import (
 // ContainerExecService abstracts docker exec operations for easier testing.
 type ContainerExecService interface {
 	ExecInContainer(ctx context.Context, containerID string, cfg containersession.ExecConfig) (*containersession.ExecAttachment, error)
+	GetDockerClient() containersession.DockerClient
 }
 
 // DefaultContainerWorkspacePath is the standard mount point for workspaces inside agent containers.

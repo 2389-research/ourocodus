@@ -731,3 +731,8 @@ func (m *Manager) ListContainerSessions() []*ContainerSession {
 	}
 	return sessions
 }
+
+// GetDockerClient returns the Docker client used by this manager
+func (m *Manager) GetDockerClient() DockerClient {
+	return m.dockerClient
+}
