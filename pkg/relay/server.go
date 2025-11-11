@@ -273,8 +273,8 @@ func (s *Server) handleAgentSpawn(ctx context.Context, conn WebSocketConn, rawMe
 		return s.handleValidationError(conn, validationErr)
 	}
 
-	s.logger.Printf("Spawning agent: userSession=%s agentID=%s workspace=%s",
-		msg.UserSessionID, msg.AgentID, msg.Workspace)
+	s.logger.Printf("[RELAY→SESSION] Request to spawn agent '%s' for user session %s (workspace: %s)",
+		msg.AgentID, msg.UserSessionID, msg.Workspace)
 
 	// Spawn agent in user session
 	err = s.sessionManager.SpawnAgent(ctx, msg.UserSessionID, msg.AgentID, msg.Workspace)

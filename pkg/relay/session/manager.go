@@ -210,7 +210,8 @@ func (m *Manager) SpawnAgent(ctx context.Context, userSessionID, agentID, worksp
 	}
 	userSession.mu.Unlock()
 
-	m.logger.Printf("Spawning agent: session=%s agentID=%s workspace=%s", userSessionID, agentID, absPath)
+	m.logger.Printf("[SESSION] Starting agent spawn process: session=%s agent=%s", userSessionID, agentID)
+	m.logger.Printf("[SESSION] ├─ Workspace path: %s", absPath)
 
 	// Create workspace directory if needed (I/O - no lock held)
 	// Use 0o700 for strict workspace isolation (owner-only access)
@@ -246,13 +247,30 @@ func (m *Manager) SpawnAgent(ctx context.Context, userSessionID, agentID, worksp
 	// NEW: Create launcher via factory if available
 	var handle agent.AgentHandle
 	if m.launcherFactory != nil {
+		// Select container command based on runtime mode
+		runtimeMode := os.Getenv("OUROCODUS_ACP_RUNTIME")
+		command := []string{"/bin/bash"} // Default: interactive shell for host mode
+
+		if runtimeMode == "container" {
+			// Container mode: Keep container alive so ACP can be run via docker exec
+			// ContainerExecProcessLauncher will exec into this container to run ACP
+			command = []string{"sleep", "infinity"}
+			m.logger.Printf("[SESSION] ├─ Runtime mode: CONTAINER (ACP will run via docker exec)")
+			m.logger.Printf("[SESSION] ├─ Container command: %v (keeps container alive for exec)", command)
+		} else {
+			m.logger.Printf("[SESSION] ├─ Runtime mode: HOST (ACP will run directly on host)")
+			m.logger.Printf("[SESSION] ├─ Container command: %v", command)
+		}
+
 		launcherConfig := agent.LauncherConfig{
 			AgentID:   agentID,
 			ImageName: "ourocodus/agent:latest", // TODO: make configurable
-			Command:   []string{"/bin/bash"},    // TODO: make configurable
+			Command:   command,
 			Workspace: absPath,
 			// Credentials will be added in next task
 		}
+
+		m.logger.Printf("[SESSION] ├─ Creating container launcher (image: %s)", launcherConfig.ImageName)
 
 		launcher, err := m.launcherFactory.CreateLauncher(ctx, agentID, launcherConfig)
 		if err != nil {
@@ -262,11 +280,13 @@ func (m *Manager) SpawnAgent(ctx context.Context, userSessionID, agentID, worksp
 			agentSession.setError(err.Error())
 			agentSession.mu.Unlock()
 
-			m.logger.Printf("Failed to create launcher: session=%s agentID=%s error=%v", userSessionID, agentID, err)
+			m.logger.Printf("[SESSION] ✗ Failed to create launcher: %v", err)
 			return fmt.Errorf("failed to create launcher: %w", err)
 		}
+		m.logger.Printf("[SESSION] ✓ Launcher created successfully")
 
 		// NEW: Spawn agent container
+		m.logger.Printf("[SESSION] ├─ Spawning agent container...")
 		spawnConfig := &agent.SpawnConfig{
 			Role:      agentID,
 			Image:     launcherConfig.ImageName,
@@ -282,9 +302,10 @@ func (m *Manager) SpawnAgent(ctx context.Context, userSessionID, agentID, worksp
 			agentSession.setError(err.Error())
 			agentSession.mu.Unlock()
 
-			m.logger.Printf("Failed to spawn container: session=%s agentID=%s error=%v", userSessionID, agentID, err)
+			m.logger.Printf("[SESSION] ✗ Container spawn failed: %v", err)
 			return fmt.Errorf("failed to spawn agent: %w", err)
 		}
+		m.logger.Printf("[SESSION] ✓ Container spawned (id: %s)", handle.ContainerID())
 
 		// NEW: Store launcher and handle
 		key := launcherKey(userSessionID, agentID)
@@ -293,7 +314,7 @@ func (m *Manager) SpawnAgent(ctx context.Context, userSessionID, agentID, worksp
 		m.handles[key] = handle
 		m.launchersMu.Unlock()
 
-		m.logger.Printf("Agent container spawned: session=%s agentID=%s container=%s", userSessionID, agentID, handle.ContainerID())
+		// Container details logged, workspace is already logged above
 	}
 
 	runtimeCtx := &AgentRuntimeContext{
@@ -303,11 +324,16 @@ func (m *Manager) SpawnAgent(ctx context.Context, userSessionID, agentID, worksp
 	}
 	if handle != nil {
 		runtimeCtx.ContainerID = handle.ContainerID()
+		m.logger.Printf("[SESSION] ├─ Creating ACP client for container %s", handle.ContainerID())
+	} else {
+		m.logger.Printf("[SESSION] ├─ Creating ACP client for host process")
 	}
 
 	// Spawn ACP client (I/O - no lock held)
 	acpClient, err := m.clientFactory.NewClient(ctx, runtimeCtx)
 	if err != nil {
+		m.logger.Printf("[SESSION] ✗ Failed to create ACP client: %v", err)
+
 		// Cleanup launcher on client creation failure
 		if m.launcherFactory != nil {
 			key := launcherKey(userSessionID, agentID)
@@ -319,6 +345,7 @@ func (m *Manager) SpawnAgent(ctx context.Context, userSessionID, agentID, worksp
 			m.launchersMu.Unlock()
 
 			if launcher != nil && handle != nil {
+				m.logger.Printf("[SESSION] ├─ Cleaning up container after ACP client failure")
 				_ = launcher.Stop(ctx, handle)
 			}
 		}
@@ -329,9 +356,9 @@ func (m *Manager) SpawnAgent(ctx context.Context, userSessionID, agentID, worksp
 		agentSession.setError(err.Error())
 		agentSession.mu.Unlock()
 
-		m.logger.Printf("Agent spawn failed: session=%s agentID=%s error=%v", userSessionID, agentID, err)
 		return fmt.Errorf("failed to spawn ACP client: %w", err)
 	}
+	m.logger.Printf("[SESSION] ✓ ACP client created successfully")
 
 	// Transition agent to ACTIVE
 	agentSession.mu.Lock()
@@ -339,6 +366,8 @@ func (m *Manager) SpawnAgent(ctx context.Context, userSessionID, agentID, worksp
 	agentSession.setAgentState(AgentActive)
 	agentSession.setAgentLastActive(m.clock.Now())
 	agentSession.mu.Unlock()
+
+	m.logger.Printf("[SESSION] ✓ Agent '%s' is now ACTIVE (session: %s)", agentID, userSessionID)
 
 	// Publish agent.spawned event (synchronous, errors logged but non-fatal)
 	if m.publisher != nil {
