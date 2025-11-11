@@ -3,9 +3,16 @@ package session
 import (
 	"context"
 	"fmt"
+	"io"
+	"strings"
 	"testing"
 
 	"github.com/2389-research/ourocodus/pkg/containersession"
+	"github.com/docker/docker/api/types"
+	dockercontainer "github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/image"
+	"github.com/docker/docker/api/types/network"
+	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
 // TestACPClientFactory_MissingAPIKey tests error when ANTHROPIC_API_KEY not set
@@ -323,7 +330,10 @@ func TestCreateContainerLauncher_WithoutLogger(t *testing.T) {
 		ContainerID: "container-123",
 	}
 
-	launcher := factory.createContainerLauncher(runtime)
+	launcher, err := factory.createContainerLauncher(runtime)
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
 	if launcher == nil {
 		t.Fatal("Expected launcher, got nil")
 	}
@@ -351,7 +361,10 @@ func TestCreateContainerLauncher_WithLogger(t *testing.T) {
 		ContainerID: "container-123",
 	}
 
-	launcher := factory.createContainerLauncher(runtime)
+	launcher, err := factory.createContainerLauncher(runtime)
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
 	if launcher == nil {
 		t.Fatal("Expected launcher, got nil")
 	}
@@ -676,5 +689,71 @@ func (m *mockContainerExecService) ExecInContainer(ctx context.Context, containe
 }
 
 func (m *mockContainerExecService) GetDockerClient() containersession.DockerClient {
+	return &mockDockerClient{}
+}
+
+// mockDockerClient is a minimal mock implementation of DockerClient for testing
+type mockDockerClient struct{}
+
+func (m *mockDockerClient) ContainerCreate(ctx context.Context, config *dockercontainer.Config,
+	hostConfig *dockercontainer.HostConfig, networkingConfig *network.NetworkingConfig,
+	platform *ocispec.Platform, containerName string,
+) (dockercontainer.CreateResponse, error) {
+	return dockercontainer.CreateResponse{}, nil
+}
+
+func (m *mockDockerClient) ContainerStart(ctx context.Context, containerID string,
+	options dockercontainer.StartOptions,
+) error {
 	return nil
+}
+
+func (m *mockDockerClient) ContainerStop(ctx context.Context, containerID string,
+	options dockercontainer.StopOptions,
+) error {
+	return nil
+}
+
+func (m *mockDockerClient) ContainerAttach(ctx context.Context, containerID string,
+	options dockercontainer.AttachOptions,
+) (types.HijackedResponse, error) {
+	return types.HijackedResponse{}, nil
+}
+
+func (m *mockDockerClient) ContainerExecCreate(ctx context.Context, containerID string,
+	config dockercontainer.ExecOptions,
+) (dockercontainer.ExecCreateResponse, error) {
+	return dockercontainer.ExecCreateResponse{}, nil
+}
+
+func (m *mockDockerClient) ContainerExecAttach(ctx context.Context, execID string,
+	config dockercontainer.ExecAttachOptions,
+) (types.HijackedResponse, error) {
+	return types.HijackedResponse{}, nil
+}
+
+func (m *mockDockerClient) ContainerExecInspect(ctx context.Context, execID string) (dockercontainer.ExecInspect, error) {
+	return dockercontainer.ExecInspect{}, nil
+}
+
+func (m *mockDockerClient) ContainerRemove(ctx context.Context, containerID string,
+	options dockercontainer.RemoveOptions,
+) error {
+	return nil
+}
+
+func (m *mockDockerClient) ContainerList(ctx context.Context,
+	options dockercontainer.ListOptions,
+) ([]dockercontainer.Summary, error) {
+	return nil, nil
+}
+
+func (m *mockDockerClient) ContainerInspect(ctx context.Context, containerID string) (dockercontainer.InspectResponse, error) {
+	return dockercontainer.InspectResponse{}, nil
+}
+
+func (m *mockDockerClient) ImagePull(ctx context.Context, refStr string,
+	options image.PullOptions,
+) (io.ReadCloser, error) {
+	return io.NopCloser(strings.NewReader("")), nil
 }

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/2389-research/ourocodus/pkg/agent"
+	"github.com/2389-research/ourocodus/pkg/runtime"
 )
 
 const (
@@ -248,10 +249,9 @@ func (m *Manager) SpawnAgent(ctx context.Context, userSessionID, agentID, worksp
 	var handle agent.AgentHandle
 	if m.launcherFactory != nil {
 		// Select container command based on runtime mode
-		runtimeMode := os.Getenv("OUROCODUS_ACP_RUNTIME")
 		command := []string{"/bin/bash"} // Default: interactive shell for host mode
 
-		if runtimeMode == "container" {
+		if runtime.IsContainerMode() {
 			// Container mode: Use image default (ENTRYPOINT ["/usr/local/bin/acp"])
 			// ContainerAttachProcessLauncher will attach to the container's stdio
 			// where ACP runs as the main process. The CMD from image provides default args.

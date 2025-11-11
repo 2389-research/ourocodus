@@ -318,25 +318,31 @@ func cleanupOrphanedContainers(ctx context.Context, cli *client.Client) error {
 	log.Printf("[CLEANUP] Found %d orphaned container(s), cleaning up...", len(containers))
 
 	for _, cont := range containers {
+		// Safe truncation for logging
+		shortID := cont.ID
+		if len(shortID) > 12 {
+			shortID = shortID[:12]
+		}
+
 		// Check container age (Created is Unix timestamp in seconds)
 		created := time.Unix(cont.Created, 0)
 		age := time.Since(created)
 
 		if age < 1*time.Hour {
-			log.Printf("[CLEANUP] Skipping recent container %s (age: %v)", cont.ID[:12], age)
+			log.Printf("[CLEANUP] Skipping recent container %s (age: %v)", shortID, age)
 			continue
 		}
 
 		// Stop and remove
 		timeout := 10
 		if err := cli.ContainerStop(ctx, cont.ID, dockercontainer.StopOptions{Timeout: &timeout}); err != nil {
-			log.Printf("[CLEANUP] WARN: Failed to stop orphaned container %s: %v", cont.ID[:12], err)
+			log.Printf("[CLEANUP] WARN: Failed to stop orphaned container %s: %v", shortID, err)
 		}
 
 		if err := cli.ContainerRemove(ctx, cont.ID, dockercontainer.RemoveOptions{Force: true}); err != nil {
-			log.Printf("[CLEANUP] WARN: Failed to remove orphaned container %s: %v", cont.ID[:12], err)
+			log.Printf("[CLEANUP] WARN: Failed to remove orphaned container %s: %v", shortID, err)
 		} else {
-			log.Printf("[CLEANUP] Cleaned up orphaned container: %s", cont.ID[:12])
+			log.Printf("[CLEANUP] Cleaned up orphaned container: %s", shortID)
 		}
 	}
 

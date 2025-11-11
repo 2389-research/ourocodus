@@ -156,10 +156,12 @@ func (m *AgentWorktreeManager) cleanupStaleWorktree(ctx context.Context, worktre
 		}
 	}
 
-	// Prune any stale worktree references from git
+	// Always prune stale worktree references from git, even if directory didn't exist
+	// This runs regardless of whether Remove() succeeded, failed, or the directory wasn't present
+	// Best effort - we don't fail the operation if prune fails since the directory is already cleaned
 	cmd := exec.CommandContext(ctx, "git", "worktree", "prune")
 	cmd.Dir = m.repoPath
-	_ = cmd.Run() // Best effort, ignore errors
+	_ = cmd.Run()
 
 	return nil
 }

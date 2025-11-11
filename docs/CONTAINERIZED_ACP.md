@@ -8,7 +8,7 @@ Previously, ACP processes ran on the host machine. Now, ACP runs inside agent Do
 
 ## Architecture
 
-```
+```text
 ┌─────────────────────────────────────────────────────────┐
 │                     Relay Server                         │
 │  ┌───────────────────────────────────────────────────┐  │
@@ -28,9 +28,10 @@ Previously, ACP processes ran on the host machine. Now, ACP runs inside agent Do
 │ Host Mode        │         │ Container Mode          │
 │ (default)        │         │ (OUROCODUS_ACP_RUNTIME= │
 │                  │         │  container)             │
-│ HostProcessLaunch│         │ ContainerExecProcess    │
+│ HostProcessLaunch│         │ ContainerAttachProcess  │
 │                  │         │ Launcher                │
-│ Uses os/exec     │         │ Uses docker exec        │
+│ Uses os/exec     │         │ Attaches to container   │
+│                  │         │ stdio                   │
 └──────────────────┘         └─────────────────────────┘
                                        │
                                        v
@@ -39,7 +40,8 @@ Previously, ACP processes ran on the host machine. Now, ACP runs inside agent Do
                              │ ┌──────────────────┐ │
                              │ │ ACP Binary       │ │
                              │ │ (echo-agent)     │ │
-                             │ │                  │ │
+                             │ │ Runs as main     │ │
+                             │ │ process          │ │
                              │ │ Stdio: JSON-RPC  │ │
                              │ └──────────────────┘ │
                              │                      │
@@ -79,21 +81,23 @@ echo '{"jsonrpc":"2.0","id":1,"method":"agent/sendMessage","params":{"content":"
   docker run --rm -i ourocodus/agent:latest
 ```
 
-### Issue #195: Launch ACP via Container Exec
+### Issue #195: Launch ACP via Container Attach
 
 **Implementation Notes:**
-The implementation was already complete! The following components existed:
+ACP runs as the container's main process with direct stdio attachment:
 
-1. **ContainerExecProcessLauncher** (`pkg/relay/session/container_exec_process_launcher.go`):
+1. **ContainerAttachProcessLauncher** (`pkg/relay/session/container_attach_process_launcher.go`):
    - Implements `acp.ProcessLauncher` interface
-   - Uses `containersession.Manager.ExecInContainer()` for docker exec
-   - Rewrites workspace paths from host to container paths
-   - Returns `containerExecTransport` wrapping exec stdio streams
+   - Attaches to container's main process stdio using `dockerClient.ContainerAttach()`
+   - Demultiplexes Docker's stream format (stdout/stderr) using `stdcopy.StdCopy()`
+   - Logs stderr line-by-line with container ID prefix
+   - Returns `containerAttachTransport` wrapping hijacked connection
 
 2. **ACPClientFactory** (`pkg/relay/session/client_factory.go`):
    - `selectLauncher()` chooses between host and container modes
    - Based on `OUROCODUS_ACP_RUNTIME` environment variable
-   - Validates container prerequisites (container ID, manager availability)
+   - Validates container prerequisites (container ID, Docker client availability)
+   - Creates `ContainerAttachProcessLauncher` for container mode
 
 3. **AgentContainerHandle** (`pkg/agent/container/types.go`):
    - Provides `ContainerID()` method
@@ -104,7 +108,7 @@ The implementation was already complete! The following components existed:
 mode := os.Getenv("OUROCODUS_ACP_RUNTIME")
 switch mode {
 case "host":    // Default - uses HostProcessLauncher
-case "container": // Uses ContainerExecProcessLauncher (requires ContainerID)
+case "container": // Uses ContainerAttachProcessLauncher (requires ContainerID)
 }
 ```
 
@@ -153,16 +157,17 @@ echo '{"jsonrpc":"2.0","id":1,"method":"agent/sendMessage","params":{"content":"
 ## Files Modified
 
 - `Makefile` - Added `acp-binary` target, updated `agent-image` dependency
-- `Dockerfile.agent` - Added ACP binary, updated entrypoint/cmd
+- `Dockerfile.agent` - Multi-stage build to compile ACP binary, updated entrypoint/cmd
+- `pkg/relay/session/container_attach_process_launcher.go` - **NEW** - Container attach launcher
+- `pkg/relay/session/container_exec_process_launcher.go` - Modified to add logging and accept logger parameter
+- `pkg/relay/session/client_factory.go` - Updated to create ContainerAttachProcessLauncher for container mode
+- `pkg/relay/session/runtime.go` - **NEW** - Shared runtime mode checking functions
+- `pkg/relay/session/manager.go` - Added logging and uses runtime mode helper functions
+- `pkg/agent/container/launcher.go` - Uses runtime mode helper to check for container attach mode
+- `pkg/containersession/manager.go` - Added skip output logging support for attach mode
+- `pkg/containersession/session.go` - Added skipOutputLogging field
+- `pkg/containersession/config.go` - Added SkipOutputLogging configuration option
 - `docs/CONTAINERIZED_ACP.md` - This documentation
-
-## Files Already Implemented (No Changes)
-
-- `pkg/relay/session/container_exec_process_launcher.go` - Container launcher
-- `pkg/relay/session/container_exec_process_launcher_test.go` - Tests
-- `pkg/relay/session/client_factory.go` - Launcher selection logic
-- `pkg/containersession/exec.go` - Docker exec implementation
-- `pkg/agent/container/types.go` - AgentContainerHandle
 
 ## Future Work
 

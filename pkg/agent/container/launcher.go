@@ -3,10 +3,10 @@ package container
 import (
 	"context"
 	"fmt"
-	"os"
 	"sync"
 
 	"github.com/2389-research/ourocodus/pkg/containersession"
+	"github.com/2389-research/ourocodus/pkg/runtime"
 	"github.com/2389-research/ourocodus/pkg/worktree"
 )
 
@@ -199,7 +199,7 @@ func (l *AgentContainerLauncher) createContainerWithMounts(
 
 	// Check if we're using container attach mode (where ACP runs as main process)
 	// In this mode, we skip the manager's output logging to avoid competing for stdio streams
-	skipOutputLogging := os.Getenv("OUROCODUS_ACP_RUNTIME") == "container"
+	skipOutputLogging := runtime.IsContainerMode()
 
 	// Create container session with custom configuration
 	// Pass the worktree path as WorkspaceDir so the Manager uses it instead of creating its own

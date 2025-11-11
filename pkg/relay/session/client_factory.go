@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/2389-research/ourocodus/pkg/acp"
+	"github.com/2389-research/ourocodus/pkg/runtime"
 )
 
 // ACPClientFactory implements ClientFactory using pkg/acp.Client with runtime-based launcher selection.
@@ -89,16 +90,9 @@ func (f *ACPClientFactory) NewClient(ctx context.Context, runtime *AgentRuntimeC
 }
 
 // getRuntimeMode reads and validates the OUROCODUS_ACP_RUNTIME environment variable.
-// Returns "host" (default), "container", or an error for invalid values.
+// Deprecated: Use runtime.GetACPRuntimeMode() instead. This wrapper is kept for backwards compatibility.
 func getRuntimeMode() (string, error) {
-	mode := os.Getenv("OUROCODUS_ACP_RUNTIME")
-	if mode == "" {
-		return "host", nil // default
-	}
-	if mode == "host" || mode == "container" {
-		return mode, nil
-	}
-	return "", fmt.Errorf("invalid OUROCODUS_ACP_RUNTIME value: %q (must be 'host' or 'container')", mode)
+	return runtime.GetACPRuntimeMode()
 }
 
 // validateContainerPrerequisites checks if all prerequisites for container execution are met.
@@ -129,7 +123,7 @@ func (f *ACPClientFactory) createHostLauncher(runtime *AgentRuntimeContext) acp.
 
 // createContainerLauncher creates a container attach launcher configured for the runtime context.
 // Logs the decision if logger is available.
-func (f *ACPClientFactory) createContainerLauncher(runtime *AgentRuntimeContext) acp.ProcessLauncher {
+func (f *ACPClientFactory) createContainerLauncher(runtime *AgentRuntimeContext) (acp.ProcessLauncher, error) {
 	if f.logger != nil {
 		f.logger.Printf("[ACP] Using container attach launcher for session=%s agent=%s container=%s",
 			runtime.SessionID, runtime.AgentID, runtime.ContainerID)
@@ -137,6 +131,10 @@ func (f *ACPClientFactory) createContainerLauncher(runtime *AgentRuntimeContext)
 
 	// Get Docker client from container session manager
 	dockerClient := f.containerSessionMgr.GetDockerClient()
+	if dockerClient == nil {
+		return nil, fmt.Errorf("docker client unavailable from container session manager (session=%s agent=%s)",
+			runtime.SessionID, runtime.AgentID)
+	}
 
 	launcher := NewContainerAttachProcessLauncher(
 		dockerClient,
@@ -144,7 +142,7 @@ func (f *ACPClientFactory) createContainerLauncher(runtime *AgentRuntimeContext)
 		f.logger,
 	)
 
-	return launcher
+	return launcher, nil
 }
 
 // selectLauncher chooses between host and container execution based on runtime context and environment.
@@ -162,7 +160,7 @@ func (f *ACPClientFactory) selectLauncher(runtime *AgentRuntimeContext) (acp.Pro
 		if err := validateContainerPrerequisites(runtime, f.containerSessionMgr); err != nil {
 			return nil, err
 		}
-		return f.createContainerLauncher(runtime), nil
+		return f.createContainerLauncher(runtime)
 	default:
 		// Should never reach here due to getRuntimeMode validation
 		return nil, fmt.Errorf("unexpected runtime mode: %q (session=%s agent=%s)", mode, runtime.SessionID, runtime.AgentID)

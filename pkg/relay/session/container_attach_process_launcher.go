@@ -84,12 +84,17 @@ func (l *ContainerAttachProcessLauncher) Start(ctx context.Context, cfg acp.Proc
 		stderrWriter = stderrWriterPipe
 
 		go func() {
+			defer func() { _ = stderrReader.Close() }()
 			scanner := bufio.NewScanner(stderrReader)
 			for scanner.Scan() {
 				line := strings.TrimSpace(scanner.Text())
 				if line != "" {
 					l.logger.Printf("[%s:stderr] %s", shortID, line)
 				}
+			}
+			// Check for scanner errors
+			if err := scanner.Err(); err != nil && l.logger != nil {
+				l.logger.Printf("[%s:stderr] Scanner error: %v", shortID, err)
 			}
 		}()
 	} else {
@@ -105,6 +110,8 @@ func (l *ContainerAttachProcessLauncher) Start(ctx context.Context, cfg acp.Proc
 		if closer, ok := stderrWriter.(io.Closer); ok {
 			_ = closer.Close()
 		}
+		// Close the hijacked response to release resources
+		attachResp.Close()
 	}()
 
 	return &containerAttachTransport{
