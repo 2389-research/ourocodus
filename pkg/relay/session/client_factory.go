@@ -73,6 +73,7 @@ func (f *ACPClientFactory) NewClient(ctx context.Context, runtime *AgentRuntimeC
 	// Build client options
 	opts := []acp.ClientOption{
 		acp.WithProcessLauncher(launcher),
+		acp.WithLaunchContext(ctx), // Enable cancellation for launcher operations
 	}
 
 	if f.acpBinaryPath != "" {

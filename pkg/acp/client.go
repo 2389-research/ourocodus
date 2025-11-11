@@ -30,6 +30,7 @@ type clientConfig struct {
 	logger      Logger
 	launcher    ProcessLauncher
 	env         map[string]string
+	launchCtx   context.Context
 }
 
 // WithCommand sets a custom command path and args for the ACP process
@@ -49,6 +50,19 @@ func WithLogger(logger Logger) ClientOption {
 			return
 		}
 		c.logger = logger
+	}
+}
+
+// WithLaunchContext sets the context used for launching the ACP process.
+// This enables cancellation and timeouts for docker exec operations.
+// If not provided, defaults to context.Background().
+func WithLaunchContext(ctx context.Context) ClientOption {
+	return func(c *clientConfig) {
+		if ctx == nil {
+			c.launchCtx = context.Background()
+			return
+		}
+		c.launchCtx = ctx
 	}
 }
 
@@ -73,6 +87,7 @@ func NewClient(workspace string, apiKey string, opts ...ClientOption) (*Client, 
 		commandPath: "claude-code-acp",
 		logger:      noOpLogger{},
 		launcher:    &HostProcessLauncher{},
+		launchCtx:   context.Background(),
 	}
 	for _, opt := range opts {
 		opt(cfg)
@@ -89,6 +104,9 @@ func NewClient(workspace string, apiKey string, opts ...ClientOption) (*Client, 
 	if cfg.env == nil {
 		cfg.env = make(map[string]string)
 	}
+	if cfg.launchCtx == nil {
+		cfg.launchCtx = context.Background()
+	}
 
 	launchCfg := ProcessLaunchConfig{
 		Workspace:   workspace,
@@ -98,7 +116,7 @@ func NewClient(workspace string, apiKey string, opts ...ClientOption) (*Client, 
 		Env:         cloneEnvMap(cfg.env),
 	}
 
-	transport, err := cfg.launcher.Start(context.Background(), launchCfg)
+	transport, err := cfg.launcher.Start(cfg.launchCtx, launchCfg)
 	if err != nil {
 		return nil, err
 	}
