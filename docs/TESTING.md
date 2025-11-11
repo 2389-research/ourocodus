@@ -82,6 +82,149 @@ mockClock.SetTime(time.Unix(2000, 0)) // Set to specific time
 
 **Important:** Always use the injected clock (`m.clock.Now()`) instead of calling `time.Now()` directly in session-related code.
 
+### ACP Container Execution Testing
+
+The ACP launcher selection and container execution system uses a three-tier testing approach to ensure reliability across different execution modes.
+
+#### Testing Tiers
+
+**1. Unit Tests (Fast, No Dependencies)**
+
+Location: `pkg/relay/session/client_factory_test.go`
+
+These tests validate individual functions in isolation with no external dependencies:
+
+```bash
+# Run unit tests for launcher selection
+go test ./pkg/relay/session -run "TestGetRuntimeMode|TestValidateContainerPrerequisites|TestCreateHostLauncher|TestCreateContainerLauncher|TestSelectLauncher"
+```
+
+**Coverage:**
+- `getRuntimeMode()` - Environment variable parsing and validation (4 test cases)
+- `validateContainerPrerequisites()` - Prerequisite validation logic (4 test cases)
+- `createHostLauncher()` - Host launcher factory (2 test cases)
+- `createContainerLauncher()` - Container launcher factory (2 test cases)
+- `selectLauncher()` - Integration of all components (6 test cases)
+
+**Benefits:**
+- Fast execution (milliseconds)
+- No Docker required
+- Deterministic results
+- Easy to debug
+
+**2. Integration Tests (Medium Speed, Mocked Dependencies)**
+
+Location: `pkg/relay/session/client_factory_test.go`
+
+These tests validate the full `NewClient()` flow with mocked container managers:
+
+```bash
+# Run integration tests for ACP client creation
+go test ./pkg/relay/session -run "TestNewClient_Integration"
+```
+
+**Coverage:**
+- Host mode client creation (success path)
+- Container mode validation failures (missing prerequisites, container ID, manager)
+- Runtime context validation (nil runtime, empty workspace)
+
+**Benefits:**
+- Validates full flow from client factory to launcher selection
+- Tests error propagation through the stack
+- No Docker required
+- Runs in normal test suite
+
+**3. Smoke Tests (Slow, Real Docker Required)**
+
+Location: `tests/e2e/acp_container_exec_test.go`
+
+These tests validate actual Docker container execution with real containers:
+
+```bash
+# Run smoke tests (requires Docker)
+go test -tags=integration ./tests/e2e -run "TestContainerExecProcessLauncher"
+```
+
+**Coverage:**
+- `TestContainerExecProcessLauncher_SmokeTest` - Basic command execution inside containers
+- `TestContainerExecProcessLauncher_WithEchoAgent` - Echo-agent binary execution in containers
+
+**Requirements:**
+- Docker daemon running (Docker Desktop or Colima)
+- Alpine image pullable from Docker Hub
+- For echo-agent test: Built echo-agent binary at `./bin/echo-agent`
+
+**Benefits:**
+- Validates real Docker integration
+- Catches Docker API compatibility issues
+- Verifies workspace mounting
+- Tests actual command execution
+
+#### Running Tests by Category
+
+```bash
+# Fast: Unit tests only (no Docker)
+go test ./pkg/relay/session -run "Test(GetRuntimeMode|ValidateContainerPrerequisites|CreateHostLauncher|CreateContainerLauncher|SelectLauncher)"
+
+# Medium: Unit + Integration tests (no Docker)
+go test ./pkg/relay/session
+
+# Slow: All tests including smoke tests (requires Docker)
+go test -tags=integration ./tests/e2e
+
+# All ACP-related tests
+make test  # Runs unit + integration (no Docker)
+make test-integration  # Runs smoke tests (requires Docker)
+```
+
+#### Test Coverage Summary
+
+| Component | Unit Tests | Integration Tests | Smoke Tests | Total Coverage |
+|-----------|-----------|------------------|-------------|----------------|
+| `getRuntimeMode()` | 4 | - | - | 100% |
+| `validateContainerPrerequisites()` | 4 | - | - | 100% |
+| `createHostLauncher()` | 2 | - | - | 100% |
+| `createContainerLauncher()` | 2 | - | - | 100% |
+| `selectLauncher()` | 6 | - | - | 83.4% |
+| `NewClient()` | - | 5 | - | Key paths |
+| Container exec | - | - | 2 | Real Docker |
+
+#### Docker Environment Setup
+
+The smoke tests automatically detect your Docker environment:
+
+**Colima (preferred):**
+```bash
+# Start Colima
+colima start
+
+# Tests will automatically detect socket at:
+# ~/.colima/default/docker.sock
+```
+
+**Docker Desktop:**
+```bash
+# Tests will use default socket at:
+# /var/run/docker.sock
+```
+
+#### CI/CD Integration
+
+**Standard CI (Unit + Integration):**
+```yaml
+- name: Run tests
+  run: make test
+```
+
+**Extended CI (Include Smoke Tests):**
+```yaml
+- name: Setup Docker
+  uses: docker/setup-buildx-action@v2
+
+- name: Run integration tests
+  run: go test -tags=integration ./tests/e2e
+```
+
 ## Integration Test Gaps (Future Work)
 
 ### Gap 1: WebSocket Server Integration
