@@ -9,6 +9,7 @@ import (
 	"github.com/2389-research/ourocodus/pkg/containersession"
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/pkg/stdcopy"
 )
 
 // ContainerAttachProcessLauncher runs ACP by attaching to a container's main process stdio.
@@ -63,17 +64,34 @@ func (l *ContainerAttachProcessLauncher) Start(ctx context.Context, cfg acp.Proc
 		l.logger.Printf("[ACP→ATTACH] ✓ Attached to container %s stdio successfully", l.containerID[:12])
 	}
 
+	// Create pipes for demultiplexed stdout/stderr
+	stdoutReader, stdoutWriter := io.Pipe()
+	stderrReader, stderrWriter := io.Pipe()
+
+	// Start demultiplexing goroutine
+	// Docker uses a special stream format when Tty=false that needs to be demultiplexed
+	go func() {
+		_, err := stdcopy.StdCopy(stdoutWriter, stderrWriter, attachResp.Reader)
+		stdoutWriter.CloseWithError(err)
+		stderrWriter.CloseWithError(err)
+	}()
+
 	return &containerAttachTransport{
 		hijackedResp: attachResp,
+		stdout:       stdoutReader,
+		stderr:       stderrReader,
 	}, nil
 }
 
 type containerAttachTransport struct {
 	hijackedResp types.HijackedResponse
+	stdout       io.ReadCloser
+	stderr       io.ReadCloser
 }
 
 func (t *containerAttachTransport) Read(p []byte) (int, error) {
-	return t.hijackedResp.Reader.Read(p)
+	// Read from demultiplexed stdout
+	return t.stdout.Read(p)
 }
 
 func (t *containerAttachTransport) Write(p []byte) (int, error) {
@@ -81,13 +99,19 @@ func (t *containerAttachTransport) Write(p []byte) (int, error) {
 }
 
 func (t *containerAttachTransport) Close() error {
+	// Close stdout/stderr pipes
+	if t.stdout != nil {
+		t.stdout.Close()
+	}
+	if t.stderr != nil {
+		t.stderr.Close()
+	}
+	// Close hijacked connection
 	t.hijackedResp.Close()
 	return nil
 }
 
 func (t *containerAttachTransport) Stderr() io.Reader {
-	// With Docker attach, stderr is multiplexed in the same stream
-	// The Reader will contain both stdout and stderr in Docker's stream format
-	// For now, return the same reader - Docker's stdcopy package can demux if needed
-	return t.hijackedResp.Reader
+	// Return demultiplexed stderr stream
+	return t.stderr
 }
