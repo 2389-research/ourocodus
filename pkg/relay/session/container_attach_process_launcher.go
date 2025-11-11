@@ -32,15 +32,22 @@ func NewContainerAttachProcessLauncher(dockerClient containersession.DockerClien
 }
 
 func (l *ContainerAttachProcessLauncher) Start(ctx context.Context, cfg acp.ProcessLaunchConfig) (acp.Transport, error) {
-	if l.logger != nil {
-		l.logger.Printf("[ACP→ATTACH] Attaching to container %s stdio", l.containerID[:12])
-	}
-
+	// Validate first before logging
 	if l.dockerClient == nil {
 		return nil, fmt.Errorf("docker client is required")
 	}
 	if l.containerID == "" {
 		return nil, fmt.Errorf("container ID is required for container attach launcher")
+	}
+
+	// Safe truncation for logging
+	shortID := l.containerID
+	if len(shortID) > 12 {
+		shortID = shortID[:12]
+	}
+
+	if l.logger != nil {
+		l.logger.Printf("[ACP→ATTACH] Attaching to container %s stdio", shortID)
 	}
 
 	// Attach to the container's stdin/stdout/stderr
@@ -63,7 +70,7 @@ func (l *ContainerAttachProcessLauncher) Start(ctx context.Context, cfg acp.Proc
 	}
 
 	if l.logger != nil {
-		l.logger.Printf("[ACP→ATTACH] ✓ Attached to container %s stdio successfully", l.containerID[:12])
+		l.logger.Printf("[ACP→ATTACH] ✓ Attached to container %s stdio successfully", shortID)
 	}
 
 	// Create pipes for demultiplexed stdout/stderr
@@ -81,7 +88,7 @@ func (l *ContainerAttachProcessLauncher) Start(ctx context.Context, cfg acp.Proc
 			for scanner.Scan() {
 				line := strings.TrimSpace(scanner.Text())
 				if line != "" {
-					l.logger.Printf("[%s:stderr] %s", l.containerID[:12], line)
+					l.logger.Printf("[%s:stderr] %s", shortID, line)
 				}
 			}
 		}()

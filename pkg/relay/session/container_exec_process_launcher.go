@@ -87,10 +87,7 @@ func rewriteWorkspaceArg(args []string, containerPath string) []string {
 }
 
 func (l *ContainerExecProcessLauncher) Start(ctx context.Context, cfg acp.ProcessLaunchConfig) (acp.Transport, error) {
-	if l.logger != nil {
-		l.logger.Printf("[ACP→EXEC] Starting ACP via docker exec in container %s", l.containerID[:12])
-	}
-
+	// Validate first before logging
 	if l.execService == nil {
 		return nil, fmt.Errorf("containersession manager is required")
 	}
@@ -102,6 +99,16 @@ func (l *ContainerExecProcessLauncher) Start(ctx context.Context, cfg acp.Proces
 	}
 	if cfg.APIKey == "" {
 		return nil, fmt.Errorf("API key is required")
+	}
+
+	// Safe truncation for logging
+	shortID := l.containerID
+	if len(shortID) > 12 {
+		shortID = shortID[:12]
+	}
+
+	if l.logger != nil {
+		l.logger.Printf("[ACP→EXEC] Starting ACP via docker exec in container %s", shortID)
 	}
 
 	// Use configured workspace path (set via WithWorkspacePath or defaulted in constructor)
@@ -134,7 +141,7 @@ func (l *ContainerExecProcessLauncher) Start(ctx context.Context, cfg acp.Proces
 	}
 
 	if l.logger != nil {
-		l.logger.Printf("[ACP→EXEC] ├─ Executing docker exec into container %s...", l.containerID[:12])
+		l.logger.Printf("[ACP→EXEC] ├─ Executing docker exec into container %s...", shortID)
 	}
 
 	attachment, err := l.execService.ExecInContainer(ctx, l.containerID, execCfg)
@@ -146,7 +153,7 @@ func (l *ContainerExecProcessLauncher) Start(ctx context.Context, cfg acp.Proces
 	}
 
 	if l.logger != nil {
-		l.logger.Printf("[ACP→EXEC] ✓ ACP process started successfully in container %s", l.containerID[:12])
+		l.logger.Printf("[ACP→EXEC] ✓ ACP process started successfully in container %s", shortID)
 	}
 
 	return &containerExecTransport{attachment: attachment}, nil
