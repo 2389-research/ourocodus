@@ -1,8 +1,37 @@
-# Ourocodus Communication Protocols
+# Future Architecture (Speculative)
+
+> **⚠️ IMPORTANT: This document describes a POSSIBLE future architecture that does NOT currently exist.**
+>
+> **Current Reality (Phase 1):**
+> ```
+> PWA → WebSocket → Relay → stdio → ACP (Claude Code)
+> ```
+>
+> - Direct stdio communication with agents
+> - No Coordinator, no multi-agent orchestration
+> - NATS is optional (event logging only, disabled by default)
+> - Container mode is optional (host mode is default)
+>
+> **See:** [WEBSOCKET_API.md](WEBSOCKET_API.md), [ACP.md](ACP.md), [ACP_PROTOCOL.md](ACP_PROTOCOL.md)
+>
+> ---
+>
+> This document explores potential evolution paths for when/if we need:
+> - Automated workflow coordination
+> - Multi-agent orchestration
+> - Distributed deployment
+> - Complex approval gates
+>
+> These are design ideas, not commitments. The current stdio-based architecture works well
+> for single-user, local-first use cases and may remain the primary architecture indefinitely.
+
+---
+
+# Multi-Service Architecture (Speculative)
 
 ## Overview
 
-This document defines the communication boundaries, message formats, and interaction patterns between Ourocodus components.
+This document explores potential communication boundaries, message formats, and interaction patterns if Ourocodus evolves into a multi-service distributed system.
 
 ## Design Goals
 
@@ -54,8 +83,6 @@ flowchart TD
 - Access event log
 - Serve web UI
 
-**Format:** See [API Server PRD](../prd/api.md)
-
 ### 2. Server-Sent Events (API Server → Clients)
 
 **Purpose:** Real-time event streaming to web UI
@@ -77,13 +104,13 @@ flowchart TD
 
 **Format:**
 
-```text
+```
 event: message
 data: {"type":"work.started","userSessionId":"sess_123"}
 
 event: message
 data: {"type":"work.completed","userSessionId":"sess_123"}
-```text
+```
 
 ### 3. NATS Pub/Sub (All Backend Components)
 
@@ -105,8 +132,6 @@ data: {"type":"work.completed","userSessionId":"sess_123"}
 - Approval requests (Coordinator → Approval Service)
 - Event broadcasting (All → Event Logger)
 
-**Format:** See [Message Schemas](#message-schemas)
-
 ### 4. Docker API (API Server ↔ Docker)
 
 **Purpose:** Container lifecycle management
@@ -117,7 +142,7 @@ data: {"type":"work.completed","userSessionId":"sess_123"}
 
 - Synchronous
 - Well-defined SDK
-- Local only (POC)
+- Local only
 
 **Use Cases:**
 
@@ -130,7 +155,7 @@ data: {"type":"work.completed","userSessionId":"sess_123"}
 
 NATS topics follow a hierarchical naming convention:
 
-```text
+```
 <domain>.<entity>.<action>
 
 Examples:
@@ -139,7 +164,7 @@ Examples:
   sessions.sess_123.approvals      # Approval requests
   sessions.sess_123.events         # Event broadcast
   system.health                    # System health messages
-```text
+```
 
 ### Topic Patterns
 
@@ -188,7 +213,7 @@ All NATS messages use a standard envelope format:
     // Type-specific data
   }
 }
-```text
+```
 
 **Fields:**
 
@@ -223,7 +248,7 @@ Coordinator → Agent: Write implementation code
     }
   }
 }
-```text
+```
 
 #### `work.testing`
 
@@ -245,7 +270,7 @@ Coordinator → Agent: Write tests
     }
   }
 }
-```text
+```
 
 #### `work.review`
 
@@ -264,7 +289,7 @@ Coordinator → Agent: Review code quality
     }
   }
 }
-```text
+```
 
 ### Result Messages
 
@@ -286,7 +311,7 @@ Agent → Coordinator: Work completed successfully
     }
   }
 }
-```text
+```
 
 #### `result.failure`
 
@@ -305,7 +330,7 @@ Agent → Coordinator: Work failed
     }
   }
 }
-```text
+```
 
 ### Approval Messages
 
@@ -328,7 +353,7 @@ Coordinator → Approval Service: Request human approval
     }
   }
 }
-```text
+```
 
 #### `approval.granted`
 
@@ -344,7 +369,7 @@ Approval Service → Coordinator: Approval granted
     "notes": "Looks good"
   }
 }
-```text
+```
 
 #### `approval.rejected`
 
@@ -360,7 +385,7 @@ Approval Service → Coordinator: Approval rejected
     "reason": "Missing error handling in auth.go:42"
   }
 }
-```text
+```
 
 ### Event Messages
 
@@ -377,7 +402,7 @@ System → Event Logger: Agent started
     "container_id": "docker_abc"
   }
 }
-```text
+```
 
 #### `event.agent.stopped`
 
@@ -391,7 +416,7 @@ System → Event Logger: Agent stopped
     "reason": "work_complete"
   }
 }
-```text
+```
 
 ## Message Ordering
 
@@ -429,7 +454,6 @@ System → Event Logger: Agent stopped
 
 - NATS silently drops (no error)
 - Consider: add request-reply pattern for critical messages
-- POC: acceptable, add monitoring post-POC
 
 ### Malformed Messages
 
@@ -454,9 +478,9 @@ System → Event Logger: Agent stopped
 
 Embed version in type name when needed:
 
-```text
+```
 "work.coding" → "work.coding.v2"
-```text
+```
 
 **Rules:**
 
@@ -477,12 +501,11 @@ switch msg.Type {
 case "work.coding", "work.coding.v1":
     // Handle both old and new
 }
-```text
+```
 
 ## Schema Validation
 
-**POC:** No runtime validation (rely on Go structs)
-**Post-POC:** Consider JSON Schema for validation
+Consider JSON Schema for validation in production deployment.
 
 ## Observability
 
@@ -500,20 +523,17 @@ Every message sent/received is logged:
   "message_id": "msg_abc123",
   "message_type": "work.coding"
 }
-```text
+```
 
 ### Tracing
 
-Future: Add `trace_id` to envelope for distributed tracing
+Add `trace_id` to envelope for distributed tracing
 
 ### Metrics
 
-Future: Track message counts, latencies, error rates
+Track message counts, latencies, error rates
 
-## Security (Deferred for POC)
-
-**POC:** No encryption, authentication, or authorization
-**Post-POC:**
+## Security
 
 - TLS for NATS connections
 - Message signing for authenticity
@@ -533,9 +553,15 @@ Real NATS server, verify end-to-end delivery
 
 Verify producer/consumer compatibility
 
+## Open Questions
+
+1. **Do we actually need a Coordinator?** Current manual control via PWA works well
+2. **Is NATS overkill for local single-user?** stdio is simpler and more debuggable
+3. **What workflows need automation?** TBD based on user feedback
+4. **Multi-agent coordination use cases?** Unclear if agents need to communicate
+
 ## References
 
 - [NATS Documentation](https://docs.nats.io/)
-- [API Server PRD](../prd/api.md)
-- [Coordinator PRD](../prd/coordinator.md)
-- [Relay PRD](../prd/relay.md)
+- [Current Implementation: WEBSOCKET_API.md](WEBSOCKET_API.md)
+- [Current Implementation: ACP.md](ACP.md)

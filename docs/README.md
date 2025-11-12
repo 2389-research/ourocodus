@@ -28,7 +28,9 @@ Understanding how Ourocodus works:
 - [**ACP.md**](architecture/ACP.md) - Agent Client Protocol integration and transport layer
 - [**AGENT_RUNTIME.md**](architecture/AGENT_RUNTIME.md) - Runtime components, session types, and lifecycle
 - [**NATS.md**](architecture/NATS.md) - Message bus architecture and JetStream integration
-- [**PROTOCOLS.md**](architecture/PROTOCOLS.md) - Communication patterns and message flows
+- [**WEBSOCKET_API.md**](architecture/WEBSOCKET_API.md) - WebSocket protocol reference (PWA ↔ Relay)
+- [**ACP_PROTOCOL.md**](architecture/ACP_PROTOCOL.md) - ACP JSON-RPC wire format (Relay ↔ Agent)
+- [**FUTURE_ARCHITECTURE.md**](architecture/FUTURE_ARCHITECTURE.md) - Speculative multi-service design (not implemented)
 - [**PWA.md**](architecture/PWA.md) - Progressive Web App frontend architecture
 
 ### Detailed Design Documents
