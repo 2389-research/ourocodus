@@ -822,8 +822,8 @@ execCfg := containersession.ExecConfig{
 
 - [Message Flow](MESSAGE_FLOW.md) - End-to-end message routing through all layers
 - [ACP Protocol](ACP_PROTOCOL.md) - JSON-RPC wire format specification
-- [Container Session Management](../operations/CONTAINER_SESSIONS.md) - Container lifecycle
 - [Testing Guide](../development/TESTING.md) - E2E tests for both modes
+- [Container Session Package](../../pkg/containersession/README.md) - Low-level container API
 
 ---
 
