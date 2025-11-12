@@ -111,4 +111,4 @@ When contributing documentation:
 
 **Questions or suggestions?** Open an issue with the `documentation` label.
 
-**Last Updated:** 2025-01-12
+**Last Updated:** 2025-11-12
