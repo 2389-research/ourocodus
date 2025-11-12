@@ -1,9 +1,14 @@
-# Exclude historical documentation
+# Exclude historical documentation (use multiple patterns to ensure coverage)
 docs/history/**
+docs/history/
+docs/history/2025-Q4-milestone1-2/**
+docs/history/2025-Q4-milestone1-2/
 
 # Exclude implementation plans and test plans (may reference future/incomplete code)
 docs/implementation/**
+docs/implementation/
 docs/testing/**
+docs/testing/
 
 # Exclude redirect stubs (they contain links to old paths by design)
 docs/AGENT_RUNTIME.md
