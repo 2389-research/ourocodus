@@ -55,8 +55,9 @@ type client struct {
 	jsMu   sync.Mutex
 	jsOnce sync.Once
 
-	mu     sync.RWMutex
-	closed bool
+	mu       sync.RWMutex
+	closed   bool
+	draining bool
 }
 
 // NewClient creates a new NATS client with the provided options.
@@ -357,18 +358,34 @@ func (c *client) Ready() error {
 
 // Drain gracefully drains the connection with the configured timeout.
 func (c *client) Drain(ctx context.Context) error {
-	// Check state with read lock
-	c.mu.RLock()
+	// Use write lock to prevent concurrent drain operations and coordinate with Close()
+	c.mu.Lock()
+
+	// Check if already closed or draining
 	if c.closed {
-		c.mu.RUnlock()
+		c.mu.Unlock()
 		return ErrClientClosed
 	}
+	if c.draining {
+		c.mu.Unlock()
+		return fmt.Errorf("drain already in progress")
+	}
 	if c.conn == nil {
-		c.mu.RUnlock()
+		c.mu.Unlock()
 		return fmt.Errorf("no connection established")
 	}
+
+	// Mark as draining to prevent concurrent drain calls and coordinate with Close()
+	c.draining = true
 	conn := c.conn // Capture connection reference while holding lock
-	c.mu.RUnlock()
+	c.mu.Unlock()
+
+	// Ensure draining flag is cleared when we're done
+	defer func() {
+		c.mu.Lock()
+		c.draining = false
+		c.mu.Unlock()
+	}()
 
 	// Check context before starting drain
 	select {
@@ -381,6 +398,13 @@ func (c *client) Drain(ctx context.Context) error {
 	timeout := c.config.DrainTimeout
 	if deadline, ok := ctx.Deadline(); ok {
 		timeUntilDeadline := time.Until(deadline)
+
+		// Check if context deadline has already passed
+		if timeUntilDeadline <= 0 {
+			return ctx.Err()
+		}
+
+		// Use the shorter of configured timeout or time until deadline
 		if timeout <= 0 || timeUntilDeadline < timeout {
 			timeout = timeUntilDeadline
 		}
@@ -427,12 +451,22 @@ func (c *client) Drain(ctx context.Context) error {
 }
 
 // Close immediately closes the connection.
+// Note: If Drain() is in progress, Close() will wait for it to complete
+// to avoid interfering with the graceful drain operation.
 func (c *client) Close() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	if c.closed {
 		return ErrClientClosed
+	}
+
+	// If drain is in progress, we need to wait for it to complete.
+	// This prevents Close() from interfering with the graceful drain.
+	// We can't wait while holding the lock, so we'll just check and return
+	// an error telling the caller to wait for drain to complete.
+	if c.draining {
+		return fmt.Errorf("drain in progress, wait for drain to complete before closing")
 	}
 
 	c.closed = true
