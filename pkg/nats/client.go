@@ -357,51 +357,73 @@ func (c *client) Ready() error {
 
 // Drain gracefully drains the connection with the configured timeout.
 func (c *client) Drain(ctx context.Context) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
+	// Check state with read lock
+	c.mu.RLock()
 	if c.closed {
+		c.mu.RUnlock()
 		return ErrClientClosed
 	}
+	if c.conn == nil {
+		c.mu.RUnlock()
+		return fmt.Errorf("no connection established")
+	}
+	conn := c.conn // Capture connection reference while holding lock
+	c.mu.RUnlock()
 
-	// Use configured drain timeout or context deadline
+	// Check context before starting drain
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
+	// Determine timeout from config or context deadline
 	timeout := c.config.DrainTimeout
 	if deadline, ok := ctx.Deadline(); ok {
-		timeout = time.Until(deadline)
+		timeUntilDeadline := time.Until(deadline)
+		if timeout <= 0 || timeUntilDeadline < timeout {
+			timeout = timeUntilDeadline
+		}
 	}
 
-	// Create a done channel
+	// Create done channel for drain result
 	done := make(chan error, 1)
 
+	// Start drain in goroutine
 	go func() {
-		done <- c.conn.Drain()
+		done <- conn.Drain()
 	}()
 
-	// Handle drain completion based on timeout configuration
-	if timeout <= 0 {
-		// No timeout - wait indefinitely for drain or context cancellation
+	// Wait for drain with proper timeout and context handling
+	var err error
+	if timeout > 0 {
 		select {
-		case err := <-done:
-			c.closed = true
-			return err
+		case err = <-done:
+			// Drain completed successfully or with error
+		case <-time.After(timeout):
+			// Timeout occurred - drain may still complete in background
+			err = fmt.Errorf("drain timeout after %v", timeout)
 		case <-ctx.Done():
-			c.closed = true
-			return ctx.Err()
+			// Context cancelled
+			err = ctx.Err()
 		}
 	} else {
-		// Use configured timeout
+		// No timeout - wait for drain or context cancellation
 		select {
-		case err := <-done:
-			c.closed = true
-			return err
-		case <-time.After(timeout):
-			c.closed = true
-			return fmt.Errorf("drain timeout after %v", timeout)
+		case err = <-done:
+			// Drain completed
 		case <-ctx.Done():
-			c.closed = true
-			return ctx.Err()
+			// Context cancelled
+			err = ctx.Err()
 		}
 	}
+
+	// Update closed state
+	c.mu.Lock()
+	c.closed = true
+	c.mu.Unlock()
+
+	return err
 }
 
 // Close immediately closes the connection.
