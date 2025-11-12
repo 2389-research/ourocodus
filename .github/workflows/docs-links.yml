@@ -19,8 +19,8 @@ jobs:
       - name: Check markdown links
         uses: lycheeverse/lychee-action@v1
         with:
-          # Check all markdown files except historical docs and localhost URLs
-          args: --verbose --no-progress --accept 200,403,429 --exclude 'localhost' --exclude-path 'docs/history/**' '**/*.md'
+          # Check all markdown files (excludes defined in .lycheeignore)
+          args: --verbose --no-progress --accept 200,403,429 '**/*.md'
           # Fail the build if broken links are found
           fail: true
         env:

@@ -1,0 +1,20 @@
+# Exclude historical documentation
+docs/history/**
+
+# Exclude redirect stubs (they contain links to old paths by design)
+docs/AGENT_RUNTIME.md
+docs/ISSUES.md
+docs/ASSUMPTIONS.md
+docs/CONTAINERIZED_ACP.md
+docs/ACP.md
+docs/ARCHITECTURE.md
+docs/NATS.md
+docs/PROTOCOLS.md
+docs/SECURITY.md
+docs/SESSION_LIFECYCLE.md
+docs/ERROR_HANDLING.md
+docs/TESTING.md
+docs/ROADMAP.md
+
+# Localhost URLs (expected to fail in CI)
+http://localhost*

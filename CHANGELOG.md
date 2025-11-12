@@ -64,8 +64,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added `OUROCODUS_ACP_RUNTIME` to environment variable documentation in:
   - [README.md](README.md)
-  - [docs/AGENT_RUNTIME.md](docs/AGENT_RUNTIME.md)
-  - [docs/ACP.md](docs/ACP.md)
+  - [docs/architecture/AGENT_RUNTIME.md](docs/architecture/AGENT_RUNTIME.md)
+  - [docs/architecture/ACP.md](docs/architecture/ACP.md)
 
 - Updated [pkg/containersession/README.md](pkg/containersession/README.md) with:
   - `ExecInContainer` API reference and examples

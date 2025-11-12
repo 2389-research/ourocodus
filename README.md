@@ -99,12 +99,12 @@ See [docs/operations/SECURITY.md](docs/operations/SECURITY.md) for threat models
 
 **Current:** Phase 1 - Foundation implementation
 
-**Progress:** [13 issues](https://github.com/2389-research/ourocodus/issues) | [Milestone](https://github.com/2389-research/ourocodus/milestone/1) | [Issue Map](docs/ISSUES.md)
+**Progress:** [13 issues](https://github.com/2389-research/ourocodus/issues) | [Milestone](https://github.com/2389-research/ourocodus/milestone/1) | [Issue Map](docs/history/ISSUES.md)
 
 ### Quick Links
 
 - [Issue #1: Project Initialization](https://github.com/2389-research/ourocodus/issues/1) ← **Start here**
-- [Issue Dependency Graph](docs/ISSUES.md)
+- [Historical Issue Dependency Graph](docs/history/ISSUES.md)
 - [Session Lifecycle](docs/development/SESSION_LIFECYCLE.md)
 - [Error Handling](docs/development/ERROR_HANDLING.md)
 
