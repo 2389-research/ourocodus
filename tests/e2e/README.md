@@ -259,7 +259,7 @@ Verifies git worktree commits:
 
 ## Related Documentation
 
-- [Phase 1 Planning](../../docs/PHASE1.md) - Original requirements
+- [Architecture](../../docs/architecture/ARCHITECTURE.md) - System architecture overview
 - [Relay Package](../../pkg/relay/) - WebSocket protocol details
 - [ACP Package](../../pkg/acp/) - Agent communication protocol
 - [Session Management](../../pkg/relay/session/) - Session layer details

@@ -185,7 +185,7 @@ This pattern is useful for:
 ## Next Steps
 
 - See `pkg/containersession/manager.go` for full I/O implementation details
-- See `docs/CONTAINERIZED_ACP.md` for how this integrates with the relay system
+- See [docs/history/2025-Q4-milestone1-2/CONTAINERIZED_ACP.md](../../../docs/history/2025-Q4-milestone1-2/CONTAINERIZED_ACP.md) for how this integrates with the relay system (archived)
 - See `cmd/echo-agent/main.go` for the production ACP JSON-RPC implementation
 
 ## Platform Support

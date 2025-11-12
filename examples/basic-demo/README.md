@@ -194,8 +194,8 @@ After understanding this basic demo:
 
 ## Related Documentation
 
-- [Architecture Overview](../../docs/architecture.md) - System design and components
-- [Protocol Documentation](../../docs/protocol.md) - WebSocket message format
+- [Architecture Overview](../../docs/architecture/ARCHITECTURE.md) - System design and components
+- [Protocol Documentation](../../docs/architecture/PROTOCOLS.md) - WebSocket message format
 - [Developer Guide](../../CONTRIBUTING.md) - Contributing to Ourocodus
 
 ## Notes

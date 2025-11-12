@@ -245,7 +245,7 @@ rm -rf workspaces/
 - [CONTRIBUTING.md](../../CONTRIBUTING.md) - How to contribute
 - [CLAUDE.md](../../CLAUDE.md) - Development tools guide
 - [README.md](../../README.md) - Project overview
-- [docs/CONTAINERIZED_ACP.md](../../docs/CONTAINERIZED_ACP.md) - Containerized ACP implementation
+- [docs/history/2025-Q4-milestone1-2/CONTAINERIZED_ACP.md](../../docs/history/2025-Q4-milestone1-2/CONTAINERIZED_ACP.md) - Containerized ACP implementation (archived)
 
 ## Questions?
 

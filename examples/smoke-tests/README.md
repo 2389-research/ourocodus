@@ -339,7 +339,7 @@ jobs:
 
 - [Basic Demo](../basic-demo/README.md) - Start with basic functionality
 - [Interactive REPL](../interactive-repl/README.md) - Manual testing interface
-- [Testing Guide](../../docs/testing.md) - Comprehensive testing documentation
+- [Testing Guide](../../docs/development/TESTING.md) - Comprehensive testing documentation
 
 ## Next Steps
 

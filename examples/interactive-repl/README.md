@@ -309,8 +309,8 @@ After mastering the REPL:
 ## Related Documentation
 
 - [Basic Demo](../basic-demo/README.md) - Start here if you haven't already
-- [Protocol Documentation](../../docs/protocol.md) - WebSocket message formats
-- [Architecture Overview](../../docs/architecture.md) - System design
+- [Protocol Documentation](../../docs/architecture/PROTOCOLS.md) - WebSocket message formats
+- [Architecture Overview](../../docs/architecture/ARCHITECTURE.md) - System design
 
 ## Notes
 
