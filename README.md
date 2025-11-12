@@ -77,12 +77,6 @@ See [docs/operations/SECURITY.md](docs/operations/SECURITY.md) for threat models
   - Current: Direct Docker SDK usage with custom container session manager
   - License: Apache 2.0
 
-- **[Packnplay](https://github.com/obra/packnplay) v1.0.2** - *Future integration (planned)*
-  - Status: Dependency imported but not yet actively used (placeholder in `pkg/agent/packnplay`)
-  - Planned for: Advanced git worktree management and credential mounting patterns
-  - License: MIT
-  - Version pinning: Explicitly pinned to stable releases for reliability
-
 ## Documentation
 
 - **[PRD.md](PRD.md)** - Product vision and requirements
