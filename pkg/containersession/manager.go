@@ -442,6 +442,17 @@ func (m *Manager) handleExistingContainer(ctx context.Context, containerID, stat
 			// Continue even if attach fails - container is still usable
 		} else {
 			session.mu.Lock()
+			// Wait for previous output handler if one exists
+			if session.outputDone != nil {
+				oldDone := session.outputDone
+				session.mu.Unlock()
+				select {
+				case <-oldDone:
+				case <-time.After(2 * time.Second):
+					m.logger.Printf("[WARN] Previous output handler did not exit: session=%s", sessionID)
+				}
+				session.mu.Lock()
+			}
 			session.outputDone = make(chan struct{})
 			outputDone := session.outputDone
 			session.mu.Unlock()
@@ -469,6 +480,17 @@ func (m *Manager) handleExistingContainer(ctx context.Context, containerID, stat
 			m.logger.Printf("Container attach failed: session=%s container=%s error=%v", sessionID, containerID, err)
 		} else {
 			session.mu.Lock()
+			// Wait for previous output handler if one exists
+			if session.outputDone != nil {
+				oldDone := session.outputDone
+				session.mu.Unlock()
+				select {
+				case <-oldDone:
+				case <-time.After(2 * time.Second):
+					m.logger.Printf("[WARN] Previous output handler did not exit: session=%s", sessionID)
+				}
+				session.mu.Lock()
+			}
 			session.outputDone = make(chan struct{})
 			outputDone := session.outputDone
 			session.mu.Unlock()
@@ -604,6 +626,17 @@ func (m *Manager) AttachContainerSession(ctx context.Context, sessionID string) 
 		// Return session anyway - container is still accessible even if I/O attach failed
 	} else {
 		session.mu.Lock()
+		// Wait for previous output handler if one exists
+		if session.outputDone != nil {
+			oldDone := session.outputDone
+			session.mu.Unlock()
+			select {
+			case <-oldDone:
+			case <-time.After(2 * time.Second):
+				m.logger.Printf("[WARN] Previous output handler did not exit: session=%s", sessionID)
+			}
+			session.mu.Lock()
+		}
 		session.outputDone = make(chan struct{})
 		outputDone := session.outputDone
 		session.mu.Unlock()
@@ -654,6 +687,17 @@ func (m *Manager) StartContainerSession(ctx context.Context, sessionID string) e
 		} else {
 			// Start goroutines to demux stdout/stderr
 			session.mu.Lock()
+			// Wait for previous output handler if one exists
+			if session.outputDone != nil {
+				oldDone := session.outputDone
+				session.mu.Unlock()
+				select {
+				case <-oldDone:
+				case <-time.After(2 * time.Second):
+					m.logger.Printf("[WARN] Previous output handler did not exit: session=%s", sessionID)
+				}
+				session.mu.Lock()
+			}
 			session.outputDone = make(chan struct{})
 			outputDone := session.outputDone
 			session.mu.Unlock()

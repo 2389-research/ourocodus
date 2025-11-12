@@ -95,12 +95,13 @@ func TestClient_LogStderrExitsOnClose(t *testing.T) {
 	}
 
 	// Start producing stderr output in the background
+	stop := make(chan struct{})
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
 		for {
 			select {
-			case <-done:
+			case <-stop:
 				return
 			default:
 				time.Sleep(10 * time.Millisecond)
@@ -128,6 +129,7 @@ func TestClient_LogStderrExitsOnClose(t *testing.T) {
 	}
 
 	// Close the stderr writer to send EOF and stop the writer goroutine
+	close(stop)
 	stderrWriter.Close()
 	<-done
 
