@@ -358,59 +358,89 @@ func (c *client) Ready() error {
 
 // Drain gracefully drains the connection with the configured timeout.
 func (c *client) Drain(ctx context.Context) error {
-	// Use write lock to prevent concurrent drain operations and coordinate with Close()
+	// Validate state and mark as draining
+	conn, err := c.validateDrainState(ctx)
+	if err != nil {
+		return err
+	}
+
+	// Determine appropriate timeout
+	timeout, err := c.determineDrainTimeout(ctx)
+	if err != nil {
+		c.clearDraining()
+		return err
+	}
+
+	// Execute drain and wait for completion
+	drainCompleted, err := c.waitForDrain(ctx, conn, timeout)
+
+	// Update flags based on result
 	c.mu.Lock()
+	c.draining = false
+	if drainCompleted {
+		// Drain completed successfully - mark connection as closed
+		c.closed = true
+	}
+	// If drain didn't complete (timeout/context), drain may still complete in background
+	// so we only clear draining flag but don't set closed
+	c.mu.Unlock()
+
+	return err
+}
+
+// validateDrainState checks if drain can proceed and marks client as draining
+func (c *client) validateDrainState(ctx context.Context) (*nats.Conn, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
 	// Check if already closed or draining
 	if c.closed {
-		c.mu.Unlock()
-		return ErrClientClosed
+		return nil, ErrClientClosed
 	}
 	if c.draining {
-		c.mu.Unlock()
-		return fmt.Errorf("drain already in progress")
+		return nil, fmt.Errorf("drain already in progress")
 	}
 	if c.conn == nil {
-		c.mu.Unlock()
-		return fmt.Errorf("no connection established")
+		return nil, fmt.Errorf("no connection established")
 	}
-
-	// Mark as draining to prevent concurrent drain calls and coordinate with Close()
-	c.draining = true
-	conn := c.conn // Capture connection reference while holding lock
-	c.mu.Unlock()
 
 	// Check context before starting drain
 	select {
 	case <-ctx.Done():
-		// Clear draining flag before returning
-		c.mu.Lock()
-		c.draining = false
-		c.mu.Unlock()
-		return ctx.Err()
+		return nil, ctx.Err()
 	default:
 	}
 
-	// Determine timeout from config or context deadline
+	// Mark as draining and capture connection reference
+	c.draining = true
+	return c.conn, nil
+}
+
+// determineDrainTimeout calculates the appropriate timeout from config and context
+func (c *client) determineDrainTimeout(ctx context.Context) (time.Duration, error) {
 	timeout := c.config.DrainTimeout
-	if deadline, ok := ctx.Deadline(); ok {
-		timeUntilDeadline := time.Until(deadline)
-
-		// Check if context deadline has already passed
-		if timeUntilDeadline <= 0 {
-			// Clear draining flag before returning
-			c.mu.Lock()
-			c.draining = false
-			c.mu.Unlock()
-			return ctx.Err()
-		}
-
-		// Use the shorter of configured timeout or time until deadline
-		if timeout <= 0 || timeUntilDeadline < timeout {
-			timeout = timeUntilDeadline
-		}
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return timeout, nil
 	}
 
+	timeUntilDeadline := time.Until(deadline)
+
+	// Check if context deadline has already passed
+	if timeUntilDeadline <= 0 {
+		return 0, ctx.Err()
+	}
+
+	// Use the shorter of configured timeout or time until deadline
+	if timeout <= 0 || timeUntilDeadline < timeout {
+		timeout = timeUntilDeadline
+	}
+
+	return timeout, nil
+}
+
+// waitForDrain executes the drain operation and waits for completion
+func (c *client) waitForDrain(ctx context.Context, conn *nats.Conn, timeout time.Duration) (bool, error) {
 	// Create done channel for drain result
 	done := make(chan error, 1)
 
@@ -442,18 +472,14 @@ func (c *client) Drain(ctx context.Context) error {
 		}
 	}
 
-	// Update flags based on result
+	return drainCompleted, err
+}
+
+// clearDraining safely clears the draining flag
+func (c *client) clearDraining() {
 	c.mu.Lock()
 	c.draining = false
-	if drainCompleted {
-		// Drain completed successfully - mark connection as closed
-		c.closed = true
-	}
-	// If drain didn't complete (timeout/context), drain may still complete in background
-	// so we only clear draining flag but don't set closed
 	c.mu.Unlock()
-
-	return err
 }
 
 // Close immediately closes the connection.
