@@ -384,7 +384,7 @@ Both agents work in complete isolation:
 
 ## References
 
-- [Architecture Documentation](./ARCHITECTURE.md)
-- [ContainerSession Package README](../pkg/containersession/README.md)
+- [Architecture Documentation](../architecture/ARCHITECTURE.md)
+- [ContainerSession Package README](../../pkg/containersession/README.md)
 - [Git Worktree Documentation](https://git-scm.com/docs/git-worktree)
 - [Docker Volumes and Mounts](https://docs.docker.com/storage/volumes/)

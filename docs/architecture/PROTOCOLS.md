@@ -54,7 +54,7 @@ flowchart TD
 - Access event log
 - Serve web UI
 
-**Format:** See [API Server PRD](./prd/api.md)
+**Format:** See [API Server PRD](../prd/api.md)
 
 ### 2. Server-Sent Events (API Server → Clients)
 
@@ -536,6 +536,6 @@ Verify producer/consumer compatibility
 ## References
 
 - [NATS Documentation](https://docs.nats.io/)
-- [API Server PRD](./prd/api.md)
-- [Coordinator PRD](./prd/coordinator.md)
-- [Relay PRD](./prd/relay.md)
+- [API Server PRD](../prd/api.md)
+- [Coordinator PRD](../prd/coordinator.md)
+- [Relay PRD](../prd/relay.md)
