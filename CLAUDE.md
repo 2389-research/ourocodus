@@ -16,7 +16,7 @@ mise install
 
 This installs:
 
-- **Go 1.23.0** - Programming language runtime
+- **Go 1.24.0** - Programming language runtime
 - **golangci-lint** - Comprehensive linter
 - **staticcheck** - Advanced static analysis tool
 - **gofumpt** - Stricter Go formatter

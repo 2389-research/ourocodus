@@ -136,7 +136,7 @@ Under the hood these call the following Make targets/scripts:
 ```bash
 # Build all components
 make build
-# → Produces: bin/relay, bin/cli, bin/echo-agent
+# → Produces: bin/relay, bin/cli, bin/echo-agent, bin/event-logger
 
 # Run tests
 make test

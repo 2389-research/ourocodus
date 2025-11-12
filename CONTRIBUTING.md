@@ -50,10 +50,14 @@ mise install
 
 This will automatically install:
 
-- **Go 1.23.0** - Programming language
+- **Go 1.24.0** - Programming language
 - **golangci-lint** - Comprehensive linter
 - **staticcheck** - Advanced static analysis
 - **gofumpt** - Stricter Go formatter
+- **esbuild** - TypeScript/JS bundler
+- **minify** - HTML/CSS/JS minifier
+- **typescript** - TypeScript compiler
+- **vitest** - Unit testing framework
 
 #### Configure Environment (Optional)
 
