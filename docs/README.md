@@ -105,6 +105,7 @@ When contributing documentation:
 3. Include diagrams using Mermaid when helpful
 4. Keep code examples up-to-date with implementation
 5. Update this index when adding new major documents
+6. Test links locally before pushing (CI runs automated link checking)
 
 ---
 
