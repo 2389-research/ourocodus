@@ -214,9 +214,14 @@ func (c *Client) logStderr() {
 		return
 	}
 
+	// IMPORTANT: This goroutine relies on the transport properly closing stderr when
+	// Close() is called. scanner.Scan() is a blocking operation that will only return
+	// when EOF is received or an error occurs. The transport.Close() implementation
+	// must close the stderr reader to unblock this goroutine. The cancellation check
+	// after Scan() provides defense-in-depth but cannot interrupt a blocked Scan().
 	scanner := bufio.NewScanner(c.stderr)
 	for scanner.Scan() {
-		// Check for cancellation
+		// Check for cancellation (defense-in-depth - won't interrupt blocked Scan())
 		select {
 		case <-c.stderrCtx.Done():
 			return

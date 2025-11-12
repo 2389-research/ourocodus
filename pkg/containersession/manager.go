@@ -441,8 +441,11 @@ func (m *Manager) handleExistingContainer(ctx context.Context, containerID, stat
 			m.logger.Printf("Container attach failed: session=%s container=%s error=%v", sessionID, containerID, err)
 			// Continue even if attach fails - container is still usable
 		} else {
+			session.mu.Lock()
 			session.outputDone = make(chan struct{})
-			go m.handleContainerOutput(sessionID, containerID, attachResp.Reader)
+			outputDone := session.outputDone
+			session.mu.Unlock()
+			go m.handleContainerOutput(sessionID, containerID, attachResp.Reader, outputDone)
 		}
 		session.MarkStarted(m.clock.Now())
 		m.logger.Printf("Reattached to running container: session=%s container=%s", sessionID, containerID)
@@ -465,8 +468,11 @@ func (m *Manager) handleExistingContainer(ctx context.Context, containerID, stat
 		if err != nil {
 			m.logger.Printf("Container attach failed: session=%s container=%s error=%v", sessionID, containerID, err)
 		} else {
+			session.mu.Lock()
 			session.outputDone = make(chan struct{})
-			go m.handleContainerOutput(sessionID, containerID, attachResp.Reader)
+			outputDone := session.outputDone
+			session.mu.Unlock()
+			go m.handleContainerOutput(sessionID, containerID, attachResp.Reader, outputDone)
 		}
 		session.MarkStarted(m.clock.Now())
 		m.logger.Printf("Started and attached to existing container: session=%s container=%s", sessionID, containerID)
@@ -597,8 +603,11 @@ func (m *Manager) AttachContainerSession(ctx context.Context, sessionID string) 
 		m.logger.Printf("Container attach failed: session=%s container=%s error=%v", sessionID, containerID, err)
 		// Return session anyway - container is still accessible even if I/O attach failed
 	} else {
+		session.mu.Lock()
 		session.outputDone = make(chan struct{})
-		go m.handleContainerOutput(sessionID, containerID, attachResp.Reader)
+		outputDone := session.outputDone
+		session.mu.Unlock()
+		go m.handleContainerOutput(sessionID, containerID, attachResp.Reader, outputDone)
 	}
 
 	m.logger.Printf("Successfully attached to session: id=%s container=%s", sessionID, containerID)
@@ -644,8 +653,11 @@ func (m *Manager) StartContainerSession(ctx context.Context, sessionID string) e
 			// Continue even if attach fails - container is still running
 		} else {
 			// Start goroutines to demux stdout/stderr
+			session.mu.Lock()
 			session.outputDone = make(chan struct{})
-			go m.handleContainerOutput(sessionID, containerID, attachResp.Reader)
+			outputDone := session.outputDone
+			session.mu.Unlock()
+			go m.handleContainerOutput(sessionID, containerID, attachResp.Reader, outputDone)
 		}
 	}
 
@@ -656,11 +668,12 @@ func (m *Manager) StartContainerSession(ctx context.Context, sessionID string) e
 }
 
 // handleContainerOutput demultiplexes Docker container output streams
-func (m *Manager) handleContainerOutput(sessionID, containerID string, reader io.Reader) {
-	// Get session to access done channel
-	session := m.GetContainerSession(sessionID)
-	if session != nil && session.outputDone != nil {
-		defer close(session.outputDone)
+// The outputDone channel is passed as a parameter to avoid TOCTOU races where
+// the session could be deleted or updated between checking and closing the channel.
+func (m *Manager) handleContainerOutput(sessionID, containerID string, reader io.Reader, outputDone chan struct{}) {
+	// Close the done channel when output handling completes
+	if outputDone != nil {
+		defer close(outputDone)
 	}
 
 	defer func() {
@@ -727,9 +740,12 @@ func (m *Manager) StopContainerSession(ctx context.Context, sessionID string) er
 	}
 
 	// Wait for output handler goroutine with 5-second timeout
-	if session.outputDone != nil {
+	session.mu.Lock()
+	outputDone := session.outputDone
+	session.mu.Unlock()
+	if outputDone != nil {
 		select {
-		case <-session.outputDone:
+		case <-outputDone:
 			// Clean shutdown
 		case <-time.After(5 * time.Second):
 			m.logger.Printf("[WARN] handleContainerOutput goroutine did not exit within timeout: session=%s", sessionID)

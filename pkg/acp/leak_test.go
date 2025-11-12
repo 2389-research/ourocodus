@@ -95,10 +95,19 @@ func TestClient_LogStderrExitsOnClose(t *testing.T) {
 	}
 
 	// Start producing stderr output in the background
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		for {
-			time.Sleep(10 * time.Millisecond)
-			_, _ = stderrWriter.Write([]byte("test output\n"))
+			select {
+			case <-done:
+				return
+			default:
+				time.Sleep(10 * time.Millisecond)
+				if _, err := stderrWriter.Write([]byte("test output\n")); err != nil {
+					return
+				}
+			}
 		}
 	}()
 
@@ -117,6 +126,10 @@ func TestClient_LogStderrExitsOnClose(t *testing.T) {
 	if err := client.Close(); err != nil {
 		t.Errorf("Failed to close client: %v", err)
 	}
+
+	// Close the stderr writer to send EOF and stop the writer goroutine
+	stderrWriter.Close()
+	<-done
 
 	// Wait for goroutine to exit (should be quick)
 	time.Sleep(100 * time.Millisecond)
