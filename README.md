@@ -83,8 +83,6 @@ See [docs/operations/SECURITY.md](docs/operations/SECURITY.md) for threat models
   - License: MIT
   - Version pinning: Explicitly pinned to stable releases for reliability
 
-See [NOTICE](NOTICE) for complete third-party license information.
-
 ## Documentation
 
 - **[PRD.md](PRD.md)** - Product vision and requirements

@@ -272,11 +272,10 @@ PWA (CDN) → API Server (HA) → NATS Cluster → Relay Pool → Agent Containe
 
 ## Key Documents
 
-- **[ARCHITECTURE.md](./ARCHITECTURE.md)** - Phase 1 vs long-term architecture
-- **[NATS.md](./NATS.md)** - Comprehensive NATS integration plan
-- **[MILESTONE_2_PLAN.md](./MILESTONE_2_PLAN.md)** - Detailed Milestone 2 plan
-- **[MILESTONE_2_SUMMARY.md](./MILESTONE_2_SUMMARY.md)** - Executive summary for stakeholders
-- **[ISSUES.md](./ISSUES.md)** - Issue dependency graph
+- **[ARCHITECTURE.md](docs/architecture/ARCHITECTURE.md)** - Phase 1 vs long-term architecture
+- **[NATS.md](docs/architecture/NATS.md)** - Comprehensive NATS integration plan
+- **[ISSUES.md](docs/history/ISSUES.md)** - Historical issue dependency graph (archived)
+- **[Milestone History](docs/history/README.md)** - Completed milestone implementation logs
 
 ---
 
@@ -284,7 +283,7 @@ PWA (CDN) → API Server (HA) → NATS Cluster → Relay Pool → Agent Containe
 
 **Questions about roadmap?** Open a GitHub issue with label `question`
 
-**Want to contribute?** See [CONTRIBUTING.md](../CONTRIBUTING.md)
+**Want to contribute?** See [CONTRIBUTING.md](CONTRIBUTING.md)
 
 **Need technical clarification?** See architecture docs linked above
 

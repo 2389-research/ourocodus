@@ -210,7 +210,7 @@ The following environment variables control agent runtime behavior:
   - ACP process runs inside existing agent container
   - Requires container session manager and active container
   - Workspace paths automatically rewritten for container mounts
-  - See [docs/ACP.md](../docs/ACP.md) for launcher selection logic
+  - See [ACP.md](ACP.md) for launcher selection logic
 
 **Setting Environment Variables:**
 
@@ -550,8 +550,8 @@ If issues persist:
 
 1. Check GitHub Issues: [github.com/2389-research/ourocodus/issues](https://github.com/2389-research/ourocodus/issues)
 2. Review relevant documentation:
-   - `docs/ARCHITECTURE.md` - System overview
-   - `docs/SESSION_LIFECYCLE.md` - Session management
+   - [ARCHITECTURE.md](ARCHITECTURE.md) - System overview
+   - [SESSION_LIFECYCLE.md](../development/SESSION_LIFECYCLE.md) - Session management
    - `pkg/containersession/doc.go` - Container session details
 3. Include diagnostic information when reporting issues:
    - Relay logs
