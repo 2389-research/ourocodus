@@ -89,4 +89,4 @@ When referencing historical documents:
 - [docs/development/](../development/) - Current development guides
 - [docs/operations/](../operations/) - Current operations docs
 
-**Last Updated:** 2025-01-12
+**Last Updated:** 2025-11-12
