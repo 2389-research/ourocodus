@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -275,6 +276,39 @@ func initializeAgentInfrastructure(ctx context.Context, logger *relay.StdLogger,
 	return dockerClient, launcherFactory, containerManager
 }
 
+// redactNATSURL removes credentials from NATS URL for safe logging
+func redactNATSURL(natsURL string) string {
+	// Parse the URL to extract and redact credentials
+	// NATS URLs can be: nats://host:port or nats://user:pass@host:port
+
+	// Use Go's net/url package for proper URL parsing
+	// This handles edge cases like @ symbols in passwords
+	parsed, err := url.Parse(natsURL)
+	if err != nil {
+		// If parsing fails, return as-is (better than crashing)
+		return natsURL
+	}
+
+	// If no user info, return original URL
+	if parsed.User == nil {
+		return natsURL
+	}
+
+	// Manually construct redacted URL to avoid URL encoding of ***
+	// Format: scheme://***:***@host:port/path
+	redacted := parsed.Scheme + "://***:***@" + parsed.Host
+	if parsed.Path != "" {
+		redacted += parsed.Path
+	}
+	if parsed.RawQuery != "" {
+		redacted += "?" + parsed.RawQuery
+	}
+	if parsed.Fragment != "" {
+		redacted += "#" + parsed.Fragment
+	}
+	return redacted
+}
+
 // initializeNATS creates a NATS client if NATS_URL is configured
 func initializeNATS() nats.Client {
 	natsURL := os.Getenv("NATS_URL")
@@ -283,7 +317,7 @@ func initializeNATS() nats.Client {
 		return nil
 	}
 
-	log.Printf("[NATS] Connecting to NATS at %s...", natsURL)
+	log.Printf("[NATS] Connecting to NATS at %s...", redactNATSURL(natsURL))
 
 	natsClient, err := nats.NewClient(
 		nats.WithURL(natsURL),
