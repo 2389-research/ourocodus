@@ -46,11 +46,11 @@ make run
   - `host`: ACP runs as host process via os/exec (standard mode)
   - `container`: ACP runs inside agent containers via docker exec (isolation mode)
   - Example: `export OUROCODUS_ACP_RUNTIME=container`
-  - See [docs/ACP.md](docs/ACP.md) for detailed launcher selection logic
+  - See [docs/architecture/ACP.md](docs/architecture/ACP.md) for detailed launcher selection logic
 
 ## Architecture
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for Phase 1 vs Long-term design.
+See [docs/architecture/ARCHITECTURE.md](docs/architecture/ARCHITECTURE.md) for Phase 1 vs Long-term design.
 
 **Phase 1 (Current):**
 
@@ -66,7 +66,7 @@ The system supports multiple concurrent agents (no hard limit).
 
 **Workspace Isolation:** Container sessions validate workspace mount points to prevent directory traversal attacks. When reusing or attaching to existing containers, the system ensures workspace paths are under the configured base directory, preventing malicious containers from exposing arbitrary host directories.
 
-See [docs/SECURITY.md](docs/SECURITY.md) for threat models and mitigation strategies.
+See [docs/operations/SECURITY.md](docs/operations/SECURITY.md) for threat models and mitigation strategies.
 
 ## Dependencies
 
@@ -88,12 +88,14 @@ See [NOTICE](NOTICE) for complete third-party license information.
 ## Documentation
 
 - **[PRD.md](PRD.md)** - Product vision and requirements
-- **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** - System architecture overview
-- **[docs/SESSION_LIFECYCLE.md](docs/SESSION_LIFECYCLE.md)** - Session and agent lifecycle
-- **[docs/ERROR_HANDLING.md](docs/ERROR_HANDLING.md)** - Error handling with structured codes
-- **[docs/ACP.md](docs/ACP.md)** - Agent Client Protocol integration details
-- **[docs/PROTOCOLS.md](docs/PROTOCOLS.md)** - Communication patterns
-- **[docs/TESTING.md](docs/TESTING.md)** - Testing strategy
+- **[ROADMAP.md](ROADMAP.md)** - Development roadmap and milestones
+- **[docs/architecture/ARCHITECTURE.md](docs/architecture/ARCHITECTURE.md)** - System architecture overview
+- **[docs/development/SESSION_LIFECYCLE.md](docs/development/SESSION_LIFECYCLE.md)** - Session and agent lifecycle
+- **[docs/development/ERROR_HANDLING.md](docs/development/ERROR_HANDLING.md)** - Error handling with structured codes
+- **[docs/architecture/ACP.md](docs/architecture/ACP.md)** - Agent Client Protocol integration details
+- **[docs/architecture/PROTOCOLS.md](docs/architecture/PROTOCOLS.md)** - Communication patterns
+- **[docs/development/TESTING.md](docs/development/TESTING.md)** - Testing strategy
+- **[docs/README.md](docs/README.md)** - Complete documentation index
 
 ## Project Status
 
@@ -105,8 +107,8 @@ See [NOTICE](NOTICE) for complete third-party license information.
 
 - [Issue #1: Project Initialization](https://github.com/2389-research/ourocodus/issues/1) ← **Start here**
 - [Issue Dependency Graph](docs/ISSUES.md)
-- [Session Lifecycle](docs/SESSION_LIFECYCLE.md)
-- [Error Handling](docs/ERROR_HANDLING.md)
+- [Session Lifecycle](docs/development/SESSION_LIFECYCLE.md)
+- [Error Handling](docs/development/ERROR_HANDLING.md)
 
 ## Development
 
@@ -331,7 +333,7 @@ The system automatically creates two streams:
 - Work results: `sessions.<user-session-id>.results.<agent-id>`
 - Agent heartbeats: `agents.<user-session-id>.<agent-id>.heartbeat`
 
-**For detailed NATS usage**, including CLI commands, publishing, subscribing, and troubleshooting, see [docs/NATS.md](docs/NATS.md).
+**For detailed NATS usage**, including CLI commands, publishing, subscribing, and troubleshooting, see [docs/architecture/NATS.md](docs/architecture/NATS.md).
 
 **For Docker/Colima setup**, see [CONTRIBUTING.md](CONTRIBUTING.md#local-services-with-docker).
 
