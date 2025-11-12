@@ -6,6 +6,7 @@ import (
 	"io"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/pkg/stdcopy"
@@ -96,10 +97,14 @@ func (m *Manager) ExecInContainer(ctx context.Context, containerID string, cfg E
 	stdoutReader, stdoutWriter := io.Pipe()
 	stderrReader, stderrWriter := io.Pipe()
 
+	// Track StdCopy goroutine completion
+	done := make(chan struct{})
+
 	// Goroutine for copying stdout/stderr from docker exec
 	// The goroutine will naturally complete when StdCopy finishes
 	// (when exec process exits or reader is closed)
 	go func() {
+		defer close(done)
 		_, copyErr := stdcopy.StdCopy(stdoutWriter, stderrWriter, attachResp.Reader)
 		_ = stdoutWriter.CloseWithError(copyErr)
 		_ = stderrWriter.CloseWithError(copyErr)
@@ -113,6 +118,7 @@ func (m *Manager) ExecInContainer(ctx context.Context, containerID string, cfg E
 		// Collect errors for observability
 		var errs []error
 
+		// Close pipes first to signal StdCopy to stop
 		if err := stdoutWriter.Close(); err != nil {
 			errs = append(errs, fmt.Errorf("stdout: %w", err))
 		}
@@ -120,7 +126,16 @@ func (m *Manager) ExecInContainer(ctx context.Context, containerID string, cfg E
 			errs = append(errs, fmt.Errorf("stderr: %w", err))
 		}
 
+		// Close attachment
 		attachResp.Close()
+
+		// Wait for StdCopy goroutine with timeout
+		select {
+		case <-done:
+			// Clean exit
+		case <-time.After(2 * time.Second):
+			errs = append(errs, fmt.Errorf("StdCopy goroutine did not exit within timeout"))
+		}
 
 		if len(errs) > 0 {
 			return fmt.Errorf("close errors: %v", errs)
