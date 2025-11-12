@@ -380,16 +380,13 @@ func (c *client) Drain(ctx context.Context) error {
 	conn := c.conn // Capture connection reference while holding lock
 	c.mu.Unlock()
 
-	// Ensure draining flag is cleared when we're done
-	defer func() {
-		c.mu.Lock()
-		c.draining = false
-		c.mu.Unlock()
-	}()
-
 	// Check context before starting drain
 	select {
 	case <-ctx.Done():
+		// Clear draining flag before returning
+		c.mu.Lock()
+		c.draining = false
+		c.mu.Unlock()
 		return ctx.Err()
 	default:
 	}
@@ -401,6 +398,10 @@ func (c *client) Drain(ctx context.Context) error {
 
 		// Check if context deadline has already passed
 		if timeUntilDeadline <= 0 {
+			// Clear draining flag before returning
+			c.mu.Lock()
+			c.draining = false
+			c.mu.Unlock()
 			return ctx.Err()
 		}
 
@@ -423,36 +424,51 @@ func (c *client) Drain(ctx context.Context) error {
 	if timeout > 0 {
 		select {
 		case err = <-done:
-			// Drain completed successfully or with error
+			// Drain completed - update both draining and closed flags atomically
+			c.mu.Lock()
+			c.draining = false
+			c.closed = true
+			c.mu.Unlock()
 		case <-time.After(timeout):
 			// Timeout occurred - drain may still complete in background
+			// Clear draining flag but don't set closed since drain is still running
+			c.mu.Lock()
+			c.draining = false
+			c.mu.Unlock()
 			err = fmt.Errorf("drain timeout after %v", timeout)
 		case <-ctx.Done():
-			// Context cancelled
+			// Context cancelled - drain may still complete in background
+			// Clear draining flag but don't set closed since drain is still running
+			c.mu.Lock()
+			c.draining = false
+			c.mu.Unlock()
 			err = ctx.Err()
 		}
 	} else {
 		// No timeout - wait for drain or context cancellation
 		select {
 		case err = <-done:
-			// Drain completed
+			// Drain completed - update both draining and closed flags atomically
+			c.mu.Lock()
+			c.draining = false
+			c.closed = true
+			c.mu.Unlock()
 		case <-ctx.Done():
-			// Context cancelled
+			// Context cancelled - drain may still complete in background
+			// Clear draining flag but don't set closed since drain is still running
+			c.mu.Lock()
+			c.draining = false
+			c.mu.Unlock()
 			err = ctx.Err()
 		}
 	}
-
-	// Update closed state
-	c.mu.Lock()
-	c.closed = true
-	c.mu.Unlock()
 
 	return err
 }
 
 // Close immediately closes the connection.
-// Note: If Drain() is in progress, Close() will wait for it to complete
-// to avoid interfering with the graceful drain operation.
+// Note: If Drain() is in progress, Close() returns an error so callers can wait
+// for the graceful drain to finish before closing.
 func (c *client) Close() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
