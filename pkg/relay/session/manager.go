@@ -245,23 +245,15 @@ func (m *Manager) SpawnAgent(ctx context.Context, userSessionID, agentID, worksp
 	userSession.setLastActive(now)
 	userSession.mu.Unlock()
 
-	// NEW: Create launcher via factory if available
+	// Create launcher ONLY in container mode
 	var handle agent.AgentHandle
-	if m.launcherFactory != nil {
-		// Select container command based on runtime mode
-		command := []string{"/bin/bash"} // Default: interactive shell for host mode
-
-		if runtime.IsContainerMode() {
-			// Container mode: Use image default (ENTRYPOINT ["/usr/local/bin/acp"])
-			// ContainerAttachProcessLauncher will attach to the container's stdio
-			// where ACP runs as the main process. The CMD from image provides default args.
-			command = []string{"--workspace", "/workspace"} // Args for ACP
-			m.logger.Printf("[SESSION] ├─ Runtime mode: CONTAINER (ACP runs as main process, stdio attached)")
-			m.logger.Printf("[SESSION] ├─ Container command (ACP args): %v", command)
-		} else {
-			m.logger.Printf("[SESSION] ├─ Runtime mode: HOST (ACP will run directly on host)")
-			m.logger.Printf("[SESSION] ├─ Container command: %v", command)
-		}
+	if m.launcherFactory != nil && runtime.IsContainerMode() {
+		// Container mode: Use image default (ENTRYPOINT ["/usr/local/bin/acp"])
+		// ContainerAttachProcessLauncher will attach to the container's stdio
+		// where ACP runs as the main process. The CMD from image provides default args.
+		command := []string{"--workspace", "/workspace"} // Args for ACP
+		m.logger.Printf("[SESSION] ├─ Runtime mode: CONTAINER (ACP runs as main process, stdio attached)")
+		m.logger.Printf("[SESSION] ├─ Container command (ACP args): %v", command)
 
 		// Get API key from client factory for container environment
 		var anthropicKey string
@@ -293,7 +285,7 @@ func (m *Manager) SpawnAgent(ctx context.Context, userSessionID, agentID, worksp
 		}
 		m.logger.Printf("[SESSION] ✓ Launcher created successfully")
 
-		// NEW: Spawn agent container
+		// Spawn agent container
 		m.logger.Printf("[SESSION] ├─ Spawning agent container...")
 		spawnConfig := &agent.SpawnConfig{
 			Role:      agentID,
@@ -315,14 +307,15 @@ func (m *Manager) SpawnAgent(ctx context.Context, userSessionID, agentID, worksp
 		}
 		m.logger.Printf("[SESSION] ✓ Container spawned (id: %s)", handle.ContainerID())
 
-		// NEW: Store launcher and handle
+		// Store launcher and handle
 		key := launcherKey(userSessionID, agentID)
 		m.launchersMu.Lock()
 		m.launchers[key] = launcher
 		m.handles[key] = handle
 		m.launchersMu.Unlock()
-
-		// Container details logged, workspace is already logged above
+	} else {
+		// Host mode: ACP will run directly on host via os/exec
+		m.logger.Printf("[SESSION] ├─ Runtime mode: HOST (ACP will run directly on host)")
 	}
 
 	runtimeCtx := &AgentRuntimeContext{
@@ -343,7 +336,7 @@ func (m *Manager) SpawnAgent(ctx context.Context, userSessionID, agentID, worksp
 		m.logger.Printf("[SESSION] ✗ Failed to create ACP client: %v", err)
 
 		// Cleanup launcher on client creation failure
-		if m.launcherFactory != nil {
+		if m.launcherFactory != nil && runtime.IsContainerMode() {
 			key := launcherKey(userSessionID, agentID)
 			m.launchersMu.Lock()
 			launcher := m.launchers[key]
@@ -442,25 +435,27 @@ func (m *Manager) TerminateAgent(ctx context.Context, userSessionID, agentID str
 
 	m.logger.Printf("[SESSION] Terminating agent: session=%s agentID=%s", userSessionID, agentID)
 
-	// NEW: Stop container if launcher exists
-	key := launcherKey(userSessionID, agentID)
-	m.launchersMu.RLock()
-	launcher := m.launchers[key]
-	handle := m.handles[key]
-	m.launchersMu.RUnlock()
+	// Stop container if launcher exists (container mode only)
+	if m.launcherFactory != nil && runtime.IsContainerMode() {
+		key := launcherKey(userSessionID, agentID)
+		m.launchersMu.RLock()
+		launcher := m.launchers[key]
+		handle := m.handles[key]
+		m.launchersMu.RUnlock()
 
-	if launcher != nil && handle != nil {
-		if err := launcher.Stop(ctx, handle); err != nil {
-			m.logger.Printf("WARN: Failed to stop container for agent %s: %v", agentID, err)
-			// Continue cleanup despite error
+		if launcher != nil && handle != nil {
+			if err := launcher.Stop(ctx, handle); err != nil {
+				m.logger.Printf("WARN: Failed to stop container for agent %s: %v", agentID, err)
+				// Continue cleanup despite error
+			}
 		}
-	}
 
-	// NEW: Remove from launcher maps
-	m.launchersMu.Lock()
-	delete(m.launchers, key)
-	delete(m.handles, key)
-	m.launchersMu.Unlock()
+		// Remove from launcher maps
+		m.launchersMu.Lock()
+		delete(m.launchers, key)
+		delete(m.handles, key)
+		m.launchersMu.Unlock()
+	}
 
 	// Close ACP client if present (with double-close protection)
 	agent.mu.Lock()
@@ -566,8 +561,8 @@ func (m *Manager) TerminateUserSession(ctx context.Context, userSessionID string
 					}
 				}
 
-				// NEW: Stop container if launcher exists
-				if m.launcherFactory != nil {
+				// Stop container if launcher exists (container mode only)
+				if m.launcherFactory != nil && runtime.IsContainerMode() {
 					key := launcherKey(userSessionID, id)
 					m.launchersMu.RLock()
 					launcher := m.launchers[key]
