@@ -421,47 +421,37 @@ func (c *client) Drain(ctx context.Context) error {
 
 	// Wait for drain with proper timeout and context handling
 	var err error
+	var drainCompleted bool
+
 	if timeout > 0 {
 		select {
 		case err = <-done:
-			// Drain completed - update both draining and closed flags atomically
-			c.mu.Lock()
-			c.draining = false
-			c.closed = true
-			c.mu.Unlock()
+			drainCompleted = true
 		case <-time.After(timeout):
-			// Timeout occurred - drain may still complete in background
-			// Clear draining flag but don't set closed since drain is still running
-			c.mu.Lock()
-			c.draining = false
-			c.mu.Unlock()
 			err = fmt.Errorf("drain timeout after %v", timeout)
 		case <-ctx.Done():
-			// Context cancelled - drain may still complete in background
-			// Clear draining flag but don't set closed since drain is still running
-			c.mu.Lock()
-			c.draining = false
-			c.mu.Unlock()
 			err = ctx.Err()
 		}
 	} else {
 		// No timeout - wait for drain or context cancellation
 		select {
 		case err = <-done:
-			// Drain completed - update both draining and closed flags atomically
-			c.mu.Lock()
-			c.draining = false
-			c.closed = true
-			c.mu.Unlock()
+			drainCompleted = true
 		case <-ctx.Done():
-			// Context cancelled - drain may still complete in background
-			// Clear draining flag but don't set closed since drain is still running
-			c.mu.Lock()
-			c.draining = false
-			c.mu.Unlock()
 			err = ctx.Err()
 		}
 	}
+
+	// Update flags based on result
+	c.mu.Lock()
+	c.draining = false
+	if drainCompleted {
+		// Drain completed successfully - mark connection as closed
+		c.closed = true
+	}
+	// If drain didn't complete (timeout/context), drain may still complete in background
+	// so we only clear draining flag but don't set closed
+	c.mu.Unlock()
 
 	return err
 }
