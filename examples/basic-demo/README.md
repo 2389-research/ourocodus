@@ -195,7 +195,7 @@ After understanding this basic demo:
 ## Related Documentation
 
 - [Architecture Overview](../../docs/architecture/ARCHITECTURE.md) - System design and components
-- [Protocol Documentation](../../docs/architecture/PROTOCOLS.md) - WebSocket message format
+- [WebSocket Protocol](../../docs/architecture/WEBSOCKET_API.md) - WebSocket message format
 - [Developer Guide](../../CONTRIBUTING.md) - Contributing to Ourocodus
 
 ## Notes

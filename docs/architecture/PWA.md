@@ -394,5 +394,5 @@ See deferred issues for Phase 1 completion and Phase 3:
 - **Protocol implementation:** `pkg/relay/message.go`
 - **Server code:** `pkg/relay/server.go`
 - **Session management:** `pkg/relay/session/`
-- **Future architecture:** [PROTOCOLS.md](PROTOCOLS.md) (NATS-based)
+- **Speculative architecture:** [FUTURE_ARCHITECTURE.md](FUTURE_ARCHITECTURE.md) (multi-service, NATS-based - not implemented)
 - **Relay PRD:** [relay.md](../prd/relay.md) (future state)

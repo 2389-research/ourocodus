@@ -48,6 +48,12 @@ make run
   - Example: `export OUROCODUS_ACP_RUNTIME=container`
   - See [docs/architecture/ACP.md](docs/architecture/ACP.md) for detailed launcher selection logic
 
+- `NATS_URL` - Optional NATS server for event logging (default: disabled)
+  - Example: `export NATS_URL=nats://localhost:4222`
+  - When unset, event publishing is disabled (relay logs to stdout only)
+  - Useful for: Audit trails, debugging, multi-service deployments
+  - See [Local Services](#local-services) for NATS setup
+
 ## Architecture
 
 See [docs/architecture/ARCHITECTURE.md](docs/architecture/ARCHITECTURE.md) for Phase 1 vs Long-term design.
@@ -85,7 +91,8 @@ See [docs/operations/SECURITY.md](docs/operations/SECURITY.md) for threat models
 - **[docs/development/SESSION_LIFECYCLE.md](docs/development/SESSION_LIFECYCLE.md)** - Session and agent lifecycle
 - **[docs/development/ERROR_HANDLING.md](docs/development/ERROR_HANDLING.md)** - Error handling with structured codes
 - **[docs/architecture/ACP.md](docs/architecture/ACP.md)** - Agent Client Protocol integration details
-- **[docs/architecture/PROTOCOLS.md](docs/architecture/PROTOCOLS.md)** - Communication patterns
+- **[docs/architecture/WEBSOCKET_API.md](docs/architecture/WEBSOCKET_API.md)** - WebSocket protocol reference
+- **[docs/architecture/ACP_PROTOCOL.md](docs/architecture/ACP_PROTOCOL.md)** - ACP JSON-RPC wire format
 - **[docs/development/TESTING.md](docs/development/TESTING.md)** - Testing strategy
 - **[docs/README.md](docs/README.md)** - Complete documentation index
 
@@ -270,9 +277,9 @@ golangci-lint run --fix
 
 ## Local Services
 
-### NATS Message Bus
+### NATS Message Bus (Optional)
 
-The project uses NATS with JetStream for persistent message streaming between services.
+NATS with JetStream can be used for optional event logging and observability. **The relay works fine without NATS** - when `NATS_URL` is unset, events are simply logged to stdout.
 
 **Prerequisites:**
 - Docker or [Colima](https://github.com/abiosoft/colima) for containerization
