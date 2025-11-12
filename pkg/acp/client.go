@@ -308,7 +308,8 @@ func (c *Client) readResponse(expectedID int) (*AgentMessage, error) {
 	return &msg, nil
 }
 
-// Close terminates the claude-code-acp process and cleans up resources
+// Close terminates the claude-code-acp process and cleans up resources.
+// Deprecated: Use CloseWithContext to avoid indefinite blocking during shutdown (issue #211).
 func (c *Client) Close() error {
 	c.closedMu.Lock()
 	if c.closed {
@@ -325,4 +326,45 @@ func (c *Client) Close() error {
 	}
 
 	return nil
+}
+
+// CloseWithContext terminates the claude-code-acp process with timeout support.
+// This prevents indefinite blocking during shutdown by respecting the context deadline.
+// If the context is canceled or times out before Close completes, an error is returned.
+func (c *Client) CloseWithContext(ctx context.Context) error {
+	c.closedMu.Lock()
+	if c.closed {
+		c.closedMu.Unlock()
+		return nil
+	}
+	c.closed = true
+	c.closedMu.Unlock()
+
+	if c.transport == nil {
+		return nil
+	}
+
+	// Run transport close in goroutine with timeout
+	type closeResult struct {
+		err error
+	}
+	resultChan := make(chan closeResult, 1)
+
+	go func() {
+		err := c.transport.Close()
+		if err != nil {
+			err = fmt.Errorf("failed to close transport: %w", err)
+		}
+		resultChan <- closeResult{err: err}
+	}()
+
+	// Wait for either close to complete or context cancellation
+	select {
+	case result := <-resultChan:
+		return result.err
+	case <-ctx.Done():
+		// Context canceled/timed out - return error but leave cleanup goroutine running
+		// The transport will eventually close, but we won't wait indefinitely
+		return fmt.Errorf("close timed out: %w", ctx.Err())
+	}
 }
