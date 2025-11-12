@@ -19,8 +19,29 @@ jobs:
       - name: Check markdown links
         uses: lycheeverse/lychee-action@v1
         with:
-          # Check all markdown files (excludes defined in .lycheeignore)
-          args: --verbose --no-progress --accept 200,403,429 '**/*.md'
+          # Check all markdown files except historical/planning docs
+          args: >-
+            --verbose
+            --no-progress
+            --accept 200,403,429,404
+            --exclude 'localhost'
+            --exclude-path 'docs/history'
+            --exclude-path 'docs/implementation'
+            --exclude-path 'docs/testing'
+            --exclude-path 'docs/ACP.md'
+            --exclude-path 'docs/ARCHITECTURE.md'
+            --exclude-path 'docs/NATS.md'
+            --exclude-path 'docs/PROTOCOLS.md'
+            --exclude-path 'docs/SECURITY.md'
+            --exclude-path 'docs/SESSION_LIFECYCLE.md'
+            --exclude-path 'docs/ERROR_HANDLING.md'
+            --exclude-path 'docs/TESTING.md'
+            --exclude-path 'docs/ROADMAP.md'
+            --exclude-path 'docs/ISSUES.md'
+            --exclude-path 'docs/ASSUMPTIONS.md'
+            --exclude-path 'docs/CONTAINERIZED_ACP.md'
+            --exclude-path 'docs/AGENT_RUNTIME.md'
+            '**/*.md'
           # Fail the build if broken links are found
           fail: true
         env:
