@@ -460,9 +460,12 @@ func (t *blockingCloseTransport) Write(p []byte) (n int, err error) {
 }
 
 func (t *blockingCloseTransport) Close(ctx context.Context) error {
-	// Block until closeDone is closed
-	<-t.closeDone
-	return nil
+	select {
+	case <-t.closeDone:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (t *blockingCloseTransport) Stderr() io.Reader {
