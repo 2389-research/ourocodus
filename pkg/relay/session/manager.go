@@ -323,7 +323,7 @@ func (m *Manager) SpawnAgent(ctx context.Context, userSessionID, agentID, worksp
 
 		// Cleanup launcher on client creation failure (container mode only)
 		if StopContainerAndCleanupLauncher(ctx, m, userSessionID, agentID, m.logger) {
-			m.logger.Printf("[SESSION] ├─ Failed to cleanup container/launcher after ACP client creation failure")
+			m.logger.Printf("[SESSION] ├─ Container/launcher cleanup failed after ACP client creation failure")
 		}
 
 		// Mark agent as FAILED
