@@ -136,6 +136,10 @@ func (m *Manager) ExecInContainer(ctx context.Context, containerID string, cfg E
 		// Only close them if the goroutine timed out (pipes might still be open)
 		if len(errs) > 0 {
 			// Goroutine didn't exit cleanly, forcibly close pipes
+			// NOTE: There is an inherent race condition here - the goroutine may call
+			// CloseWithError concurrently with this timeout path trying to close the pipes.
+			// We accept this race as unavoidable during forcible cleanup and check for
+			// io.ErrClosedPipe to handle the concurrent close gracefully.
 			if err := stdoutWriter.Close(); err != nil && err != io.ErrClosedPipe {
 				errs = append(errs, fmt.Errorf("stdout: %w", err))
 			}

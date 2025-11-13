@@ -10,20 +10,29 @@ import (
 
 // mockTransport is a simple mock transport for testing
 type mockTransport struct {
-	stdin        *bytes.Buffer
-	stdout       *bytes.Buffer
-	stderr       *bytes.Buffer
-	stderrReader io.Reader
-	closed       bool
+	stdin         *bytes.Buffer
+	stdout        *bytes.Buffer
+	stderr        *bytes.Buffer
+	stderrReader  *io.PipeReader
+	stderrWriter  *io.PipeWriter
+	closed        bool
 }
 
 func newMockTransport() *mockTransport {
-	stderr := bytes.NewBufferString("mock stderr output\n")
+	// Use io.Pipe so we can close stderr to unblock the scanner
+	stderrReader, stderrWriter := io.Pipe()
+
+	// Write mock stderr output
+	go func() {
+		stderrWriter.Write([]byte("mock stderr output\n"))
+	}()
+
 	return &mockTransport{
 		stdin:        &bytes.Buffer{},
 		stdout:       bytes.NewBufferString(`{"jsonrpc":"2.0","id":1,"result":{"type":"text","content":"test"}}`),
 		stderr:       &bytes.Buffer{},
-		stderrReader: stderr,
+		stderrReader: stderrReader,
+		stderrWriter: stderrWriter,
 	}
 }
 
@@ -41,6 +50,10 @@ func (m *mockTransport) Stderr() io.Reader {
 
 func (m *mockTransport) Close() error {
 	m.closed = true
+	// Close stderr writer to unblock scanner.Scan() in logStderr goroutine
+	if m.stderrWriter != nil {
+		m.stderrWriter.Close()
+	}
 	return nil
 }
 

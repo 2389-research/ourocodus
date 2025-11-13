@@ -208,11 +208,11 @@ func cloneEnvMap(src map[string]string) map[string]string {
 
 // logStderr reads stderr and logs it for debugging purposes
 func (c *Client) logStderr() {
-	defer close(c.stderrDone)
-
 	if c.stderr == nil {
+		close(c.stderrDone)
 		return
 	}
+	defer close(c.stderrDone)
 
 	// IMPORTANT: This goroutine relies on the transport properly closing stderr when
 	// Close() is called. scanner.Scan() is a blocking operation that will only return
