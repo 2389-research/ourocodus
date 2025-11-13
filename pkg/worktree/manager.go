@@ -43,6 +43,63 @@ func NewAgentWorktreeManager(repoPath string) (*AgentWorktreeManager, error) {
 	}, nil
 }
 
+// validateAgentID validates that an agent ID is safe for use in filesystem paths.
+// Returns ErrInvalidAgentID if the agentID contains path separators or traversal sequences.
+func validateAgentID(agentID string) error {
+	if agentID == "" {
+		return ErrInvalidAgentID
+	}
+
+	// Check for path separators and traversal sequences
+	if strings.Contains(agentID, "/") || strings.Contains(agentID, "\\") ||
+		strings.Contains(agentID, "..") || strings.Contains(agentID, string(filepath.Separator)) {
+		return fmt.Errorf("%w: agent ID must not contain path separators or traversal sequences", ErrInvalidAgentID)
+	}
+
+	return nil
+}
+
+// validatePath validates that a path is safe and within expected boundaries.
+// For baseDir: must be absolute path.
+// For worktreePath: must be absolute and not contain traversal sequences.
+func validatePath(path string, mustBeAbsolute bool) error {
+	if path == "" {
+		return ErrInvalidPath
+	}
+
+	// Clean the path to resolve any . or .. components
+	cleanPath := filepath.Clean(path)
+
+	// Check if path must be absolute
+	if mustBeAbsolute && !filepath.IsAbs(cleanPath) {
+		return fmt.Errorf("%w: path must be absolute", ErrInvalidPath)
+	}
+
+	// Check for path traversal attempts
+	// After cleaning, if the path still contains ".." it's trying to traverse
+	if strings.Contains(cleanPath, "..") {
+		return fmt.Errorf("%w: path contains traversal sequences", ErrInvalidPath)
+	}
+
+	return nil
+}
+
+// validateWorktreePath validates that a worktree path is safe for removal.
+// Ensures the path is absolute and doesn't contain traversal sequences.
+func validateWorktreePath(worktreePath string) error {
+	if err := validatePath(worktreePath, true); err != nil {
+		return err
+	}
+
+	// Additional check: worktree paths should contain "agent-" to prevent
+	// accidental removal of non-worktree directories
+	if !strings.Contains(filepath.Base(worktreePath), "agent-") {
+		return fmt.Errorf("%w: worktree path must contain 'agent-' prefix", ErrInvalidPath)
+	}
+
+	return nil
+}
+
 // AgentWorktree represents an isolated git worktree for an AgentSession.
 type AgentWorktree struct {
 	path       string
@@ -85,11 +142,14 @@ func (w *AgentWorktree) CreatedAt() time.Time {
 //	// Creates: /workspaces/agent-coder-abc123/
 //	// Branch: agent-coder-abc123-20250105-143022
 func (m *AgentWorktreeManager) Create(ctx context.Context, agentID, baseDir string) (*AgentWorktree, error) {
-	if agentID == "" {
-		return nil, fmt.Errorf("agentID cannot be empty")
+	// Validate agentID for path traversal attempts
+	if err := validateAgentID(agentID); err != nil {
+		return nil, err
 	}
-	if baseDir == "" {
-		return nil, fmt.Errorf("baseDir cannot be empty")
+
+	// Validate baseDir is absolute and safe
+	if err := validatePath(baseDir, true); err != nil {
+		return nil, fmt.Errorf("invalid baseDir: %w", err)
 	}
 
 	// Check context cancellation
@@ -103,7 +163,7 @@ func (m *AgentWorktreeManager) Create(ctx context.Context, agentID, baseDir stri
 	timestamp := time.Now().Format("20060102-150405")
 	branchName := fmt.Sprintf("agent-%s-%s", agentID, timestamp)
 
-	// Create worktree path
+	// Create worktree path - safe because agentID is validated
 	worktreePath := filepath.Join(baseDir, fmt.Sprintf("agent-%s", agentID))
 
 	// Ensure base directory exists
@@ -118,7 +178,7 @@ func (m *AgentWorktreeManager) Create(ctx context.Context, agentID, baseDir stri
 
 	// Create worktree with new branch
 	// git worktree add -b <branch> <path>
-	// #nosec G204 -- git command with controlled arguments
+	// #nosec G204 -- git command with validated arguments
 	cmd := exec.CommandContext(ctx, "git", "worktree", "add", "-b", branchName, worktreePath)
 	cmd.Dir = m.repoPath
 
@@ -140,6 +200,11 @@ func (m *AgentWorktreeManager) Create(ctx context.Context, agentID, baseDir stri
 // This is called before creating a new worktree to handle interrupted/failed previous runs.
 // It's idempotent and safe to call even if no stale worktree exists.
 func (m *AgentWorktreeManager) cleanupStaleWorktree(ctx context.Context, worktreePath string) error {
+	// Validate worktree path for safety
+	if err := validateWorktreePath(worktreePath); err != nil {
+		return err
+	}
+
 	// Check if directory exists
 	if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
 		// No stale directory, nothing to clean up
@@ -188,8 +253,9 @@ func (m *AgentWorktreeManager) cleanupStaleWorktree(ctx context.Context, worktre
 //
 // Returns an error if removal fails. Idempotent - safe to call multiple times.
 func (m *AgentWorktreeManager) Remove(ctx context.Context, worktreePath string) error {
-	if worktreePath == "" {
-		return fmt.Errorf("worktreePath cannot be empty")
+	// Validate worktree path for safety
+	if err := validateWorktreePath(worktreePath); err != nil {
+		return err
 	}
 
 	// Check context cancellation
