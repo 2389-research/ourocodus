@@ -416,7 +416,28 @@ func (m *Manager) handleExistingContainer(ctx context.Context, containerID, stat
 	}
 
 	// Create or retrieve session object
+	session := m.getOrCreateSession(sessionID, containerID, workspacePath, labels, createdAt)
+
+	// Handle based on container state
+	switch state {
+	case "running":
+		return m.handleRunningContainer(ctx, session, containerID, sessionID)
+	case "created", "exited":
+		return m.handleStoppedContainer(ctx, session, containerID, sessionID)
+	case "paused":
+		return nil, fmt.Errorf("container %s is paused - unpause not yet supported", containerID)
+	case "dead", "removing":
+		return m.handleBadStateContainer(ctx, containerID, state, sessionID)
+	default:
+		return nil, fmt.Errorf("unknown container state: %s", state)
+	}
+}
+
+// getOrCreateSession retrieves or creates a session with the given parameters
+func (m *Manager) getOrCreateSession(sessionID, containerID, workspacePath string, labels map[string]string, createdAt time.Time) *ContainerSession {
 	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	session, exists := m.sessions[sessionID]
 	if !exists {
 		session = NewContainerSession(sessionID, workspacePath, labels, createdAt)
@@ -424,73 +445,64 @@ func (m *Manager) handleExistingContainer(ctx context.Context, containerID, stat
 	}
 	// Always update container ID (even for existing sessions) to handle container replacement
 	session.SetContainerID(containerID)
-	m.mu.Unlock()
+	return session
+}
 
-	// Handle based on container state
-	switch state {
-	case "running":
-		// Container is already running - just attach I/O
-		attachResp, err := m.dockerClient.ContainerAttach(ctx, containerID, container.AttachOptions{
-			Stream: true,
-			Stdin:  false,
-			Stdout: true,
-			Stderr: true,
-			Logs:   true,
-		})
-		if err != nil {
-			m.logger.Printf("Container attach failed: session=%s container=%s error=%v", sessionID, containerID, err)
-			// Continue even if attach fails - container is still usable
-		} else {
-			go m.handleContainerOutput(sessionID, containerID, attachResp.Reader)
-		}
-		session.MarkStarted(m.clock.Now())
-		m.logger.Printf("Reattached to running container: session=%s container=%s", sessionID, containerID)
-
-	case "created", "exited":
-		// Container exists but is stopped - start it
-		err := m.dockerClient.ContainerStart(ctx, containerID, container.StartOptions{})
-		if err != nil {
-			return nil, fmt.Errorf("failed to start existing container: %w", err)
-		}
-
-		// Attach to I/O
-		attachResp, err := m.dockerClient.ContainerAttach(ctx, containerID, container.AttachOptions{
-			Stream: true,
-			Stdin:  false,
-			Stdout: true,
-			Stderr: true,
-			Logs:   true,
-		})
-		if err != nil {
-			m.logger.Printf("Container attach failed: session=%s container=%s error=%v", sessionID, containerID, err)
-		} else {
-			go m.handleContainerOutput(sessionID, containerID, attachResp.Reader)
-		}
-		session.MarkStarted(m.clock.Now())
-		m.logger.Printf("Started and attached to existing container: session=%s container=%s", sessionID, containerID)
-
-	case "paused":
-		// Container is paused - unpause it
-		// Note: Docker SDK doesn't have Unpause in our interface yet, so we'll treat as error for now
-		return nil, fmt.Errorf("container %s is paused - unpause not yet supported", containerID)
-
-	case "dead", "removing":
-		// Container is in a bad state - remove it and let caller create new one
-		m.logger.Printf("Container in bad state (%s), removing: session=%s container=%s", state, sessionID, containerID)
-		_ = m.dockerClient.ContainerRemove(ctx, containerID, container.RemoveOptions{Force: true})
-
-		// Remove from session map so CreateContainerSession can create new one
-		m.mu.Lock()
-		delete(m.sessions, sessionID)
-		m.mu.Unlock()
-
-		return nil, fmt.Errorf("container %s in bad state (%s), removed - retry CreateContainerSession", containerID, state)
-
-	default:
-		return nil, fmt.Errorf("unknown container state: %s", state)
+// attachAndStartOutput attaches to container I/O and starts output handling
+func (m *Manager) attachAndStartOutput(ctx context.Context, session *ContainerSession, containerID, sessionID string) error {
+	attachResp, err := m.dockerClient.ContainerAttach(ctx, containerID, container.AttachOptions{
+		Stream: true,
+		Stdin:  false,
+		Stdout: true,
+		Stderr: true,
+		Logs:   true,
+	})
+	if err != nil {
+		m.logger.Printf("Container attach failed: session=%s container=%s error=%v", sessionID, containerID, err)
+		return err
 	}
 
+	m.startOutputHandler(session, sessionID, containerID, attachResp.Reader)
+	return nil
+}
+
+// handleRunningContainer handles reattaching to an already running container
+func (m *Manager) handleRunningContainer(ctx context.Context, session *ContainerSession, containerID, sessionID string) (*ContainerSession, error) {
+	// Container is already running - just attach I/O
+	// Continue even if attach fails - container is still usable
+	_ = m.attachAndStartOutput(ctx, session, containerID, sessionID)
+	session.MarkStarted(m.clock.Now())
+	m.logger.Printf("Reattached to running container: session=%s container=%s", sessionID, containerID)
 	return session, nil
+}
+
+// handleStoppedContainer handles starting and attaching to a stopped container
+func (m *Manager) handleStoppedContainer(ctx context.Context, session *ContainerSession, containerID, sessionID string) (*ContainerSession, error) {
+	// Container exists but is stopped - start it
+	err := m.dockerClient.ContainerStart(ctx, containerID, container.StartOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to start existing container: %w", err)
+	}
+
+	// Attach to I/O
+	_ = m.attachAndStartOutput(ctx, session, containerID, sessionID)
+	session.MarkStarted(m.clock.Now())
+	m.logger.Printf("Started and attached to existing container: session=%s container=%s", sessionID, containerID)
+	return session, nil
+}
+
+// handleBadStateContainer handles containers in dead or removing states
+func (m *Manager) handleBadStateContainer(ctx context.Context, containerID, state, sessionID string) (*ContainerSession, error) {
+	// Container is in a bad state - remove it and let caller create new one
+	m.logger.Printf("Container in bad state (%s), removing: session=%s container=%s", state, sessionID, containerID)
+	_ = m.dockerClient.ContainerRemove(ctx, containerID, container.RemoveOptions{Force: true})
+
+	// Remove from session map so CreateContainerSession can create new one
+	m.mu.Lock()
+	delete(m.sessions, sessionID)
+	m.mu.Unlock()
+
+	return nil, fmt.Errorf("container %s in bad state (%s), removed - retry CreateContainerSession", containerID, state)
 }
 
 // AttachContainerSession reconnects to an existing container session by session ID.
@@ -595,7 +607,7 @@ func (m *Manager) AttachContainerSession(ctx context.Context, sessionID string) 
 		m.logger.Printf("Container attach failed: session=%s container=%s error=%v", sessionID, containerID, err)
 		// Return session anyway - container is still accessible even if I/O attach failed
 	} else {
-		go m.handleContainerOutput(sessionID, containerID, attachResp.Reader)
+		m.startOutputHandler(session, sessionID, containerID, attachResp.Reader)
 	}
 
 	m.logger.Printf("Successfully attached to session: id=%s container=%s", sessionID, containerID)
@@ -641,7 +653,7 @@ func (m *Manager) StartContainerSession(ctx context.Context, sessionID string) e
 			// Continue even if attach fails - container is still running
 		} else {
 			// Start goroutines to demux stdout/stderr
-			go m.handleContainerOutput(sessionID, containerID, attachResp.Reader)
+			m.startOutputHandler(session, sessionID, containerID, attachResp.Reader)
 		}
 	}
 
@@ -651,8 +663,16 @@ func (m *Manager) StartContainerSession(ctx context.Context, sessionID string) e
 	return nil
 }
 
-// handleContainerOutput demultiplexes Docker container output streams
-func (m *Manager) handleContainerOutput(sessionID, containerID string, reader io.Reader) {
+// handleContainerOutput demultiplexes Docker container output streams.
+// The outputDone channel is passed by value (a copy of the channel reference) to ensure
+// it cannot be modified by concurrent session updates. This prevents TOCTOU races where
+// the session's outputDone field might be reassigned between checking and using it.
+func (m *Manager) handleContainerOutput(sessionID, containerID string, reader io.Reader, outputDone chan struct{}) {
+	// Close the done channel when output handling completes
+	if outputDone != nil {
+		defer close(outputDone)
+	}
+
 	defer func() {
 		if r := recover(); r != nil {
 			m.logger.Printf("Panic in output handler: session=%s container=%s panic=%v", sessionID, containerID, r)
@@ -670,6 +690,31 @@ func (m *Manager) handleContainerOutput(sessionID, containerID string, reader io
 	if err != nil && err != io.EOF {
 		m.logger.Printf("Output stream error: session=%s error=%v", sessionID, err)
 	}
+}
+
+// startOutputHandler waits for any previous output handler to complete, then starts a new one.
+// This ensures only one output handler is running at a time for a given session.
+func (m *Manager) startOutputHandler(session *ContainerSession, sessionID, containerID string, reader io.Reader) {
+	session.mu.Lock()
+	// Wait for previous output handler if one exists
+	if session.outputDone != nil {
+		oldDone := session.outputDone
+		session.mu.Unlock()
+		select {
+		case <-oldDone:
+			// Previous handler exited cleanly
+		case <-time.After(2 * time.Second):
+			// Timeout - previous handler is still running
+			// DO NOT start a new handler to avoid goroutine leak
+			m.logger.Printf("[ERROR] Previous output handler did not exit, refusing to start new handler: session=%s", sessionID)
+			return
+		}
+		session.mu.Lock()
+	}
+	session.outputDone = make(chan struct{})
+	outputDone := session.outputDone
+	session.mu.Unlock()
+	go m.handleContainerOutput(sessionID, containerID, reader, outputDone)
 }
 
 // logWriter adapts Logger to io.Writer interface
@@ -714,6 +759,19 @@ func (m *Manager) StopContainerSession(ctx context.Context, sessionID string) er
 		session.SetError(err.Error())
 		m.logger.Printf("Container stop failed: session=%s container=%s error=%v", sessionID, containerID, err)
 		return fmt.Errorf("failed to stop container: %w", err)
+	}
+
+	// Wait for output handler goroutine with 5-second timeout
+	session.mu.Lock()
+	outputDone := session.outputDone
+	session.mu.Unlock()
+	if outputDone != nil {
+		select {
+		case <-outputDone:
+			// Clean shutdown
+		case <-time.After(2 * time.Second):
+			m.logger.Printf("[WARN] handleContainerOutput goroutine did not exit within timeout: session=%s", sessionID)
+		}
 	}
 
 	session.MarkStopped(m.clock.Now())

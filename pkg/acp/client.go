@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"time"
 )
 
 // Client manages communication with a single claude-code-acp runtime transport.
@@ -15,10 +16,16 @@ type Client struct {
 	stderr    io.Reader
 	scanner   *bufio.Scanner
 	logger    Logger
-	closedMu  sync.RWMutex
-	reqMu     sync.Mutex // Protects entire request/response cycle
-	nextID    int
-	closed    bool
+
+	// Lifecycle management for logStderr goroutine
+	stderrCtx    context.Context
+	stderrCancel context.CancelFunc
+	stderrDone   chan struct{}
+
+	closedMu sync.RWMutex
+	reqMu    sync.Mutex // Protects entire request/response cycle
+	nextID   int
+	closed   bool
 }
 
 // ClientOption configures a Client
@@ -168,12 +175,17 @@ func NewClientFromTransport(transport Transport, opts ...ClientOption) (*Client,
 }
 
 func newClientFromTransport(transport Transport, logger Logger) (*Client, error) {
+	ctx, cancel := context.WithCancel(context.Background())
+
 	client := &Client{
-		transport: transport,
-		stderr:    transport.Stderr(),
-		scanner:   bufio.NewScanner(transport),
-		logger:    logger,
-		nextID:    1,
+		transport:    transport,
+		stderr:       transport.Stderr(),
+		scanner:      bufio.NewScanner(transport),
+		logger:       logger,
+		nextID:       1,
+		stderrCtx:    ctx,
+		stderrCancel: cancel,
+		stderrDone:   make(chan struct{}),
 	}
 
 	client.scanner.Buffer(make([]byte, 64*1024), 5*1024*1024)
@@ -197,12 +209,28 @@ func cloneEnvMap(src map[string]string) map[string]string {
 // logStderr reads stderr and logs it for debugging purposes
 func (c *Client) logStderr() {
 	if c.stderr == nil {
+		close(c.stderrDone)
 		return
 	}
+	defer close(c.stderrDone)
+
+	// IMPORTANT: This goroutine relies on the transport properly closing stderr when
+	// Close() is called. scanner.Scan() is a blocking operation that will only return
+	// when EOF is received or an error occurs. The transport.Close() implementation
+	// must close the stderr reader to unblock this goroutine. The cancellation check
+	// after Scan() provides defense-in-depth but cannot interrupt a blocked Scan().
 	scanner := bufio.NewScanner(c.stderr)
 	for scanner.Scan() {
+		// Check for cancellation (defense-in-depth - won't interrupt blocked Scan())
+		select {
+		case <-c.stderrCtx.Done():
+			return
+		default:
+		}
+
 		c.logger.Printf("[ACP stderr] %s", scanner.Text())
 	}
+
 	if err := scanner.Err(); err != nil {
 		c.logger.Printf("[ACP stderr] scanner error: %v", err)
 	}
@@ -318,10 +346,29 @@ func (c *Client) Close() error {
 	c.closed = true
 	c.closedMu.Unlock()
 
+	// Signal logStderr goroutine to stop
+	if c.stderrCancel != nil {
+		c.stderrCancel()
+	}
+
+	// Close transport (will close stderr, causing scanner to exit)
+	var transportErr error
 	if c.transport != nil {
-		if err := c.transport.Close(); err != nil {
-			return fmt.Errorf("failed to close transport: %w", err)
+		transportErr = c.transport.Close()
+	}
+
+	// Wait for logStderr goroutine with timeout
+	if c.stderrDone != nil {
+		select {
+		case <-c.stderrDone:
+			// Clean shutdown
+		case <-time.After(2 * time.Second):
+			c.logger.Printf("[WARN] logStderr goroutine did not exit within timeout")
 		}
+	}
+
+	if transportErr != nil {
+		return fmt.Errorf("failed to close transport: %w", transportErr)
 	}
 
 	return nil
