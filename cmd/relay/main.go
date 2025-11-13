@@ -131,12 +131,16 @@ func main() {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
 
+	// Track if any cleanup step fails (issue #216)
+	var shutdownErrors []error
+
 	// Attempt graceful HTTP server shutdown
 	if err := httpServer.Shutdown(shutdownCtx); err != nil {
 		log.Printf("[SHUTDOWN] Server shutdown error: %v", err)
-		os.Exit(1)
+		shutdownErrors = append(shutdownErrors, fmt.Errorf("HTTP shutdown: %w", err))
+	} else {
+		log.Println("[SHUTDOWN] HTTP server stopped")
 	}
-	log.Println("[SHUTDOWN] HTTP server stopped")
 
 	// Cleanup all active sessions (agents, containers, worktrees, credentials)
 	log.Println("[SHUTDOWN] Cleaning up active sessions...")
@@ -153,6 +157,7 @@ func main() {
 			if _, err := sessionManager.TerminateUserSession(shutdownCtx, sessionID); err != nil {
 				log.Printf("[SHUTDOWN] WARN: Failed to terminate session %s: %v", sessionID, err)
 				failCount++
+				shutdownErrors = append(shutdownErrors, fmt.Errorf("session %s: %w", sessionID, err))
 			} else {
 				successCount++
 			}
@@ -168,12 +173,21 @@ func main() {
 		log.Println("[SHUTDOWN] Draining NATS connection...")
 		if err := natsClient.Drain(shutdownCtx); err != nil {
 			log.Printf("[SHUTDOWN] NATS drain error: %v", err)
+			shutdownErrors = append(shutdownErrors, fmt.Errorf("NATS drain: %w", err))
 		} else {
 			log.Println("[SHUTDOWN] NATS connection drained successfully")
 		}
 	}
 
-	log.Println("[SHUTDOWN] Server stopped")
+	// Docker client will be closed by defer at line 71
+
+	// Exit with error if any cleanup step failed (issue #216)
+	if len(shutdownErrors) > 0 {
+		log.Printf("[SHUTDOWN] Server stopped with %d error(s)", len(shutdownErrors))
+		os.Exit(1)
+	}
+
+	log.Println("[SHUTDOWN] Server stopped successfully")
 }
 
 // initializeAgentInfrastructure sets up Docker, worktree, credentials, and launcher factory

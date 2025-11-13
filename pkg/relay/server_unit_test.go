@@ -345,7 +345,7 @@ func TestRouteMessage_ValidEchoMessage(t *testing.T) {
 	ctx := context.Background()
 	rawMessage := []byte(`{"version":"1.0","type":"test:echo","message":"hello"}`)
 
-	shouldClose := server.routeMessage(ctx, conn, rawMessage)
+	_, shouldClose := server.routeMessage(ctx, conn, rawMessage)
 
 	if shouldClose {
 		t.Error("expected shouldClose=false for valid message")
@@ -370,7 +370,7 @@ func TestRouteMessage_ValidationError(t *testing.T) {
 	// Missing version field
 	rawMessage := []byte(`{"type":"test:echo","message":"hello"}`)
 
-	shouldClose := server.routeMessage(ctx, conn, rawMessage)
+	_, shouldClose := server.routeMessage(ctx, conn, rawMessage)
 
 	if shouldClose {
 		t.Error("expected shouldClose=false for recoverable validation error")
@@ -404,7 +404,7 @@ func TestRouteMessage_VersionMismatch(t *testing.T) {
 	// Wrong version - non-recoverable
 	rawMessage := []byte(`{"version":"2.0","type":"test:echo"}`)
 
-	shouldClose := server.routeMessage(ctx, conn, rawMessage)
+	_, shouldClose := server.routeMessage(ctx, conn, rawMessage)
 
 	if !shouldClose {
 		t.Error("expected shouldClose=true for version mismatch")
@@ -837,7 +837,7 @@ func TestHandleSessionCreate_ParseError(t *testing.T) {
 	ctx := context.Background()
 	rawMessage := []byte(`{invalid json}`)
 
-	shouldClose := server.handleSessionCreate(ctx, conn, rawMessage)
+	_, shouldClose := server.handleSessionCreate(ctx, conn, rawMessage)
 
 	if shouldClose {
 		t.Error("expected shouldClose=false for parse error")
@@ -878,7 +878,7 @@ func TestHandleSessionCreate_CreateSessionFails(t *testing.T) {
 	ctx := context.Background()
 	rawMessage := buildValidSessionCreateMessage()
 
-	shouldClose := server.handleSessionCreate(ctx, conn, rawMessage)
+	_, shouldClose := server.handleSessionCreate(ctx, conn, rawMessage)
 
 	if shouldClose {
 		t.Error("expected shouldClose=false for recoverable error")

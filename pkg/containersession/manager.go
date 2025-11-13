@@ -462,7 +462,7 @@ func (m *Manager) attachAndStartOutput(ctx context.Context, session *ContainerSe
 		return err
 	}
 
-	m.startOutputHandler(session, sessionID, containerID, attachResp.Reader)
+	m.startOutputHandler(session, sessionID, containerID, attachResp.Reader, attachResp.Close)
 	return nil
 }
 
@@ -607,7 +607,7 @@ func (m *Manager) AttachContainerSession(ctx context.Context, sessionID string) 
 		m.logger.Printf("Container attach failed: session=%s container=%s error=%v", sessionID, containerID, err)
 		// Return session anyway - container is still accessible even if I/O attach failed
 	} else {
-		m.startOutputHandler(session, sessionID, containerID, attachResp.Reader)
+		m.startOutputHandler(session, sessionID, containerID, attachResp.Reader, attachResp.Close)
 	}
 
 	m.logger.Printf("Successfully attached to session: id=%s container=%s", sessionID, containerID)
@@ -653,7 +653,7 @@ func (m *Manager) StartContainerSession(ctx context.Context, sessionID string) e
 			// Continue even if attach fails - container is still running
 		} else {
 			// Start goroutines to demux stdout/stderr
-			m.startOutputHandler(session, sessionID, containerID, attachResp.Reader)
+			m.startOutputHandler(session, sessionID, containerID, attachResp.Reader, attachResp.Close)
 		}
 	}
 
@@ -667,13 +667,20 @@ func (m *Manager) StartContainerSession(ctx context.Context, sessionID string) e
 // The outputDone channel is passed by value (a copy of the channel reference) to ensure
 // it cannot be modified by concurrent session updates. This prevents TOCTOU races where
 // the session's outputDone field might be reassigned between checking and using it.
-func (m *Manager) handleContainerOutput(sessionID, containerID string, reader io.Reader, outputDone chan struct{}) {
+// The cleanup function (if provided) is called when output handling completes to prevent
+// resource leaks (issue #225).
+func (m *Manager) handleContainerOutput(sessionID, containerID string, reader io.Reader, outputDone chan struct{}, cleanup func()) {
 	// Close the done channel when output handling completes
 	if outputDone != nil {
 		defer close(outputDone)
 	}
 
 	defer func() {
+		// Always cleanup the attach response to prevent resource leaks (issue #225)
+		if cleanup != nil {
+			cleanup()
+		}
+
 		if r := recover(); r != nil {
 			m.logger.Printf("Panic in output handler: session=%s container=%s panic=%v", sessionID, containerID, r)
 		}
@@ -694,7 +701,8 @@ func (m *Manager) handleContainerOutput(sessionID, containerID string, reader io
 
 // startOutputHandler waits for any previous output handler to complete, then starts a new one.
 // This ensures only one output handler is running at a time for a given session.
-func (m *Manager) startOutputHandler(session *ContainerSession, sessionID, containerID string, reader io.Reader) {
+// The cleanup function (if provided) is called when the handler completes to prevent resource leaks.
+func (m *Manager) startOutputHandler(session *ContainerSession, sessionID, containerID string, reader io.Reader, cleanup func()) {
 	session.mu.Lock()
 	// Wait for previous output handler if one exists
 	if session.outputDone != nil {
@@ -707,6 +715,10 @@ func (m *Manager) startOutputHandler(session *ContainerSession, sessionID, conta
 			// Timeout - previous handler is still running
 			// DO NOT start a new handler to avoid goroutine leak
 			m.logger.Printf("[ERROR] Previous output handler did not exit, refusing to start new handler: session=%s", sessionID)
+			// Must still call cleanup to avoid resource leak (issue #225)
+			if cleanup != nil {
+				cleanup()
+			}
 			return
 		}
 		session.mu.Lock()
@@ -714,7 +726,7 @@ func (m *Manager) startOutputHandler(session *ContainerSession, sessionID, conta
 	session.outputDone = make(chan struct{})
 	outputDone := session.outputDone
 	session.mu.Unlock()
-	go m.handleContainerOutput(sessionID, containerID, reader, outputDone)
+	go m.handleContainerOutput(sessionID, containerID, reader, outputDone, cleanup)
 }
 
 // logWriter adapts Logger to io.Writer interface
