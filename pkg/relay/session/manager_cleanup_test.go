@@ -20,7 +20,7 @@ func TestTerminateAgent_CloseError(t *testing.T) {
 	failingFactory := &mockClientFactory{
 		clientFunc: func(workspace string) (ACPClient, error) {
 			return &mockACPClient{
-				closeFunc: func() error {
+				closeFunc: func(ctx context.Context) error {
 					return fmt.Errorf("close failed")
 				},
 			}, nil

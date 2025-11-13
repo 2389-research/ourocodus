@@ -441,25 +441,25 @@ func (m *Manager) TerminateAgent(ctx context.Context, userSessionID, agentID str
 	m.logger.Printf("[SESSION] Terminating agent: session=%s agentID=%s", userSessionID, agentID)
 
 	// Stop container if launcher exists (container mode only)
+	// Use atomic take-and-delete pattern to prevent double-stop race (Issue #210)
 	if m.isContainerModeEnabled() {
 		key := launcherKey(userSessionID, agentID)
-		m.launchersMu.RLock()
+
+		// Atomic take-and-delete under Lock
+		m.launchersMu.Lock()
 		launcher := m.launchers[key]
 		handle := m.handles[key]
-		m.launchersMu.RUnlock()
+		delete(m.launchers, key) // Delete BEFORE releasing lock
+		delete(m.handles, key)
+		m.launchersMu.Unlock()
 
+		// Now safe - only one goroutine has these pointers
 		if launcher != nil && handle != nil {
 			if err := launcher.Stop(ctx, handle); err != nil {
 				m.logger.Printf("WARN: Failed to stop container for agent %s: %v", agentID, err)
 				// Continue cleanup despite error
 			}
 		}
-
-		// Remove from launcher maps
-		m.launchersMu.Lock()
-		delete(m.launchers, key)
-		delete(m.handles, key)
-		m.launchersMu.Unlock()
 	}
 
 	// Close ACP client if present (with double-close protection)
@@ -556,13 +556,19 @@ func (m *Manager) TerminateUserSession(ctx context.Context, userSessionID string
 				}
 
 				// Stop container if launcher exists (container mode only)
+				// Use atomic take-and-delete pattern to prevent double-stop race (Issue #210)
 				if m.isContainerModeEnabled() {
 					key := launcherKey(userSessionID, id)
-					m.launchersMu.RLock()
+
+					// Atomic take-and-delete under Lock
+					m.launchersMu.Lock()
 					launcher := m.launchers[key]
 					handle := m.handles[key]
-					m.launchersMu.RUnlock()
+					delete(m.launchers, key) // Delete BEFORE releasing lock
+					delete(m.handles, key)
+					m.launchersMu.Unlock()
 
+					// Now safe - only one goroutine has these pointers
 					if launcher != nil && handle != nil {
 						if err := launcher.Stop(agentCtx, handle); err != nil {
 							m.logger.Printf("WARN: Failed to stop container for agent %s: %v", id, err)
@@ -570,12 +576,6 @@ func (m *Manager) TerminateUserSession(ctx context.Context, userSessionID string
 							// Continue cleanup despite error
 						}
 					}
-
-					// Remove from launcher maps
-					m.launchersMu.Lock()
-					delete(m.launchers, key)
-					delete(m.handles, key)
-					m.launchersMu.Unlock()
 				}
 				if failed {
 					atomic.AddInt32(&agentFailures, 1)

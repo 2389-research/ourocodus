@@ -54,7 +54,7 @@ func TestContainerExecProcessLauncher_Start(t *testing.T) {
 		t.Fatalf("stdin not forwarded, got %q", stdinBuf.String())
 	}
 
-	if err := transport.Close(); err != nil {
+	if err := transport.Close(context.Background()); err != nil {
 		t.Fatalf("close failed: %v", err)
 	}
 
