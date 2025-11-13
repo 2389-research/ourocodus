@@ -106,23 +106,6 @@ func StopContainerAndCleanupLauncher(
 	return failed
 }
 
-// LauncherCleanupFunc is a function that cleans up launcher resources.
-// Returns true if cleanup failed.
-type LauncherCleanupFunc func() bool
-
-// CreateLauncherCleanup creates a cleanup function for container launcher resources.
-// This returns a closure that can be called to perform the cleanup.
-func CreateLauncherCleanup(
-	ctx context.Context,
-	m *Manager,
-	userSessionID, agentID string,
-	logger Logger,
-) LauncherCleanupFunc {
-	return func() bool {
-		return StopContainerAndCleanupLauncher(ctx, m, userSessionID, agentID, logger)
-	}
-}
-
 // ACPClientHandle represents a handle to an ACP client for safe cleanup.
 type ACPClientHandle struct {
 	client        ACPClient

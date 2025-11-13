@@ -322,7 +322,9 @@ func (m *Manager) SpawnAgent(ctx context.Context, userSessionID, agentID, worksp
 		m.logger.Printf("[SESSION] ✗ Failed to create ACP client: %v", err)
 
 		// Cleanup launcher on client creation failure (container mode only)
-		StopContainerAndCleanupLauncher(ctx, m, userSessionID, agentID, m.logger)
+		if StopContainerAndCleanupLauncher(ctx, m, userSessionID, agentID, m.logger) {
+			m.logger.Printf("[SESSION] ├─ Failed to cleanup container/launcher after ACP client creation failure")
+		}
 
 		// Mark agent as FAILED
 		agentSession.mu.Lock()
@@ -409,7 +411,9 @@ func (m *Manager) TerminateAgent(ctx context.Context, userSessionID, agentID str
 	m.logger.Printf("[SESSION] Terminating agent: session=%s agentID=%s", userSessionID, agentID)
 
 	// Stop container and cleanup launcher (container mode only)
-	StopContainerAndCleanupLauncher(ctx, m, userSessionID, agentID, m.logger)
+	if StopContainerAndCleanupLauncher(ctx, m, userSessionID, agentID, m.logger) {
+		m.logger.Printf("WARN: Failed to stop container and cleanup launcher: session=%s agentID=%s", userSessionID, agentID)
+	}
 
 	// Close ACP client safely (with double-close protection)
 	_ = CloseACPClientSafely(agent, m.logger, userSessionID, agentID)
