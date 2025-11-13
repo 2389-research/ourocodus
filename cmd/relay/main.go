@@ -285,8 +285,19 @@ func redactNATSURL(natsURL string) string {
 	// This handles edge cases like @ symbols in passwords
 	parsed, err := url.Parse(natsURL)
 	if err != nil {
-		// If parsing fails, return as-is (better than crashing)
-		return natsURL
+		// If parsing fails, return safe placeholder to avoid credential leakage
+		// Malformed URLs might still contain embedded credentials
+		return "INVALID_NATS_URL"
+	}
+
+	// Check for opaque URIs (missing // authority separator)
+	// These may contain credentials in the opaque part like "nats:user:pass@host"
+	// which wouldn't be caught by the User field check
+	if parsed.Opaque != "" && (len(parsed.Opaque) > 0 && (parsed.Opaque[0] != '/' || (len(parsed.Opaque) > 1 && parsed.Opaque[1] != '/'))) {
+		// Opaque URI detected - if it contains @ it might have credentials
+		if len(parsed.Opaque) > 0 && containsAtSymbol(parsed.Opaque) {
+			return "INVALID_NATS_URL"
+		}
 	}
 
 	// If no user info, return original URL
@@ -307,6 +318,16 @@ func redactNATSURL(natsURL string) string {
 		redacted += "#" + parsed.Fragment
 	}
 	return redacted
+}
+
+// containsAtSymbol checks if a string contains the @ character
+func containsAtSymbol(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] == '@' {
+			return true
+		}
+	}
+	return false
 }
 
 // initializeNATS creates a NATS client if NATS_URL is configured

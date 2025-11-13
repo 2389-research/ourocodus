@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -37,9 +38,24 @@ func TestRedactNATSURL(t *testing.T) {
 			expected: "nats://***:***@cluster.nats.io:4222",
 		},
 		{
+			name:     "URL with username only (no password)",
+			input:    "nats://user@localhost:4222",
+			expected: "nats://***:***@localhost:4222",
+		},
+		{
+			name:     "URL with empty password",
+			input:    "nats://user:@localhost:4222",
+			expected: "nats://***:***@localhost:4222",
+		},
+		{
 			name:     "URL with special characters in credentials",
 			input:    "nats://user%40example:p%40ss%3Aword@server:4222",
 			expected: "nats://***:***@server:4222",
+		},
+		{
+			name:     "Malformed URL with credentials (missing //)",
+			input:    "nats:admin:secret@host:4222",
+			expected: "INVALID_NATS_URL",
 		},
 		{
 			name:     "Short URL",
@@ -110,21 +126,10 @@ func TestRedactNATSURL_PreservesHostInformation(t *testing.T) {
 	}
 
 	// Verify "admin" and "secret" are not in output
-	if contains(result, "admin") {
+	if strings.Contains(result, "admin") {
 		t.Error("Username 'admin' still visible in redacted URL")
 	}
-	if contains(result, "secret") {
+	if strings.Contains(result, "secret") {
 		t.Error("Password 'secret' still visible in redacted URL")
 	}
-}
-
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && func() bool {
-		for i := 0; i <= len(s)-len(substr); i++ {
-			if s[i:i+len(substr)] == substr {
-				return true
-			}
-		}
-		return false
-	}()
 }
