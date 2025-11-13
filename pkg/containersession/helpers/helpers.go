@@ -3,12 +3,14 @@ package helpers
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
 	"runtime"
 	"time"
 
+	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
 	"github.com/google/uuid"
 )
@@ -109,4 +111,32 @@ func CreateDockerClient(ctx context.Context) (*client.Client, error) {
 	}
 
 	return nil, fmt.Errorf("cannot connect to Docker: tried DOCKER_HOST env, Colima (macOS), and /var/run/docker.sock")
+}
+
+// AttachContainerIO attaches to a container's I/O streams and starts an output handler.
+// Returns true if the attachment was successful, false otherwise.
+// This helper extracts the common pattern used in multiple places to attach to container I/O.
+func AttachContainerIO(
+	ctx context.Context,
+	dockerClient *client.Client,
+	containerID string,
+	sessionID string,
+	logger *log.Logger,
+	outputHandler func(sessionID, containerID string, reader io.Reader, cleanup func()),
+) bool {
+	attachResp, err := dockerClient.ContainerAttach(ctx, containerID, container.AttachOptions{
+		Stream: true,
+		Stdin:  false,
+		Stdout: true,
+		Stderr: true,
+		Logs:   true,
+	})
+	if err != nil {
+		logger.Printf("Container attach failed: session=%s container=%s error=%v", sessionID, containerID, err)
+		return false
+	}
+
+	// Start output handler if successful
+	outputHandler(sessionID, containerID, attachResp.Reader, attachResp.Close)
+	return true
 }
