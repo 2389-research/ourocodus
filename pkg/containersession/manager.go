@@ -441,7 +441,7 @@ func (m *Manager) handleExistingContainer(ctx context.Context, containerID, stat
 			m.logger.Printf("Container attach failed: session=%s container=%s error=%v", sessionID, containerID, err)
 			// Continue even if attach fails - container is still usable
 		} else {
-			go m.handleContainerOutput(sessionID, containerID, attachResp.Reader)
+			go m.handleContainerOutput(sessionID, containerID, attachResp.Reader, attachResp.Close)
 		}
 		session.MarkStarted(m.clock.Now())
 		m.logger.Printf("Reattached to running container: session=%s container=%s", sessionID, containerID)
@@ -464,7 +464,7 @@ func (m *Manager) handleExistingContainer(ctx context.Context, containerID, stat
 		if err != nil {
 			m.logger.Printf("Container attach failed: session=%s container=%s error=%v", sessionID, containerID, err)
 		} else {
-			go m.handleContainerOutput(sessionID, containerID, attachResp.Reader)
+			go m.handleContainerOutput(sessionID, containerID, attachResp.Reader, attachResp.Close)
 		}
 		session.MarkStarted(m.clock.Now())
 		m.logger.Printf("Started and attached to existing container: session=%s container=%s", sessionID, containerID)
@@ -595,7 +595,7 @@ func (m *Manager) AttachContainerSession(ctx context.Context, sessionID string) 
 		m.logger.Printf("Container attach failed: session=%s container=%s error=%v", sessionID, containerID, err)
 		// Return session anyway - container is still accessible even if I/O attach failed
 	} else {
-		go m.handleContainerOutput(sessionID, containerID, attachResp.Reader)
+		go m.handleContainerOutput(sessionID, containerID, attachResp.Reader, attachResp.Close)
 	}
 
 	m.logger.Printf("Successfully attached to session: id=%s container=%s", sessionID, containerID)
@@ -641,7 +641,7 @@ func (m *Manager) StartContainerSession(ctx context.Context, sessionID string) e
 			// Continue even if attach fails - container is still running
 		} else {
 			// Start goroutines to demux stdout/stderr
-			go m.handleContainerOutput(sessionID, containerID, attachResp.Reader)
+			go m.handleContainerOutput(sessionID, containerID, attachResp.Reader, attachResp.Close)
 		}
 	}
 
@@ -651,9 +651,15 @@ func (m *Manager) StartContainerSession(ctx context.Context, sessionID string) e
 	return nil
 }
 
-// handleContainerOutput demultiplexes Docker container output streams
-func (m *Manager) handleContainerOutput(sessionID, containerID string, reader io.Reader) {
+// handleContainerOutput demultiplexes Docker container output streams.
+// It closes the provided closer when done to prevent resource leaks (issue #225).
+func (m *Manager) handleContainerOutput(sessionID, containerID string, reader io.Reader, cleanup func()) {
 	defer func() {
+		// Always cleanup the attach response to prevent resource leaks (issue #225)
+		if cleanup != nil {
+			cleanup()
+		}
+
 		if r := recover(); r != nil {
 			m.logger.Printf("Panic in output handler: session=%s container=%s panic=%v", sessionID, containerID, r)
 		}

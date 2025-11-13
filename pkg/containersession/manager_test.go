@@ -1,9 +1,12 @@
 package containersession
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"net"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -17,6 +20,36 @@ import (
 )
 
 // Mock implementations for testing
+
+// mockConn implements net.Conn for testing
+type mockConn struct {
+	closed bool
+	mu     sync.Mutex
+}
+
+func (m *mockConn) Read(b []byte) (n int, err error)   { return 0, io.EOF }
+func (m *mockConn) Write(b []byte) (n int, err error)  { return len(b), nil }
+func (m *mockConn) Close() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.closed = true
+	return nil
+}
+func (m *mockConn) LocalAddr() net.Addr                { return nil }
+func (m *mockConn) RemoteAddr() net.Addr               { return nil }
+func (m *mockConn) SetDeadline(t time.Time) error      { return nil }
+func (m *mockConn) SetReadDeadline(t time.Time) error  { return nil }
+func (m *mockConn) SetWriteDeadline(t time.Time) error { return nil }
+
+// newMockHijackedResponse creates a HijackedResponse with proper mocks for testing
+func newMockHijackedResponse() types.HijackedResponse {
+	conn := &mockConn{}
+	reader := bufio.NewReader(strings.NewReader(""))
+	return types.HijackedResponse{
+		Conn:   conn,
+		Reader: reader,
+	}
+}
 
 type mockDockerClient struct {
 	createFn     func(ctx context.Context, config *container.Config, hostConfig *container.HostConfig, networkingConfig *network.NetworkingConfig, platform *ocispec.Platform, containerName string) (container.CreateResponse, error)
@@ -573,7 +606,7 @@ func TestHandleExistingContainer(t *testing.T) {
 				}, nil
 			},
 			attachFn: func(ctx context.Context, containerID string, options container.AttachOptions) (types.HijackedResponse, error) {
-				return types.HijackedResponse{}, nil
+				return newMockHijackedResponse(), nil
 			},
 		}
 		manager := NewManager(docker, &mockIDGenerator{}, &mockClock{}, &mockLogger{}, baseDir)
@@ -618,7 +651,7 @@ func TestHandleExistingContainer(t *testing.T) {
 				return nil
 			},
 			attachFn: func(ctx context.Context, containerID string, options container.AttachOptions) (types.HijackedResponse, error) {
-				return types.HijackedResponse{}, nil
+				return newMockHijackedResponse(), nil
 			},
 		}
 		manager := NewManager(docker, &mockIDGenerator{}, &mockClock{}, &mockLogger{}, baseDir)
@@ -765,7 +798,7 @@ func TestAttachContainerSession(t *testing.T) {
 				}, nil
 			},
 			attachFn: func(ctx context.Context, containerID string, options container.AttachOptions) (types.HijackedResponse, error) {
-				return types.HijackedResponse{}, nil
+				return newMockHijackedResponse(), nil
 			},
 		}
 		manager := NewManager(docker, &mockIDGenerator{}, &mockClock{}, &mockLogger{}, baseDir)
@@ -885,7 +918,7 @@ func TestCreateContainerSession_Reuse(t *testing.T) {
 				}, nil
 			},
 			attachFn: func(ctx context.Context, containerID string, options container.AttachOptions) (types.HijackedResponse, error) {
-				return types.HijackedResponse{}, nil
+				return newMockHijackedResponse(), nil
 			},
 			createFn: func(ctx context.Context, config *container.Config, hostConfig *container.HostConfig, networkingConfig *network.NetworkingConfig, platform *ocispec.Platform, containerName string) (container.CreateResponse, error) {
 				createCalled = true
@@ -964,7 +997,7 @@ func TestCreateContainerSession_Reuse(t *testing.T) {
 				return nil
 			},
 			attachFn: func(ctx context.Context, containerID string, options container.AttachOptions) (types.HijackedResponse, error) {
-				return types.HijackedResponse{}, nil
+				return newMockHijackedResponse(), nil
 			},
 			createFn: func(ctx context.Context, config *container.Config, hostConfig *container.HostConfig, networkingConfig *network.NetworkingConfig, platform *ocispec.Platform, containerName string) (container.CreateResponse, error) {
 				createCalled = true
