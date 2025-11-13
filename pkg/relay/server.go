@@ -364,73 +364,31 @@ func (s *Server) handleAgentMessage(ctx context.Context, conn WebSocketConn, raw
 	agent, err := s.sessionManager.GetAgent(msg.UserSessionID, msg.AgentID)
 	if err != nil {
 		s.logger.Printf("Failed to get agent: %v", err)
-
 		// Map error to protocol error code (distinguishes SESSION_NOT_FOUND vs AGENT_NOT_FOUND)
-		errorCode, errorMessage, recoverable := s.mapError(err)
-
-		errorMsg := NewErrorMessage(errorCode, errorMessage, recoverable)
-		if writeErr := conn.WriteJSON(errorMsg); writeErr != nil {
-			s.logger.Printf("Failed to send error response: %v", writeErr)
-			return true // Close on write error
-		}
-
-		// Keep connection open even for non-recoverable errors
-		// Client can choose to: close connection OR create missing resources and retry
-		return false
+		// Keep connection open even for non-recoverable errors - client can create missing resources
+		return SendMappedError(conn, s.logger, err, s.mapError)
 	}
 
 	// Check agent state
 	if agent.GetState() != session.AgentActive {
 		s.logger.Printf("Agent not ready: userSession=%s agentID=%s state=%s",
 			msg.UserSessionID, msg.AgentID, agent.GetState())
-
-		errorMsg := NewErrorMessage(
-			"AGENT_NOT_READY",
-			fmt.Sprintf("Agent is not ready (current state: %s)", agent.GetState()),
-			true, // Recoverable - client can wait and retry
-		)
-		if writeErr := conn.WriteJSON(errorMsg); writeErr != nil {
-			s.logger.Printf("Failed to send error response: %v", writeErr)
-			return true
-		}
-
-		return false // Keep connection open for retry
+		return SendAgentNotReadyError(conn, s.logger,
+			fmt.Sprintf("Agent is not ready (current state: %s)", agent.GetState()))
 	}
 
 	// Get ACP client and send message
 	acpClient := agent.GetACPClient()
 	if acpClient == nil {
 		s.logger.Printf("Agent has no ACP client: userSession=%s agentID=%s", msg.UserSessionID, msg.AgentID)
-
-		errorMsg := NewErrorMessage(
-			"AGENT_NOT_READY",
-			"Agent ACP client not initialized",
-			true, // Recoverable
-		)
-		if writeErr := conn.WriteJSON(errorMsg); writeErr != nil {
-			s.logger.Printf("Failed to send error response: %v", writeErr)
-			return true
-		}
-
-		return false // Keep connection open for retry
+		return SendAgentNotReadyError(conn, s.logger, "Agent ACP client not initialized")
 	}
 
 	// Send message to agent
 	response, err := acpClient.SendMessage(msg.Content)
 	if err != nil {
 		s.logger.Printf("Agent message failed: %v", err)
-
-		errorMsg := NewErrorMessage(
-			"AGENT_MESSAGE_FAILED",
-			fmt.Sprintf("Failed to send message to agent: %v", err),
-			true, // Recoverable - client can retry
-		)
-		if writeErr := conn.WriteJSON(errorMsg); writeErr != nil {
-			s.logger.Printf("Failed to send error response: %v", writeErr)
-			return true
-		}
-
-		return false // Keep connection open for retry
+		return SendAgentMessageFailedError(conn, s.logger, err)
 	}
 
 	s.logger.Printf("[RELAY] Agent response received: userSession=%s agentID=%s",
@@ -440,16 +398,8 @@ func (s *Server) handleAgentMessage(ctx context.Context, conn WebSocketConn, raw
 	agentMsg, ok := response.(*acp.AgentMessage)
 	if !ok {
 		s.logger.Printf("Invalid response type from agent: %T", response)
-		errorMsg := NewErrorMessage(
-			"AGENT_MESSAGE_FAILED",
-			"Invalid response format from agent",
-			true, // Recoverable - client can retry
-		)
-		if writeErr := conn.WriteJSON(errorMsg); writeErr != nil {
-			s.logger.Printf("Failed to send error response: %v", writeErr)
-			return true
-		}
-		return false
+		return SendErrorMessage(conn, s.logger, "AGENT_MESSAGE_FAILED",
+			"Invalid response format from agent", true)
 	}
 	responseStr := agentMsg.Content
 
