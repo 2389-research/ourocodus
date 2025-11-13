@@ -439,7 +439,7 @@ func (t *blockingCloseTransport) Write(p []byte) (n int, err error) {
 	return len(p), nil
 }
 
-func (t *blockingCloseTransport) Close() error {
+func (t *blockingCloseTransport) Close(ctx context.Context) error {
 	// Block until closeDone is closed
 	<-t.closeDone
 	return nil
@@ -463,7 +463,7 @@ func (t *mockTransportForClose) Write(p []byte) (n int, err error) {
 	return len(p), nil
 }
 
-func (t *mockTransportForClose) Close() error {
+func (t *mockTransportForClose) Close(ctx context.Context) error {
 	t.closed = true
 	t.closeCount++
 	return nil

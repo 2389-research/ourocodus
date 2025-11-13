@@ -2,6 +2,7 @@ package acp
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"runtime"
 	"testing"
@@ -48,7 +49,7 @@ func (m *mockTransport) Stderr() io.Reader {
 	return m.stderrReader
 }
 
-func (m *mockTransport) Close() error {
+func (m *mockTransport) Close(ctx context.Context) error {
 	m.closed = true
 	// Close stderr writer to unblock scanner.Scan() in logStderr goroutine
 	if m.stderrWriter != nil {
