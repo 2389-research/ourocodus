@@ -49,6 +49,7 @@ func (m *mockUpgrader) Upgrade(w interface{}, r interface{}, responseHeader inte
 }
 
 type mockWebSocketConn struct {
+	mu            sync.Mutex
 	written       []interface{}
 	messageToRead []byte
 	readError     error
@@ -60,7 +61,9 @@ func (m *mockWebSocketConn) WriteJSON(v interface{}) error {
 	if m.writeError != nil {
 		return m.writeError
 	}
+	m.mu.Lock()
 	m.written = append(m.written, v)
+	m.mu.Unlock()
 	return nil
 }
 

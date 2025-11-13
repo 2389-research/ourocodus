@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 
 	"github.com/2389-research/ourocodus/pkg/acp"
 	"github.com/2389-research/ourocodus/pkg/agent/container"
@@ -166,15 +167,23 @@ func (s *Server) handleUnknownMessageType(conn WebSocketConn, msgType string) bo
 // SessionWebSocketAdapter adapts relay.WebSocketConn to session.WebSocketConn
 // Bridges the WebSocket interface between relay and session packages
 // Server owns all I/O - adapter only exposes WriteJSON and Close to session layer
+//
+// Thread-safety: WriteJSON is protected by a mutex to prevent concurrent write panics.
+// gorilla/websocket requires that only one goroutine writes to a connection at a time.
 type SessionWebSocketAdapter struct {
-	conn WebSocketConn
+	conn    WebSocketConn
+	writeMu sync.Mutex // Protects concurrent writes (issue #213)
 }
 
 func (a *SessionWebSocketAdapter) WriteJSON(v interface{}) error {
+	a.writeMu.Lock()
+	defer a.writeMu.Unlock()
 	return a.conn.WriteJSON(v)
 }
 
 func (a *SessionWebSocketAdapter) Close() error {
+	// Note: Close does not need mutex protection as it's typically called once
+	// during cleanup. The underlying connection handles concurrent Close calls.
 	return a.conn.Close()
 }
 

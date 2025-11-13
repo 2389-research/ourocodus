@@ -379,3 +379,55 @@ func TestServer_InvalidJSON(t *testing.T) {
 		t.Errorf("expected echo of recovered message, got %v", echoMsg["message"])
 	}
 }
+
+// TestSessionWebSocketAdapter_ConcurrentWrites tests that concurrent writes don't panic (issue #213)
+func TestSessionWebSocketAdapter_ConcurrentWrites(t *testing.T) {
+	// Use existing mockWebSocketConn from server_unit_test.go
+	mockConn := &mockWebSocketConn{}
+
+	adapter := &SessionWebSocketAdapter{
+		conn: mockConn,
+	}
+
+	// Launch multiple goroutines that write concurrently
+	const numGoroutines = 10
+	const writesPerGoroutine = 50
+
+	done := make(chan bool, numGoroutines)
+
+	for i := 0; i < numGoroutines; i++ {
+		go func(id int) {
+			defer func() {
+				if r := recover(); r != nil {
+					t.Errorf("Goroutine %d panicked: %v", id, r)
+				}
+				done <- true
+			}()
+
+			for j := 0; j < writesPerGoroutine; j++ {
+				msg := map[string]interface{}{
+					"goroutine": id,
+					"message":   j,
+				}
+				if err := adapter.WriteJSON(msg); err != nil {
+					t.Errorf("Goroutine %d write %d failed: %v", id, j, err)
+				}
+			}
+		}(i)
+	}
+
+	// Wait for all goroutines to complete
+	for i := 0; i < numGoroutines; i++ {
+		<-done
+	}
+
+	// Verify total writes - the mockWebSocketConn appends to written slice
+	// With mutex protection, all writes should be recorded
+	expectedWrites := numGoroutines * writesPerGoroutine
+	mockConn.mu.Lock()
+	actualWrites := len(mockConn.written)
+	mockConn.mu.Unlock()
+	if actualWrites != expectedWrites {
+		t.Errorf("Expected %d writes, got %d", expectedWrites, actualWrites)
+	}
+}

@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -289,6 +291,58 @@ func initializeAgentInfrastructure(ctx context.Context, logger *relay.StdLogger,
 	return dockerClient, launcherFactory, containerManager
 }
 
+// redactNATSURL removes credentials from NATS URL for safe logging
+func redactNATSURL(natsURL string) string {
+	// Handle comma-separated NATS URLs (HA configuration with multiple servers)
+	// Example: nats://user:pass@host1:4222,nats://admin:secret@host2:4222
+	if strings.Contains(natsURL, ",") {
+		urls := strings.Split(natsURL, ",")
+		redacted := make([]string, len(urls))
+		for i, u := range urls {
+			redacted[i] = redactNATSURL(strings.TrimSpace(u))
+		}
+		return strings.Join(redacted, ",")
+	}
+
+	// Parse the URL to extract and redact credentials
+	// NATS URLs can be: nats://host:port or nats://user:pass@host:port
+
+	// Use Go's net/url package for proper URL parsing
+	// This handles edge cases like @ symbols in passwords
+	parsed, err := url.Parse(natsURL)
+	if err != nil {
+		// If parsing fails, return safe placeholder to avoid credential leakage
+		// Malformed URLs might still contain embedded credentials
+		return "INVALID_NATS_URL"
+	}
+
+	// Check for opaque URIs (missing // authority separator)
+	// These may contain credentials in the opaque part like "nats:user:pass@host"
+	// which wouldn't be caught by the User field check
+	if parsed.Opaque != "" && (len(parsed.Opaque) > 0 && (parsed.Opaque[0] != '/' || (len(parsed.Opaque) > 1 && parsed.Opaque[1] != '/'))) {
+		// Opaque URI detected - if it contains @ it might have credentials
+		if len(parsed.Opaque) > 0 && strings.Contains(parsed.Opaque, "@") {
+			return "INVALID_NATS_URL"
+		}
+	}
+
+	// If no user info, return original URL
+	if parsed.User == nil {
+		return natsURL
+	}
+
+	// Manually construct redacted URL to avoid URL encoding of ***
+	// Format: scheme://***:***@host:port
+	redacted := parsed.Scheme + "://***:***@" + parsed.Host
+	if parsed.RawQuery != "" {
+		redacted += "?" + parsed.RawQuery
+	}
+	if parsed.Fragment != "" {
+		redacted += "#" + parsed.Fragment
+	}
+	return redacted
+}
+
 // initializeNATS creates a NATS client if NATS_URL is configured
 func initializeNATS() nats.Client {
 	natsURL := os.Getenv("NATS_URL")
@@ -297,7 +351,7 @@ func initializeNATS() nats.Client {
 		return nil
 	}
 
-	log.Printf("[NATS] Connecting to NATS at %s...", natsURL)
+	log.Printf("[NATS] Connecting to NATS at %s...", redactNATSURL(natsURL))
 
 	natsClient, err := nats.NewClient(
 		nats.WithURL(natsURL),

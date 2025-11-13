@@ -6,6 +6,7 @@ import (
 	"io"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/pkg/stdcopy"
@@ -96,31 +97,56 @@ func (m *Manager) ExecInContainer(ctx context.Context, containerID string, cfg E
 	stdoutReader, stdoutWriter := io.Pipe()
 	stderrReader, stderrWriter := io.Pipe()
 
+	// Track StdCopy goroutine completion
+	done := make(chan struct{})
+
 	// Goroutine for copying stdout/stderr from docker exec
 	// The goroutine will naturally complete when StdCopy finishes
 	// (when exec process exits or reader is closed)
 	go func() {
+		defer close(done)
 		_, copyErr := stdcopy.StdCopy(stdoutWriter, stderrWriter, attachResp.Reader)
 		_ = stdoutWriter.CloseWithError(copyErr)
 		_ = stderrWriter.CloseWithError(copyErr)
 	}()
 
 	closeFn := func() error {
-		// Close resources in correct order
+		// Close resources in correct order:
+		// 1. Close attachResp to stop the reader (causes StdCopy to return)
+		// 2. Wait for StdCopy goroutine to complete (it will close pipes with appropriate error)
 		// Note: attachResp.Reader is a *bufio.Reader without Close method
 		// The underlying connection is closed by attachResp.Close()
 
 		// Collect errors for observability
 		var errs []error
 
-		if err := stdoutWriter.Close(); err != nil {
-			errs = append(errs, fmt.Errorf("stdout: %w", err))
-		}
-		if err := stderrWriter.Close(); err != nil {
-			errs = append(errs, fmt.Errorf("stderr: %w", err))
+		// Close attachment first to stop the reader and cause StdCopy to return
+		attachResp.Close()
+
+		// Wait for StdCopy goroutine with timeout
+		select {
+		case <-done:
+			// Clean exit - goroutine has closed the pipes
+		case <-time.After(2 * time.Second):
+			errs = append(errs, fmt.Errorf("StdCopy goroutine did not exit within timeout"))
 		}
 
-		attachResp.Close()
+		// Pipes are already closed by the goroutine with CloseWithError
+		// Attempting to close them again would return io.ErrClosedPipe
+		// Only close them if the goroutine timed out (pipes might still be open)
+		if len(errs) > 0 {
+			// Goroutine didn't exit cleanly, forcibly close pipes
+			// NOTE: There is an inherent race condition here - the goroutine may call
+			// CloseWithError concurrently with this timeout path trying to close the pipes.
+			// We accept this race as unavoidable during forcible cleanup and check for
+			// io.ErrClosedPipe to handle the concurrent close gracefully.
+			if err := stdoutWriter.Close(); err != nil && err != io.ErrClosedPipe {
+				errs = append(errs, fmt.Errorf("stdout: %w", err))
+			}
+			if err := stderrWriter.Close(); err != nil && err != io.ErrClosedPipe {
+				errs = append(errs, fmt.Errorf("stderr: %w", err))
+			}
+		}
 
 		if len(errs) > 0 {
 			return fmt.Errorf("close errors: %v", errs)

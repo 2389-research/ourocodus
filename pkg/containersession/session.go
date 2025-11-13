@@ -32,6 +32,9 @@ type ContainerSession struct {
 	errorMsg          string
 	skipOutputLogging bool // Skip attaching for output logging
 
+	// Track output handler goroutine
+	outputDone chan struct{}
+
 	// Synchronization
 	mu sync.RWMutex
 }

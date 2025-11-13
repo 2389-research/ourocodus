@@ -1,7 +1,10 @@
 package acp_test
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -337,4 +340,135 @@ func TestSendMessage_InvalidJSON(t *testing.T) {
 	if err.Error() == "" {
 		t.Error("Expected non-empty error message for invalid JSON")
 	}
+}
+
+// Test CloseWithContext respects timeout (issue #211)
+func TestClient_CloseWithContext_Timeout(t *testing.T) {
+	// Create a transport that blocks on Close
+	blockingTransport := &blockingCloseTransport{
+		closeDone: make(chan struct{}),
+	}
+
+	client, err := acp.NewClientFromTransport(blockingTransport)
+	if err != nil {
+		t.Fatalf("Failed to create client: %v", err)
+	}
+
+	// Create context with short timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	// CloseWithContext should return timeout error, not block forever
+	err = client.CloseWithContext(ctx)
+	if err == nil {
+		t.Fatal("Expected timeout error, got nil")
+	}
+
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("Expected deadline exceeded error, got: %v", err)
+	}
+
+	// Unblock the transport to avoid goroutine leak
+	close(blockingTransport.closeDone)
+	// Give the goroutine time to complete
+	time.Sleep(50 * time.Millisecond)
+}
+
+// Test CloseWithContext succeeds when transport closes quickly
+func TestClient_CloseWithContext_Success(t *testing.T) {
+	// Create a normal transport
+	normalTransport := &mockTransportForClose{}
+
+	client, err := acp.NewClientFromTransport(normalTransport)
+	if err != nil {
+		t.Fatalf("Failed to create client: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	defer cancel()
+
+	// CloseWithContext should succeed
+	err = client.CloseWithContext(ctx)
+	if err != nil {
+		t.Fatalf("Expected successful close, got error: %v", err)
+	}
+
+	if !normalTransport.closed {
+		t.Error("Transport should be closed")
+	}
+}
+
+// Test CloseWithContext is idempotent
+func TestClient_CloseWithContext_Idempotent(t *testing.T) {
+	normalTransport := &mockTransportForClose{}
+	client, err := acp.NewClientFromTransport(normalTransport)
+	if err != nil {
+		t.Fatalf("Failed to create client: %v", err)
+	}
+
+	ctx := context.Background()
+
+	// First close
+	err1 := client.CloseWithContext(ctx)
+	if err1 != nil {
+		t.Fatalf("First close failed: %v", err1)
+	}
+
+	// Second close should be no-op
+	err2 := client.CloseWithContext(ctx)
+	if err2 != nil {
+		t.Fatalf("Second close failed: %v", err2)
+	}
+
+	// Transport Close should only be called once
+	if normalTransport.closeCount != 1 {
+		t.Errorf("Expected 1 close call, got %d", normalTransport.closeCount)
+	}
+}
+
+// blockingCloseTransport simulates a transport that blocks indefinitely on Close
+type blockingCloseTransport struct {
+	closeDone chan struct{}
+}
+
+func (t *blockingCloseTransport) Read(p []byte) (n int, err error) {
+	return 0, io.EOF
+}
+
+func (t *blockingCloseTransport) Write(p []byte) (n int, err error) {
+	return len(p), nil
+}
+
+func (t *blockingCloseTransport) Close() error {
+	// Block until closeDone is closed
+	<-t.closeDone
+	return nil
+}
+
+func (t *blockingCloseTransport) Stderr() io.Reader {
+	return nil
+}
+
+// mockTransportForClose is a simple non-blocking transport for tests
+type mockTransportForClose struct {
+	closed     bool
+	closeCount int
+}
+
+func (t *mockTransportForClose) Read(p []byte) (n int, err error) {
+	return 0, io.EOF
+}
+
+func (t *mockTransportForClose) Write(p []byte) (n int, err error) {
+	return len(p), nil
+}
+
+func (t *mockTransportForClose) Close() error {
+	t.closed = true
+	t.closeCount++
+	return nil
+}
+
+func (t *mockTransportForClose) Stderr() io.Reader {
+	return nil
 }
