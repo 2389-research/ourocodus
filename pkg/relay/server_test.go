@@ -424,7 +424,10 @@ func TestSessionWebSocketAdapter_ConcurrentWrites(t *testing.T) {
 	// Verify total writes - the mockWebSocketConn appends to written slice
 	// With mutex protection, all writes should be recorded
 	expectedWrites := numGoroutines * writesPerGoroutine
-	if len(mockConn.written) != expectedWrites {
-		t.Errorf("Expected %d writes, got %d", expectedWrites, len(mockConn.written))
+	mockConn.mu.Lock()
+	actualWrites := len(mockConn.written)
+	mockConn.mu.Unlock()
+	if actualWrites != expectedWrites {
+		t.Errorf("Expected %d writes, got %d", expectedWrites, actualWrites)
 	}
 }

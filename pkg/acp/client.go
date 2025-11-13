@@ -323,6 +323,10 @@ func (c *Client) Close() error {
 // CloseWithContext terminates the claude-code-acp process with timeout support.
 // This prevents indefinite blocking during shutdown by respecting the context deadline.
 // If the context is canceled or times out before Close completes, an error is returned.
+//
+// Note: If the context times out, a goroutine may continue running in the background
+// attempting to close the transport. This is a known limitation when dealing with
+// potentially-blocking Close operations.
 func (c *Client) CloseWithContext(ctx context.Context) error {
 	c.closedMu.Lock()
 	if c.closed {

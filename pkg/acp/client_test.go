@@ -370,6 +370,8 @@ func TestClient_CloseWithContext_Timeout(t *testing.T) {
 
 	// Unblock the transport to avoid goroutine leak
 	close(blockingTransport.closeDone)
+	// Give the goroutine time to complete
+	time.Sleep(50 * time.Millisecond)
 }
 
 // Test CloseWithContext succeeds when transport closes quickly
