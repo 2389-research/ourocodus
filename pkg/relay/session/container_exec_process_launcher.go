@@ -201,8 +201,10 @@ func (t *containerExecTransport) Close(ctx context.Context) error {
 	case err := <-done:
 		return err
 	case <-ctx.Done():
-		// Context cancelled, but we can't interrupt the underlying Close()
-		// This is acceptable for docker exec - the container will clean up
+		// Note: If context is cancelled, cleanup continues in background goroutine.
+		// This is a known limitation due to Docker API not supporting context-aware Close().
+		// The goroutine will complete cleanup and exit, but timing is unpredictable.
+		// See Issue #212 for discussion of this tradeoff.
 		return fmt.Errorf("close cancelled by context: %w", ctx.Err())
 	}
 }

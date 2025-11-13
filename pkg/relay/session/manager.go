@@ -445,7 +445,7 @@ func (m *Manager) TerminateAgent(ctx context.Context, userSessionID, agentID str
 	if m.isContainerModeEnabled() {
 		key := launcherKey(userSessionID, agentID)
 
-		// Atomic take-and-delete under Lock
+		// Mutex-protected take-and-delete pattern to prevent double-stop race (Issue #210)
 		m.launchersMu.Lock()
 		launcher := m.launchers[key]
 		handle := m.handles[key]
@@ -561,7 +561,7 @@ func (m *Manager) TerminateUserSession(ctx context.Context, userSessionID string
 				if m.isContainerModeEnabled() {
 					key := launcherKey(userSessionID, id)
 
-					// Atomic take-and-delete under Lock
+					// Mutex-protected take-and-delete pattern to prevent double-stop race (Issue #210)
 					m.launchersMu.Lock()
 					launcher := m.launchers[key]
 					handle := m.handles[key]

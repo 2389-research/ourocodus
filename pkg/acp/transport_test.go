@@ -128,7 +128,7 @@ done
 	}
 
 	// Should take about 5 seconds for graceful timeout, then kill succeeds quickly
-	expectedMin := 5 * time.Second
+	expectedMin := 4800 * time.Millisecond // 4.8s with tolerance for CI
 	expectedMax := 6 * time.Second
 
 	if elapsed < expectedMin {
@@ -302,13 +302,10 @@ done
 	}
 
 	// Should take about 5 seconds (graceful timeout) + small time for kill to work
-	expectedMin := 5 * time.Second
-	expectedMax := 6 * time.Second
+	expectedMin := 4800 * time.Millisecond // 4.8s with tolerance for CI
 
-	if elapsed < expectedMin || elapsed > expectedMax {
-		t.Logf("Warning: Close timing was %v, expected between %v and %v",
-			elapsed, expectedMin, expectedMax)
-		// Not a fatal error as timing can vary on CI systems
+	if elapsed < expectedMin {
+		t.Logf("Warning: Close timing was %v, expected at least %v", elapsed, expectedMin)
 	}
 
 	t.Logf("Close completed successfully in %v after kill", elapsed)

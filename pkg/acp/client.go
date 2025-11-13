@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"sync"
-	"time"
 )
 
 // Client manages communication with a single claude-code-acp runtime transport.
@@ -366,15 +365,13 @@ func (c *Client) Close(ctx context.Context) error {
 		}
 	}
 
-	// Wait for logStderr goroutine with context timeout
+	// Wait for logStderr goroutine to exit, respecting context deadline
 	if c.stderrDone != nil {
 		select {
 		case <-c.stderrDone:
 			// Clean shutdown
 		case <-ctx.Done():
 			c.logger.Printf("[WARN] logStderr goroutine did not exit before context deadline")
-		case <-time.After(2 * time.Second):
-			c.logger.Printf("[WARN] logStderr goroutine did not exit within 2s timeout")
 		}
 	}
 

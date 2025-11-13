@@ -151,8 +151,10 @@ func (t *containerAttachTransport) Close(ctx context.Context) error {
 	case <-done:
 		return nil
 	case <-ctx.Done():
-		// Context cancelled, but cleanup continues in background
-		// This is acceptable - Docker connection will eventually clean up
+		// Note: If context is cancelled, cleanup continues in background goroutine.
+		// This is a known limitation due to Docker API not supporting context-aware Close().
+		// The goroutine will complete cleanup and exit, but timing is unpredictable.
+		// See Issue #212 for discussion of this tradeoff.
 		return fmt.Errorf("close cancelled by context: %w", ctx.Err())
 	}
 }
