@@ -40,7 +40,7 @@ func (m *integrationMockACPClient) SendMessage(content string) (interface{}, err
 	}, nil
 }
 
-func (m *integrationMockACPClient) Close() error {
+func (m *integrationMockACPClient) Close(ctx context.Context) error {
 	if m.closeFunc != nil {
 		return m.closeFunc()
 	}
