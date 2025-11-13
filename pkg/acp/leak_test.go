@@ -10,12 +10,12 @@ import (
 
 // mockTransport is a simple mock transport for testing
 type mockTransport struct {
-	stdin         *bytes.Buffer
-	stdout        *bytes.Buffer
-	stderr        *bytes.Buffer
-	stderrReader  *io.PipeReader
-	stderrWriter  *io.PipeWriter
-	closed        bool
+	stdin        *bytes.Buffer
+	stdout       *bytes.Buffer
+	stderr       *bytes.Buffer
+	stderrReader *io.PipeReader
+	stderrWriter *io.PipeWriter
+	closed       bool
 }
 
 func newMockTransport() *mockTransport {

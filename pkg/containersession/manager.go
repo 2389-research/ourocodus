@@ -702,8 +702,12 @@ func (m *Manager) startOutputHandler(session *ContainerSession, sessionID, conta
 		session.mu.Unlock()
 		select {
 		case <-oldDone:
+			// Previous handler exited cleanly
 		case <-time.After(2 * time.Second):
-			m.logger.Printf("[WARN] Previous output handler did not exit: session=%s", sessionID)
+			// Timeout - previous handler is still running
+			// DO NOT start a new handler to avoid goroutine leak
+			m.logger.Printf("[ERROR] Previous output handler did not exit, refusing to start new handler: session=%s", sessionID)
+			return
 		}
 		session.mu.Lock()
 	}
