@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"time"
 )
 
 // Client manages communication with a single claude-code-acp runtime transport.
@@ -309,23 +310,14 @@ func (c *Client) readResponse(expectedID int) (*AgentMessage, error) {
 }
 
 // Close terminates the claude-code-acp process and cleans up resources.
-// Deprecated: Use CloseWithContext to avoid indefinite blocking during shutdown (issue #211).
+// This method delegates to CloseWithContext with a 5-second timeout to prevent
+// indefinite blocking during shutdown (issue #211).
+// For more control over the timeout, use CloseWithContext directly.
 func (c *Client) Close() error {
-	c.closedMu.Lock()
-	if c.closed {
-		c.closedMu.Unlock()
-		return nil
-	}
-	c.closed = true
-	c.closedMu.Unlock()
-
-	if c.transport != nil {
-		if err := c.transport.Close(); err != nil {
-			return fmt.Errorf("failed to close transport: %w", err)
-		}
-	}
-
-	return nil
+	// Delegate to CloseWithContext with a reasonable default timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return c.CloseWithContext(ctx)
 }
 
 // CloseWithContext terminates the claude-code-acp process with timeout support.
