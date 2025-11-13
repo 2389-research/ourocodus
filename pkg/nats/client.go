@@ -396,16 +396,26 @@ func (c *client) waitForBackgroundDrain(conn *nats.Conn) {
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 
-	for {
-		<-ticker.C
+	// Add a reasonable maximum wait time to prevent goroutine leak (issue #230)
+	timeout := time.After(30 * time.Second)
 
-		// Check if drain completed (connection is no longer draining or is closed)
-		if !conn.IsDraining() || conn.IsClosed() {
+	for {
+		select {
+		case <-ticker.C:
+			// Check if drain completed (connection is no longer draining or is closed)
+			if !conn.IsDraining() || conn.IsClosed() {
+				c.mu.Lock()
+				c.draining = false
+				if conn.IsClosed() {
+					c.closed = true
+				}
+				c.mu.Unlock()
+				return
+			}
+		case <-timeout:
+			// Force cleanup after timeout to prevent goroutine leak
 			c.mu.Lock()
 			c.draining = false
-			if conn.IsClosed() {
-				c.closed = true
-			}
 			c.mu.Unlock()
 			return
 		}
