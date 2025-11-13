@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -168,34 +166,17 @@ func (m *Manager) List(filter *SessionFilter) []*UserSession {
 //nolint:gocyclo // Complexity required for TOCTOU prevention and proper error handling
 func (m *Manager) SpawnAgent(ctx context.Context, userSessionID, agentID, workspace string) error {
 	// Validate inputs
-	if strings.TrimSpace(agentID) == "" {
-		return ErrEmptyAgentID
+	if err := ValidateNonEmpty(agentID, ErrEmptyAgentID); err != nil {
+		return err
 	}
-	if strings.TrimSpace(workspace) == "" {
-		return ErrEmptyWorkspace
+	if err := ValidateNonEmpty(workspace, ErrEmptyWorkspace); err != nil {
+		return err
 	}
 
 	// Validate and constrain workspace path under base directory
-	cleanPath := filepath.Clean(workspace)
-	absPath, err := filepath.Abs(cleanPath)
+	absPath, err := ValidateWorkspacePath(workspace, m.baseWorkspaceDir)
 	if err != nil {
-		return fmt.Errorf("invalid workspace path: %w", err)
-	}
-
-	baseAbs, err := filepath.Abs(m.baseWorkspaceDir)
-	if err != nil {
-		return fmt.Errorf("invalid base workspace directory: %w", err)
-	}
-
-	// Defense-in-depth: Check prefix with separator to prevent directory name bypass
-	if absPath != baseAbs && !strings.HasPrefix(absPath, baseAbs+string(os.PathSeparator)) {
-		return fmt.Errorf("workspace path must be under base directory %s", m.baseWorkspaceDir)
-	}
-
-	// Use filepath.Rel to prevent directory traversal with ".."
-	relPath, err := filepath.Rel(baseAbs, absPath)
-	if err != nil || strings.HasPrefix(relPath, "..") || relPath == ".." || filepath.IsAbs(relPath) {
-		return fmt.Errorf("workspace path must be under base directory %s", m.baseWorkspaceDir)
+		return err
 	}
 
 	// Get user session
@@ -340,21 +321,8 @@ func (m *Manager) SpawnAgent(ctx context.Context, userSessionID, agentID, worksp
 	if err != nil {
 		m.logger.Printf("[SESSION] ✗ Failed to create ACP client: %v", err)
 
-		// Cleanup launcher on client creation failure
-		if m.isContainerModeEnabled() {
-			key := launcherKey(userSessionID, agentID)
-			m.launchersMu.Lock()
-			launcher := m.launchers[key]
-			handle := m.handles[key]
-			delete(m.launchers, key)
-			delete(m.handles, key)
-			m.launchersMu.Unlock()
-
-			if launcher != nil && handle != nil {
-				m.logger.Printf("[SESSION] ├─ Cleaning up container after ACP client failure")
-				_ = launcher.Stop(ctx, handle)
-			}
-		}
+		// Cleanup launcher on client creation failure (container mode only)
+		StopContainerAndCleanupLauncher(ctx, m, userSessionID, agentID, m.logger)
 
 		// Mark agent as FAILED
 		agentSession.mu.Lock()
@@ -440,44 +408,11 @@ func (m *Manager) TerminateAgent(ctx context.Context, userSessionID, agentID str
 
 	m.logger.Printf("[SESSION] Terminating agent: session=%s agentID=%s", userSessionID, agentID)
 
-	// Stop container if launcher exists (container mode only)
-	if m.isContainerModeEnabled() {
-		key := launcherKey(userSessionID, agentID)
-		m.launchersMu.RLock()
-		launcher := m.launchers[key]
-		handle := m.handles[key]
-		m.launchersMu.RUnlock()
+	// Stop container and cleanup launcher (container mode only)
+	StopContainerAndCleanupLauncher(ctx, m, userSessionID, agentID, m.logger)
 
-		if launcher != nil && handle != nil {
-			if err := launcher.Stop(ctx, handle); err != nil {
-				m.logger.Printf("WARN: Failed to stop container for agent %s: %v", agentID, err)
-				// Continue cleanup despite error
-			}
-		}
-
-		// Remove from launcher maps
-		m.launchersMu.Lock()
-		delete(m.launchers, key)
-		delete(m.handles, key)
-		m.launchersMu.Unlock()
-	}
-
-	// Close ACP client if present (with double-close protection)
-	agent.mu.Lock()
-	acpClient := agent.acpClient
-	if acpClient != nil {
-		agent.acpClient = nil // Clear before Close to prevent double-close
-	}
-	agent.setAgentState(AgentTerminated)
-	agent.mu.Unlock()
-
-	// Close outside the lock
-	if acpClient != nil {
-		if err := acpClient.Close(); err != nil {
-			m.logger.Printf("Error closing ACP client: session=%s agentID=%s error=%v", userSessionID, agentID, err)
-			// Continue with cleanup even if close fails
-		}
-	}
+	// Close ACP client safely (with double-close protection)
+	_ = CloseACPClientSafely(agent, m.logger, userSessionID, agentID)
 
 	userSession.mu.Lock()
 	userSession.removeAgent(agentID)
@@ -538,56 +473,30 @@ func (m *Manager) TerminateUserSession(ctx context.Context, userSessionID string
 				agentCtx, cancel := context.WithTimeout(ctx, agentTimeout)
 				defer cancel()
 
-				// Close ACP client (with double-close protection)
-				a.mu.Lock()
-				acpClient := a.acpClient
-				if acpClient != nil {
-					a.acpClient = nil // Clear before Close to prevent double-close
-				}
-				a.setAgentState(AgentTerminated)
-				a.mu.Unlock()
+				// Extract ACP client (with double-close protection)
+				handle := ExtractACPClient(a, m.logger, userSessionID, id)
 
-				// Close outside the lock
-				if acpClient != nil {
-					done := make(chan error, 1)
-					go func() {
-						done <- acpClient.Close()
-					}()
+				// Close with timeout
+				done := make(chan error, 1)
+				go func() {
+					done <- handle.Close()
+				}()
 
-					select {
-					case err := <-done:
-						if err != nil {
-							m.logger.Printf("Error closing agent: userSession=%s agentID=%s error=%v", userSessionID, id, err)
-							failed = true
-						}
-					case <-agentCtx.Done():
-						m.logger.Printf("Agent close timeout: userSession=%s agentID=%s", userSessionID, id)
+				select {
+				case err := <-done:
+					if err != nil {
 						failed = true
 					}
+				case <-agentCtx.Done():
+					m.logger.Printf("Agent close timeout: userSession=%s agentID=%s", userSessionID, id)
+					failed = true
 				}
 
-				// Stop container if launcher exists (container mode only)
-				if m.isContainerModeEnabled() {
-					key := launcherKey(userSessionID, id)
-					m.launchersMu.RLock()
-					launcher := m.launchers[key]
-					handle := m.handles[key]
-					m.launchersMu.RUnlock()
-
-					if launcher != nil && handle != nil {
-						if err := launcher.Stop(agentCtx, handle); err != nil {
-							m.logger.Printf("WARN: Failed to stop container for agent %s: %v", id, err)
-							failed = true
-							// Continue cleanup despite error
-						}
-					}
-
-					// Remove from launcher maps
-					m.launchersMu.Lock()
-					delete(m.launchers, key)
-					delete(m.handles, key)
-					m.launchersMu.Unlock()
+				// Stop container and cleanup launcher (container mode only)
+				if StopContainerAndCleanupLauncher(agentCtx, m, userSessionID, id, m.logger) {
+					failed = true
 				}
+
 				if failed {
 					atomic.AddInt32(&agentFailures, 1)
 				} else {
