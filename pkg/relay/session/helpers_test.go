@@ -83,10 +83,10 @@ func TestValidateWorkspacePath(t *testing.T) {
 	}
 
 	tests := []struct {
-		name      string
-		workspace string
-		baseDir   string
-		wantErr   bool
+		name        string
+		workspace   string
+		baseDir     string
+		wantErr     bool
 		errContains string
 	}{
 		{
@@ -102,17 +102,17 @@ func TestValidateWorkspacePath(t *testing.T) {
 			wantErr:   false,
 		},
 		{
-			name:      "path traversal attempt with ..",
-			workspace: filepath.Join(baseDir, "..", "evil"),
-			baseDir:   baseDir,
-			wantErr:   true,
+			name:        "path traversal attempt with ..",
+			workspace:   filepath.Join(baseDir, "..", "evil"),
+			baseDir:     baseDir,
+			wantErr:     true,
 			errContains: "must be under base directory",
 		},
 		{
-			name:      "absolute path outside base",
-			workspace: "/tmp/evil",
-			baseDir:   baseDir,
-			wantErr:   true,
+			name:        "absolute path outside base",
+			workspace:   "/tmp/evil",
+			baseDir:     baseDir,
+			wantErr:     true,
 			errContains: "must be under base directory",
 		},
 	}
