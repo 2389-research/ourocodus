@@ -117,6 +117,11 @@ func launcherKey(sessionID, agentID string) string {
 	return sessionID + ":" + agentID
 }
 
+// isContainerModeEnabled checks if container mode is enabled and launcher factory is available.
+func (m *Manager) isContainerModeEnabled() bool {
+	return m.launcherFactory != nil && runtime.IsContainerMode()
+}
+
 // CreateUserSession creates a new user session in ACTIVE state with no agents
 // Session starts empty - agents are spawned separately via SpawnAgent
 func (m *Manager) CreateUserSession(ctx context.Context, ws WebSocketConn) (*UserSession, error) {
@@ -247,7 +252,7 @@ func (m *Manager) SpawnAgent(ctx context.Context, userSessionID, agentID, worksp
 
 	// Create launcher ONLY in container mode
 	var handle agent.AgentHandle
-	if m.launcherFactory != nil && runtime.IsContainerMode() {
+	if m.isContainerModeEnabled() {
 		// Container mode: Use image default (ENTRYPOINT ["/usr/local/bin/acp"])
 		// ContainerAttachProcessLauncher will attach to the container's stdio
 		// where ACP runs as the main process. The CMD from image provides default args.
@@ -336,7 +341,7 @@ func (m *Manager) SpawnAgent(ctx context.Context, userSessionID, agentID, worksp
 		m.logger.Printf("[SESSION] ✗ Failed to create ACP client: %v", err)
 
 		// Cleanup launcher on client creation failure
-		if m.launcherFactory != nil && runtime.IsContainerMode() {
+		if m.isContainerModeEnabled() {
 			key := launcherKey(userSessionID, agentID)
 			m.launchersMu.Lock()
 			launcher := m.launchers[key]
@@ -436,7 +441,7 @@ func (m *Manager) TerminateAgent(ctx context.Context, userSessionID, agentID str
 	m.logger.Printf("[SESSION] Terminating agent: session=%s agentID=%s", userSessionID, agentID)
 
 	// Stop container if launcher exists (container mode only)
-	if m.launcherFactory != nil && runtime.IsContainerMode() {
+	if m.isContainerModeEnabled() {
 		key := launcherKey(userSessionID, agentID)
 		m.launchersMu.RLock()
 		launcher := m.launchers[key]
@@ -562,7 +567,7 @@ func (m *Manager) TerminateUserSession(ctx context.Context, userSessionID string
 				}
 
 				// Stop container if launcher exists (container mode only)
-				if m.launcherFactory != nil && runtime.IsContainerMode() {
+				if m.isContainerModeEnabled() {
 					key := launcherKey(userSessionID, id)
 					m.launchersMu.RLock()
 					launcher := m.launchers[key]

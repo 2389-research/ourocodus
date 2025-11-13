@@ -55,8 +55,9 @@ type client struct {
 	jsMu   sync.Mutex
 	jsOnce sync.Once
 
-	mu     sync.RWMutex
-	closed bool
+	mu       sync.RWMutex
+	closed   bool
+	draining bool
 }
 
 // NewClient creates a new NATS client with the provided options.
@@ -357,60 +358,186 @@ func (c *client) Ready() error {
 
 // Drain gracefully drains the connection with the configured timeout.
 func (c *client) Drain(ctx context.Context) error {
+	// Validate state and mark as draining
+	conn, err := c.validateDrainState(ctx)
+	if err != nil {
+		return err
+	}
+
+	// Determine appropriate timeout
+	timeout, err := c.determineDrainTimeout(ctx)
+	if err != nil {
+		c.clearDraining()
+		return err
+	}
+
+	// Execute drain and wait for completion
+	drainCompleted, err := c.waitForDrain(ctx, conn, timeout)
+
+	// Update flags based on result
 	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if c.closed {
-		return ErrClientClosed
-	}
-
-	// Use configured drain timeout or context deadline
-	timeout := c.config.DrainTimeout
-	if deadline, ok := ctx.Deadline(); ok {
-		timeout = time.Until(deadline)
-	}
-
-	// Create a done channel
-	done := make(chan error, 1)
-
-	go func() {
-		done <- c.conn.Drain()
-	}()
-
-	// Handle drain completion based on timeout configuration
-	if timeout <= 0 {
-		// No timeout - wait indefinitely for drain or context cancellation
-		select {
-		case err := <-done:
-			c.closed = true
-			return err
-		case <-ctx.Done():
-			c.closed = true
-			return ctx.Err()
-		}
+	if drainCompleted {
+		// Drain completed successfully - mark connection as closed
+		c.draining = false
+		c.closed = true
 	} else {
-		// Use configured timeout
+		// Drain didn't complete (timeout/context) - keep draining flag set
+		// and spawn goroutine to clear it when background drain finishes
+		go c.waitForBackgroundDrain(conn)
+	}
+	c.mu.Unlock()
+
+	return err
+}
+
+// waitForBackgroundDrain waits for a background drain to complete and clears the draining flag
+func (c *client) waitForBackgroundDrain(conn *nats.Conn) {
+	// Poll connection status until drain completes
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+
+	// Add a reasonable maximum wait time to prevent goroutine leak (issue #230)
+	timeout := time.After(30 * time.Second)
+
+	for {
 		select {
-		case err := <-done:
-			c.closed = true
-			return err
-		case <-time.After(timeout):
-			c.closed = true
-			return fmt.Errorf("drain timeout after %v", timeout)
-		case <-ctx.Done():
-			c.closed = true
-			return ctx.Err()
+		case <-ticker.C:
+			// Check if drain completed (connection is no longer draining or is closed)
+			if !conn.IsDraining() || conn.IsClosed() {
+				c.mu.Lock()
+				c.draining = false
+				if conn.IsClosed() {
+					c.closed = true
+				}
+				c.mu.Unlock()
+				return
+			}
+		case <-timeout:
+			// Force cleanup after timeout to prevent goroutine leak
+			c.mu.Lock()
+			c.draining = false
+			c.mu.Unlock()
+			return
 		}
 	}
 }
 
+// validateDrainState checks if drain can proceed and marks client as draining
+func (c *client) validateDrainState(ctx context.Context) (*nats.Conn, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	// Check if already closed or draining
+	if c.closed {
+		return nil, ErrClientClosed
+	}
+	if c.draining {
+		return nil, fmt.Errorf("drain already in progress")
+	}
+	if c.conn == nil {
+		return nil, fmt.Errorf("no connection established")
+	}
+
+	// Also check if NATS connection itself is already draining (prevents re-entry)
+	if c.conn.IsDraining() {
+		return nil, fmt.Errorf("NATS connection already draining")
+	}
+
+	// Check context before starting drain
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+
+	// Mark as draining and capture connection reference
+	c.draining = true
+	return c.conn, nil
+}
+
+// determineDrainTimeout calculates the appropriate timeout from config and context
+func (c *client) determineDrainTimeout(ctx context.Context) (time.Duration, error) {
+	timeout := c.config.DrainTimeout
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return timeout, nil
+	}
+
+	timeUntilDeadline := time.Until(deadline)
+
+	// Check if context deadline has already passed
+	if timeUntilDeadline <= 0 {
+		return 0, ctx.Err()
+	}
+
+	// Use the shorter of configured timeout or time until deadline
+	if timeout <= 0 || timeUntilDeadline < timeout {
+		timeout = timeUntilDeadline
+	}
+
+	return timeout, nil
+}
+
+// waitForDrain executes the drain operation and waits for completion
+func (c *client) waitForDrain(ctx context.Context, conn *nats.Conn, timeout time.Duration) (bool, error) {
+	// Create done channel for drain result
+	done := make(chan error, 1)
+
+	// Start drain in goroutine
+	go func() {
+		done <- conn.Drain()
+	}()
+
+	// Wait for drain with proper timeout and context handling
+	var err error
+	var drainCompleted bool
+
+	if timeout > 0 {
+		select {
+		case err = <-done:
+			drainCompleted = true
+		case <-time.After(timeout):
+			err = fmt.Errorf("drain timeout after %v", timeout)
+		case <-ctx.Done():
+			err = ctx.Err()
+		}
+	} else {
+		// No timeout - wait for drain or context cancellation
+		select {
+		case err = <-done:
+			drainCompleted = true
+		case <-ctx.Done():
+			err = ctx.Err()
+		}
+	}
+
+	return drainCompleted, err
+}
+
+// clearDraining safely clears the draining flag
+func (c *client) clearDraining() {
+	c.mu.Lock()
+	c.draining = false
+	c.mu.Unlock()
+}
+
 // Close immediately closes the connection.
+// Note: If Drain() is in progress, Close() returns an error so callers can wait
+// for the graceful drain to finish before closing.
 func (c *client) Close() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	if c.closed {
 		return ErrClientClosed
+	}
+
+	// If drain is in progress, we need to wait for it to complete.
+	// This prevents Close() from interfering with the graceful drain.
+	// We can't wait while holding the lock, so we'll just check and return
+	// an error telling the caller to wait for drain to complete.
+	if c.draining {
+		return fmt.Errorf("drain in progress, wait for drain to complete before closing")
 	}
 
 	c.closed = true
