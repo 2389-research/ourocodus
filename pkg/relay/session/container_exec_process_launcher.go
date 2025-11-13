@@ -189,8 +189,22 @@ func (t *containerExecTransport) Write(p []byte) (int, error) {
 	return t.attachment.Stdin().Write(p)
 }
 
-func (t *containerExecTransport) Close() error {
-	return t.attachment.Close()
+func (t *containerExecTransport) Close(ctx context.Context) error {
+	// The ExecAttachment.Close() is synchronous and doesn't support context,
+	// but we respect context cancellation by running it in a goroutine
+	done := make(chan error, 1)
+	go func() {
+		done <- t.attachment.Close()
+	}()
+
+	select {
+	case err := <-done:
+		return err
+	case <-ctx.Done():
+		// Context cancelled, but we can't interrupt the underlying Close()
+		// This is acceptable for docker exec - the container will clean up
+		return fmt.Errorf("close cancelled by context: %w", ctx.Err())
+	}
 }
 
 func (t *containerExecTransport) Stderr() io.Reader {

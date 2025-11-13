@@ -377,7 +377,7 @@ func (c *Client) CloseWithContext(ctx context.Context) error {
 	go func() {
 		var err error
 		if c.transport != nil {
-			err = c.transport.Close()
+			err = c.transport.Close(ctx)
 			if err != nil {
 				err = fmt.Errorf("failed to close transport: %w", err)
 			}
