@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -278,6 +279,17 @@ func initializeAgentInfrastructure(ctx context.Context, logger *relay.StdLogger,
 
 // redactNATSURL removes credentials from NATS URL for safe logging
 func redactNATSURL(natsURL string) string {
+	// Handle comma-separated NATS URLs (HA configuration with multiple servers)
+	// Example: nats://user:pass@host1:4222,nats://admin:secret@host2:4222
+	if strings.Contains(natsURL, ",") {
+		urls := strings.Split(natsURL, ",")
+		redacted := make([]string, len(urls))
+		for i, u := range urls {
+			redacted[i] = redactNATSURL(strings.TrimSpace(u))
+		}
+		return strings.Join(redacted, ",")
+	}
+
 	// Parse the URL to extract and redact credentials
 	// NATS URLs can be: nats://host:port or nats://user:pass@host:port
 
@@ -295,7 +307,7 @@ func redactNATSURL(natsURL string) string {
 	// which wouldn't be caught by the User field check
 	if parsed.Opaque != "" && (len(parsed.Opaque) > 0 && (parsed.Opaque[0] != '/' || (len(parsed.Opaque) > 1 && parsed.Opaque[1] != '/'))) {
 		// Opaque URI detected - if it contains @ it might have credentials
-		if len(parsed.Opaque) > 0 && containsAtSymbol(parsed.Opaque) {
+		if len(parsed.Opaque) > 0 && strings.Contains(parsed.Opaque, "@") {
 			return "INVALID_NATS_URL"
 		}
 	}
@@ -306,11 +318,8 @@ func redactNATSURL(natsURL string) string {
 	}
 
 	// Manually construct redacted URL to avoid URL encoding of ***
-	// Format: scheme://***:***@host:port/path
+	// Format: scheme://***:***@host:port
 	redacted := parsed.Scheme + "://***:***@" + parsed.Host
-	if parsed.Path != "" {
-		redacted += parsed.Path
-	}
 	if parsed.RawQuery != "" {
 		redacted += "?" + parsed.RawQuery
 	}
@@ -318,16 +327,6 @@ func redactNATSURL(natsURL string) string {
 		redacted += "#" + parsed.Fragment
 	}
 	return redacted
-}
-
-// containsAtSymbol checks if a string contains the @ character
-func containsAtSymbol(s string) bool {
-	for i := 0; i < len(s); i++ {
-		if s[i] == '@' {
-			return true
-		}
-	}
-	return false
 }
 
 // initializeNATS creates a NATS client if NATS_URL is configured

@@ -67,6 +67,21 @@ func TestRedactNATSURL(t *testing.T) {
 			input:    "",
 			expected: "",
 		},
+		{
+			name:     "Multi-host HA configuration with credentials",
+			input:    "nats://user:pass@host1:4222,nats://admin:secret@host2:4222",
+			expected: "nats://***:***@host1:4222,nats://***:***@host2:4222",
+		},
+		{
+			name:     "Multi-host HA with mixed credentials",
+			input:    "nats://user:pass@host1:4222,nats://host2:4222,nats://admin:secret@host3:4222",
+			expected: "nats://***:***@host1:4222,nats://host2:4222,nats://***:***@host3:4222",
+		},
+		{
+			name:     "Multi-host HA with spaces",
+			input:    "nats://user:pass@host1:4222, nats://admin:secret@host2:4222",
+			expected: "nats://***:***@host1:4222,nats://***:***@host2:4222",
+		},
 	}
 
 	for _, tt := range tests {
