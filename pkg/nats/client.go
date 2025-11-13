@@ -376,16 +376,40 @@ func (c *client) Drain(ctx context.Context) error {
 
 	// Update flags based on result
 	c.mu.Lock()
-	c.draining = false
 	if drainCompleted {
 		// Drain completed successfully - mark connection as closed
+		c.draining = false
 		c.closed = true
+	} else {
+		// Drain didn't complete (timeout/context) - keep draining flag set
+		// and spawn goroutine to clear it when background drain finishes
+		go c.waitForBackgroundDrain(conn)
 	}
-	// If drain didn't complete (timeout/context), drain may still complete in background
-	// so we only clear draining flag but don't set closed
 	c.mu.Unlock()
 
 	return err
+}
+
+// waitForBackgroundDrain waits for a background drain to complete and clears the draining flag
+func (c *client) waitForBackgroundDrain(conn *nats.Conn) {
+	// Poll connection status until drain completes
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		<-ticker.C
+
+		// Check if drain completed (connection is no longer draining or is closed)
+		if !conn.IsDraining() || conn.IsClosed() {
+			c.mu.Lock()
+			c.draining = false
+			if conn.IsClosed() {
+				c.closed = true
+			}
+			c.mu.Unlock()
+			return
+		}
+	}
 }
 
 // validateDrainState checks if drain can proceed and marks client as draining
@@ -402,6 +426,11 @@ func (c *client) validateDrainState(ctx context.Context) (*nats.Conn, error) {
 	}
 	if c.conn == nil {
 		return nil, fmt.Errorf("no connection established")
+	}
+
+	// Also check if NATS connection itself is already draining (prevents re-entry)
+	if c.conn.IsDraining() {
+		return nil, fmt.Errorf("NATS connection already draining")
 	}
 
 	// Check context before starting drain
