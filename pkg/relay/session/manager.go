@@ -534,8 +534,9 @@ func (m *Manager) TerminateUserSession(ctx context.Context, userSessionID string
 				defer wg.Done()
 				failed := false
 
-				// Create context with timeout for this agent
-				agentCtx, cancel := context.WithTimeout(ctx, agentTimeout)
+				// Create dedicated shutdown context independent of request context
+				// This ensures cleanup completes even if HTTP request times out
+				shutdownCtx, cancel := context.WithTimeout(context.Background(), agentTimeout)
 				defer cancel()
 
 				// Close ACP client (with double-close protection)
@@ -549,7 +550,7 @@ func (m *Manager) TerminateUserSession(ctx context.Context, userSessionID string
 
 				// Close outside the lock (no goroutine wrapper needed - Close respects context)
 				if acpClient != nil {
-					if err := acpClient.Close(agentCtx); err != nil {
+					if err := acpClient.Close(shutdownCtx); err != nil {
 						m.logger.Printf("Error closing agent: userSession=%s agentID=%s error=%v", userSessionID, id, err)
 						failed = true
 					}
@@ -570,7 +571,7 @@ func (m *Manager) TerminateUserSession(ctx context.Context, userSessionID string
 
 					// Now safe - only one goroutine has these pointers
 					if launcher != nil && handle != nil {
-						if err := launcher.Stop(agentCtx, handle); err != nil {
+						if err := launcher.Stop(shutdownCtx, handle); err != nil {
 							m.logger.Printf("WARN: Failed to stop container for agent %s: %v", id, err)
 							failed = true
 							// Continue cleanup despite error

@@ -88,7 +88,8 @@ func main() {
 		log.Fatalf("Failed to create client: %v", err)
 	}
 	defer func() {
-		ctx := context.Background()
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
 		_ = client.Close(ctx)
 	}()
 
@@ -144,7 +145,8 @@ func main() {
 
 	// Close client
 	fmt.Println("Closing client...")
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 	if err := client.Close(ctx); err != nil {
 		log.Fatalf("Failed to close client: %v", err)
 	}
