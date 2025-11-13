@@ -124,7 +124,7 @@ func TestAgentWorktreeManager_Create(t *testing.T) {
 		wt, err := manager.Create(ctx, "", baseDir)
 		assert.Error(t, err)
 		assert.Nil(t, wt)
-		assert.Contains(t, err.Error(), "agentID")
+		assert.Contains(t, err.Error(), "agent ID")
 	})
 
 	t.Run("EmptyBaseDir", func(t *testing.T) {
@@ -200,7 +200,7 @@ func TestAgentWorktreeManager_Remove(t *testing.T) {
 		ctx := context.Background()
 		err = manager.Remove(ctx, "")
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "worktreePath")
+		assert.Contains(t, err.Error(), "path")
 	})
 
 	t.Run("NonexistentWorktree", func(t *testing.T) {
@@ -209,7 +209,7 @@ func TestAgentWorktreeManager_Remove(t *testing.T) {
 		require.NoError(t, err)
 
 		ctx := context.Background()
-		nonexistentPath := filepath.Join(repoDir, "nonexistent")
+		nonexistentPath := filepath.Join(repoDir, "agent-nonexistent")
 
 		// Should not error for idempotent removal
 		err = manager.Remove(ctx, nonexistentPath)
@@ -224,7 +224,7 @@ func TestAgentWorktreeManager_Remove(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel() // Cancel immediately
 
-		worktreePath := filepath.Join(repoDir, "some-path")
+		worktreePath := filepath.Join(repoDir, "agent-some-path")
 		err = manager.Remove(ctx, worktreePath)
 		assert.Error(t, err)
 		assert.Equal(t, context.Canceled, err)
@@ -317,4 +317,114 @@ func TestAgentWorktree_Accessors(t *testing.T) {
 	assert.Equal(t, "/path/to/worktree", wt.Path())
 	assert.Equal(t, "agent-coder-123", wt.BranchName())
 	assert.False(t, wt.CreatedAt().IsZero())
+}
+
+// TestAgentWorktreeManager_SecurityValidation tests path traversal prevention (issue #232)
+func TestAgentWorktreeManager_SecurityValidation(t *testing.T) {
+	t.Run("Create_RejectsPathTraversalInAgentID", func(t *testing.T) {
+		repoDir := setupTestRepo(t)
+		manager, err := NewAgentWorktreeManager(repoDir)
+		require.NoError(t, err)
+
+		ctx := context.Background()
+		baseDir := filepath.Join(repoDir, "workspaces")
+
+		// Test various path traversal attempts in agentID
+		traversalAttempts := []string{
+			"../../../etc/passwd",
+			"..\\..\\windows\\system32",
+			"agent/../../secrets",
+			"test/../../../sensitive",
+			"./../../etc",
+		}
+
+		for _, badAgentID := range traversalAttempts {
+			wt, err := manager.Create(ctx, badAgentID, baseDir)
+			assert.Error(t, err, "should reject agentID with path traversal: %s", badAgentID)
+			assert.Nil(t, wt)
+			assert.Contains(t, err.Error(), "agent ID")
+		}
+	})
+
+	t.Run("Create_RejectsRelativeBaseDir", func(t *testing.T) {
+		repoDir := setupTestRepo(t)
+		manager, err := NewAgentWorktreeManager(repoDir)
+		require.NoError(t, err)
+
+		ctx := context.Background()
+
+		// Test relative baseDir
+		wt, err := manager.Create(ctx, "coder-123", "./workspaces")
+		assert.Error(t, err, "should reject relative baseDir")
+		assert.Nil(t, wt)
+		assert.Contains(t, err.Error(), "baseDir")
+	})
+
+	t.Run("Remove_RejectsPathTraversal", func(t *testing.T) {
+		repoDir := setupTestRepo(t)
+		manager, err := NewAgentWorktreeManager(repoDir)
+		require.NoError(t, err)
+
+		ctx := context.Background()
+
+		// Test path traversal attempts in Remove
+		traversalPaths := []string{
+			"../../../etc/passwd",
+			filepath.Join(repoDir, "../../../etc/passwd"),
+			"./../../sensitive",
+		}
+
+		for _, badPath := range traversalPaths {
+			err := manager.Remove(ctx, badPath)
+			assert.Error(t, err, "should reject path traversal in Remove: %s", badPath)
+			assert.Contains(t, err.Error(), "path")
+		}
+	})
+
+	t.Run("Remove_RejectsNonAgentPaths", func(t *testing.T) {
+		repoDir := setupTestRepo(t)
+		manager, err := NewAgentWorktreeManager(repoDir)
+		require.NoError(t, err)
+
+		ctx := context.Background()
+
+		// Test paths without "agent-" prefix
+		nonAgentPaths := []string{
+			filepath.Join(repoDir, "legitimate-dir"),
+			filepath.Join(repoDir, "workspaces/user-data"),
+			filepath.Join(repoDir, "config"),
+		}
+
+		for _, path := range nonAgentPaths {
+			err := manager.Remove(ctx, path)
+			assert.Error(t, err, "should reject non-agent path: %s", path)
+			assert.Contains(t, err.Error(), "agent-")
+		}
+	})
+
+	t.Run("Create_AcceptsSafeAgentID", func(t *testing.T) {
+		repoDir := setupTestRepo(t)
+		manager, err := NewAgentWorktreeManager(repoDir)
+		require.NoError(t, err)
+
+		ctx := context.Background()
+		baseDir := filepath.Join(repoDir, "workspaces")
+
+		// Test safe agentIDs
+		safeAgentIDs := []string{
+			"coder-123",
+			"reviewer-abc",
+			"agent-xyz-456",
+			"test_agent",
+		}
+
+		for _, agentID := range safeAgentIDs {
+			wt, err := manager.Create(ctx, agentID, baseDir)
+			assert.NoError(t, err, "should accept safe agentID: %s", agentID)
+			assert.NotNil(t, wt)
+
+			// Cleanup
+			_ = manager.Remove(ctx, wt.Path())
+		}
+	})
 }
