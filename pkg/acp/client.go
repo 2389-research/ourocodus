@@ -336,8 +336,25 @@ func (c *Client) readResponse(expectedID int) (*AgentMessage, error) {
 	return &msg, nil
 }
 
-// Close terminates the claude-code-acp process and cleans up resources
+// Close terminates the claude-code-acp process and cleans up resources.
+// This method delegates to CloseWithContext with a 5-second timeout to prevent
+// indefinite blocking during shutdown (issue #211).
+// For more control over the timeout, use CloseWithContext directly.
 func (c *Client) Close() error {
+	// Delegate to CloseWithContext with a reasonable default timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return c.CloseWithContext(ctx)
+}
+
+// CloseWithContext terminates the claude-code-acp process with timeout support.
+// This prevents indefinite blocking during shutdown by respecting the context deadline.
+// If the context is canceled or times out before Close completes, an error is returned.
+//
+// Note: If the context times out, a goroutine may continue running in the background
+// attempting to close the transport. This is a known limitation when dealing with
+// potentially-blocking Close operations.
+func (c *Client) CloseWithContext(ctx context.Context) error {
 	c.closedMu.Lock()
 	if c.closed {
 		c.closedMu.Unlock()
@@ -351,10 +368,32 @@ func (c *Client) Close() error {
 		c.stderrCancel()
 	}
 
-	// Close transport (will close stderr, causing scanner to exit)
+	// Run transport close in goroutine with timeout to avoid indefinite blocking
+	type closeResult struct {
+		err error
+	}
+	transportDone := make(chan closeResult, 1)
+
+	go func() {
+		var err error
+		if c.transport != nil {
+			err = c.transport.Close()
+			if err != nil {
+				err = fmt.Errorf("failed to close transport: %w", err)
+			}
+		}
+		transportDone <- closeResult{err: err}
+	}()
+
+	// Wait for transport close with context timeout
 	var transportErr error
-	if c.transport != nil {
-		transportErr = c.transport.Close()
+	select {
+	case result := <-transportDone:
+		transportErr = result.err
+	case <-ctx.Done():
+		// Context canceled/timed out - return error but leave cleanup goroutine running
+		// The transport will eventually close, but we won't wait indefinitely
+		transportErr = fmt.Errorf("transport close timed out: %w", ctx.Err())
 	}
 
 	// Wait for logStderr goroutine with timeout
@@ -367,9 +406,5 @@ func (c *Client) Close() error {
 		}
 	}
 
-	if transportErr != nil {
-		return fmt.Errorf("failed to close transport: %w", transportErr)
-	}
-
-	return nil
+	return transportErr
 }
