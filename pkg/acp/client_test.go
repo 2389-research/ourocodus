@@ -76,7 +76,10 @@ func TestNewClient_Success(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create client: %v", err)
 	}
-	defer client.Close()
+	defer func() {
+		ctx := context.Background()
+		_ = client.Close(ctx)
+	}()
 
 	// Verify client was created successfully
 	if client == nil {
@@ -120,7 +123,10 @@ func TestSendMessage_ValidRequest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create client: %v", err)
 	}
-	defer client.Close()
+	defer func() {
+		ctx := context.Background()
+		_ = client.Close(ctx)
+	}()
 
 	// Send a message
 	msg, err := client.SendMessage("Hello, world!")
@@ -148,7 +154,10 @@ func TestSendMessage_MultipleSequential(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create client: %v", err)
 	}
-	defer client.Close()
+	defer func() {
+		ctx := context.Background()
+		_ = client.Close(ctx)
+	}()
 
 	// Send multiple messages and verify they all work
 	messages := []string{"First message", "Second message", "Third message"}
@@ -181,13 +190,14 @@ func TestClose_TerminatesCleanly(t *testing.T) {
 	}
 
 	// Close the client
-	err = client.Close()
+	ctx := context.Background()
+	err = client.Close(ctx)
 	if err != nil {
 		t.Errorf("Close() returned error: %v", err)
 	}
 
 	// Verify we can call Close() multiple times without error
-	err = client.Close()
+	err = client.Close(ctx)
 	if err != nil {
 		t.Errorf("Second Close() returned error: %v", err)
 	}
@@ -204,7 +214,8 @@ func TestSendMessage_AfterClose(t *testing.T) {
 	}
 
 	// Close the client
-	err = client.Close()
+	ctx := context.Background()
+	err = client.Close(ctx)
 	if err != nil {
 		t.Fatalf("Close() failed: %v", err)
 	}
@@ -248,7 +259,10 @@ func TestClient_WithLogger(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create client: %v", err)
 	}
-	defer client.Close()
+	defer func() {
+		ctx := context.Background()
+		_ = client.Close(ctx)
+	}()
 
 	deadline := time.Now().Add(500 * time.Millisecond)
 	for time.Now().Before(deadline) {
@@ -299,7 +313,10 @@ func TestSendMessage_ProcessCrash(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create client: %v", err)
 	}
-	defer client.Close()
+	defer func() {
+		ctx := context.Background()
+		_ = client.Close(ctx)
+	}()
 
 	// Try to send a message - should fail because process crashed
 	_, err = client.SendMessage("Hello")
@@ -328,7 +345,10 @@ func TestSendMessage_InvalidJSON(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create client: %v", err)
 	}
-	defer client.Close()
+	defer func() {
+		ctx := context.Background()
+		_ = client.Close(ctx)
+	}()
 
 	// Try to send a message - should fail due to invalid JSON response
 	_, err = client.SendMessage("Hello")
@@ -342,8 +362,8 @@ func TestSendMessage_InvalidJSON(t *testing.T) {
 	}
 }
 
-// Test CloseWithContext respects timeout (issue #211)
-func TestClient_CloseWithContext_Timeout(t *testing.T) {
+// Test Close respects context timeout (issue #211)
+func TestClient_Close_Timeout(t *testing.T) {
 	// Create a transport that blocks on Close
 	blockingTransport := &blockingCloseTransport{
 		closeDone: make(chan struct{}),
@@ -358,8 +378,8 @@ func TestClient_CloseWithContext_Timeout(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
-	// CloseWithContext should return timeout error, not block forever
-	err = client.CloseWithContext(ctx)
+	// Close should return timeout error, not block forever
+	err = client.Close(ctx)
 	if err == nil {
 		t.Fatal("Expected timeout error, got nil")
 	}
@@ -370,12 +390,12 @@ func TestClient_CloseWithContext_Timeout(t *testing.T) {
 
 	// Unblock the transport to avoid goroutine leak
 	close(blockingTransport.closeDone)
-	// Give the goroutine time to complete
+	// Give time for cleanup
 	time.Sleep(50 * time.Millisecond)
 }
 
-// Test CloseWithContext succeeds when transport closes quickly
-func TestClient_CloseWithContext_Success(t *testing.T) {
+// Test Close succeeds when transport closes quickly
+func TestClient_Close_Success(t *testing.T) {
 	// Create a normal transport
 	normalTransport := &mockTransportForClose{}
 
@@ -387,8 +407,8 @@ func TestClient_CloseWithContext_Success(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
 
-	// CloseWithContext should succeed
-	err = client.CloseWithContext(ctx)
+	// Close should succeed
+	err = client.Close(ctx)
 	if err != nil {
 		t.Fatalf("Expected successful close, got error: %v", err)
 	}
@@ -398,8 +418,8 @@ func TestClient_CloseWithContext_Success(t *testing.T) {
 	}
 }
 
-// Test CloseWithContext is idempotent
-func TestClient_CloseWithContext_Idempotent(t *testing.T) {
+// Test Close is idempotent
+func TestClient_Close_Idempotent(t *testing.T) {
 	normalTransport := &mockTransportForClose{}
 	client, err := acp.NewClientFromTransport(normalTransport)
 	if err != nil {
@@ -409,13 +429,13 @@ func TestClient_CloseWithContext_Idempotent(t *testing.T) {
 	ctx := context.Background()
 
 	// First close
-	err1 := client.CloseWithContext(ctx)
+	err1 := client.Close(ctx)
 	if err1 != nil {
 		t.Fatalf("First close failed: %v", err1)
 	}
 
 	// Second close should be no-op
-	err2 := client.CloseWithContext(ctx)
+	err2 := client.Close(ctx)
 	if err2 != nil {
 		t.Fatalf("Second close failed: %v", err2)
 	}

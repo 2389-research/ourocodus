@@ -132,7 +132,7 @@ type WebSocketConn interface {
 // Note: AgentMessage type is defined in pkg/acp
 type ACPClient interface {
 	SendMessage(content string) (interface{}, error) // Returns *acp.AgentMessage
-	Close() error
+	Close(ctx context.Context) error
 }
 
 // ClientFactory abstracts ACP client creation for testing

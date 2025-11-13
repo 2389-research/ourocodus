@@ -80,7 +80,8 @@ func TestClient_NoGoroutineLeak(t *testing.T) {
 		}
 
 		// Close the client
-		if err := client.Close(); err != nil {
+		ctx := context.Background()
+		if err := client.Close(ctx); err != nil {
 			t.Errorf("Failed to close client: %v", err)
 		}
 	}
@@ -138,7 +139,8 @@ func TestClient_LogStderrExitsOnClose(t *testing.T) {
 	beforeClose := countGoroutines()
 
 	// Close the client
-	if err := client.Close(); err != nil {
+	ctx := context.Background()
+	if err := client.Close(ctx); err != nil {
 		t.Errorf("Failed to close client: %v", err)
 	}
 
@@ -167,19 +169,13 @@ func TestClient_CloseTimeout(t *testing.T) {
 		t.Fatalf("Failed to create client: %v", err)
 	}
 
-	// Close should complete within reasonable time (2 second timeout + buffer)
-	done := make(chan error, 1)
-	go func() {
-		done <- client.Close()
-	}()
+	// Close should complete within reasonable time (context timeout)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
 
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Errorf("Close failed: %v", err)
-		}
-	case <-time.After(3 * time.Second):
-		t.Errorf("Close did not complete within timeout")
+	err = client.Close(ctx)
+	if err != nil {
+		t.Errorf("Close failed: %v", err)
 	}
 }
 
@@ -193,8 +189,9 @@ func TestClient_MultipleCloseIdempotent(t *testing.T) {
 	}
 
 	// Close multiple times
+	ctx := context.Background()
 	for i := 0; i < 3; i++ {
-		if err := client.Close(); err != nil {
+		if err := client.Close(ctx); err != nil {
 			t.Errorf("Close %d failed: %v", i+1, err)
 		}
 	}

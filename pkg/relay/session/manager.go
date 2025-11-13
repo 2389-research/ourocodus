@@ -471,9 +471,9 @@ func (m *Manager) TerminateAgent(ctx context.Context, userSessionID, agentID str
 	agent.setAgentState(AgentTerminated)
 	agent.mu.Unlock()
 
-	// Close outside the lock
+	// Close outside the lock with context
 	if acpClient != nil {
-		if err := acpClient.Close(); err != nil {
+		if err := acpClient.Close(ctx); err != nil {
 			m.logger.Printf("Error closing ACP client: session=%s agentID=%s error=%v", userSessionID, agentID, err)
 			// Continue with cleanup even if close fails
 		}
@@ -547,21 +547,10 @@ func (m *Manager) TerminateUserSession(ctx context.Context, userSessionID string
 				a.setAgentState(AgentTerminated)
 				a.mu.Unlock()
 
-				// Close outside the lock
+				// Close outside the lock (no goroutine wrapper needed - Close respects context)
 				if acpClient != nil {
-					done := make(chan error, 1)
-					go func() {
-						done <- acpClient.Close()
-					}()
-
-					select {
-					case err := <-done:
-						if err != nil {
-							m.logger.Printf("Error closing agent: userSession=%s agentID=%s error=%v", userSessionID, id, err)
-							failed = true
-						}
-					case <-agentCtx.Done():
-						m.logger.Printf("Agent close timeout: userSession=%s agentID=%s", userSessionID, id)
+					if err := acpClient.Close(agentCtx); err != nil {
+						m.logger.Printf("Error closing agent: userSession=%s agentID=%s error=%v", userSessionID, id, err)
 						failed = true
 					}
 				}
