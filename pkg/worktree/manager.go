@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -17,9 +19,11 @@ import (
 // concurrent agents. AgentWorktreeManager creates git worktrees with unique branches,
 // providing filesystem and git isolation.
 //
-// Thread-safety: AgentWorktreeManager is safe for concurrent use.
+// Thread-safety: AgentWorktreeManager is safe for concurrent use via internal mutex
+// serialization. Methods may block if another goroutine holds the lock.
 type AgentWorktreeManager struct {
 	repoPath string
+	mu       sync.Mutex // Serializes all mutating operations
 }
 
 // NewAgentWorktreeManager creates a new worktree manager for the given repository.
@@ -142,6 +146,9 @@ func (w *AgentWorktree) CreatedAt() time.Time {
 //	// Creates: /workspaces/agent-coder-abc123/
 //	// Branch: agent-coder-abc123-20250105-143022
 func (m *AgentWorktreeManager) Create(ctx context.Context, agentID, baseDir string) (*AgentWorktree, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	// Validate agentID for path traversal attempts
 	if err := validateAgentID(agentID); err != nil {
 		return nil, err
@@ -212,9 +219,9 @@ func (m *AgentWorktreeManager) cleanupStaleWorktree(ctx context.Context, worktre
 	}
 
 	// Directory exists - try to remove it from git's worktree tracking
-	// This uses the existing Remove method which handles all cleanup
-	if err := m.Remove(ctx, worktreePath); err != nil {
-		// If Remove fails, try manual cleanup
+	// Call removeUnlocked since Create() already holds the mutex
+	if err := m.removeUnlocked(ctx, worktreePath); err != nil {
+		// If removeUnlocked fails, try manual cleanup
 		// This can happen if git doesn't know about the directory
 		if err := os.RemoveAll(worktreePath); err != nil {
 			return fmt.Errorf("failed to remove stale directory: %w", err)
@@ -222,7 +229,7 @@ func (m *AgentWorktreeManager) cleanupStaleWorktree(ctx context.Context, worktre
 	}
 
 	// Verify directory was actually removed (defensive check)
-	// Even if Remove() succeeded, ensure the directory is gone
+	// Even if removeUnlocked() succeeded, ensure the directory is gone
 	if _, err := os.Stat(worktreePath); err == nil {
 		// Directory still exists, force removal
 		if err := os.RemoveAll(worktreePath); err != nil {
@@ -253,6 +260,15 @@ func (m *AgentWorktreeManager) cleanupStaleWorktree(ctx context.Context, worktre
 //
 // Returns an error if removal fails. Idempotent - safe to call multiple times.
 func (m *AgentWorktreeManager) Remove(ctx context.Context, worktreePath string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	return m.removeUnlocked(ctx, worktreePath)
+}
+
+// removeUnlocked is the internal implementation of Remove without locking.
+// Callers must hold m.mu.
+func (m *AgentWorktreeManager) removeUnlocked(ctx context.Context, worktreePath string) error {
 	// Validate worktree path for safety
 	if err := validateWorktreePath(worktreePath); err != nil {
 		return err
@@ -341,7 +357,7 @@ func (m *AgentWorktreeManager) removeWorktreeAndDir(ctx context.Context, worktre
 	return nil
 }
 
-// removeBranch removes a git branch. Best effort - does not return errors.
+// removeBranch removes a git branch. Best effort - logs errors but does not fail.
 func (m *AgentWorktreeManager) removeBranch(ctx context.Context, branchName string) {
 	if branchName == "" {
 		return
@@ -350,13 +366,17 @@ func (m *AgentWorktreeManager) removeBranch(ctx context.Context, branchName stri
 	// Prune worktree references first
 	cmd := exec.CommandContext(ctx, "git", "worktree", "prune")
 	cmd.Dir = m.repoPath
-	_ = cmd.Run() // best effort
+	if err := cmd.Run(); err != nil {
+		log.Printf("[WARN] Failed to prune worktree references: %v", err)
+	}
 
 	// Delete the branch
 	// #nosec G204 -- git command with controlled arguments
 	cmd = exec.CommandContext(ctx, "git", "branch", "-D", branchName)
 	cmd.Dir = m.repoPath
-	_ = cmd.Run() // best effort
+	if err := cmd.Run(); err != nil {
+		log.Printf("[WARN] Failed to delete branch %s: %v", branchName, err)
+	}
 }
 
 // List returns all worktrees managed by this repository.
