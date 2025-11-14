@@ -559,14 +559,19 @@ func (c *client) Close() error {
 	subs := append([]*Subscription{}, c.subs...) // Copy to avoid holding lock during Stop
 	c.subsMu.Unlock()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
+	// Stop each subscription with its own timeout to prevent cascade failures
 	for _, sub := range subs {
+		// Skip subscriptions that are already stopped
+		if !sub.IsValid() {
+			continue
+		}
+
 		// Best effort - log but don't fail Close()
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		if err := sub.Stop(ctx); err != nil {
 			log.Printf("[WARN] Failed to stop subscription: %v", err)
 		}
+		cancel()
 	}
 
 	// Close connection

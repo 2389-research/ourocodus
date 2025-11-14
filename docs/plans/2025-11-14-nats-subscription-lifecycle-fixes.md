@@ -57,10 +57,12 @@ type client struct {
     // ... no subscription tracking
 }
 
-func (c *client) Subscribe(subject string, handler MessageHandler) (Subscription, error) {
+func (c *client) Subscribe(ctx context.Context, subject string, handler MsgHandler, opts ...SubOption) (*Subscription, error) {
     // Creates subscription but doesn't track it
-    natsSub, err := c.conn.Subscribe(subject, ...)
-    sub := &subscription{natsSub: natsSub, ...}
+    sub := newSubscription(c, subject, handler, ...)
+    if err := sub.start(ctx); err != nil {
+        return nil, err
+    }
     return sub, nil  // Lost reference
 }
 
@@ -117,12 +119,15 @@ type client struct {
     // ... existing fields
 
     subsMu sync.Mutex
-    subs   []*subscription  // Track active subscriptions
+    subs   []*Subscription  // Track active subscriptions
 }
 
-func (c *client) Subscribe(subject string, handler MessageHandler) (Subscription, error) {
+func (c *client) Subscribe(ctx context.Context, subject string, handler MsgHandler, opts ...SubOption) (*Subscription, error) {
     // ... create subscription
-    sub := &subscription{...}
+    sub := newSubscription(c, subject, handler, applySubOptions(opts...))
+    if err := sub.start(ctx); err != nil {
+        return nil, err
+    }
 
     // Track the subscription
     c.subsMu.Lock()
@@ -132,17 +137,8 @@ func (c *client) Subscribe(subject string, handler MessageHandler) (Subscription
     return sub, nil
 }
 
-func (c *client) SubscribeQueue(subject, queue string, handler MessageHandler) (Subscription, error) {
-    // ... create subscription
-    sub := &subscription{...}
-
-    // Track the subscription
-    c.subsMu.Lock()
-    c.subs = append(c.subs, sub)
-    c.subsMu.Unlock()
-
-    return sub, nil
-}
+// Queue subscriptions use the same Subscribe() method with WithQueueGroup() option
+// Example: client.Subscribe(ctx, subject, handler, nats.WithQueueGroup(queueName))
 
 func (c *client) Close() error {
     // Mark as closed
@@ -156,7 +152,7 @@ func (c *client) Close() error {
 
     // Stop all tracked subscriptions with timeout
     c.subsMu.Lock()
-    subs := append([]*subscription{}, c.subs...)  // Copy to avoid holding lock during Stop
+    subs := append([]*Subscription{}, c.subs...)  // Copy to avoid holding lock during Stop
     c.subsMu.Unlock()
 
     ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -182,10 +178,9 @@ func (c *client) Close() error {
 3. Note that the goroutine is short-lived after timeout
 
 ### Phase 2: Add Subscription Tracking (#238)
-1. Add `subsMu sync.Mutex` and `subs []*subscription` fields to `client` struct
-2. Update `Subscribe()` to track subscriptions
-3. Update `SubscribeQueue()` to track subscriptions
-4. Add `log` import for warning messages
+1. Add `subsMu sync.Mutex` and `subs []*Subscription` fields to `client` struct
+2. Update `Subscribe()` to track subscriptions (queue subscriptions use same method with `WithQueueGroup()` option)
+3. Add `log` import for warning messages
 
 ### Phase 3: Update Close() Method
 1. Copy tracked subscriptions (avoid holding lock during Stop)
@@ -204,10 +199,10 @@ func TestClient_SubscriptionTracking(t *testing.T) {
     client := setupTestClient(t)
 
     // Subscribe to multiple subjects
-    sub1, err := client.Subscribe("test.1", handler)
+    sub1, err := client.Subscribe(ctx, "test.1", handler)
     require.NoError(t, err)
 
-    sub2, err := client.SubscribeQueue("test.2", "queue", handler)
+    sub2, err := client.Subscribe(ctx, "test.2", handler, nats.WithQueueGroup("queue"))
     require.NoError(t, err)
 
     // Verify subscriptions are tracked
