@@ -3,6 +3,7 @@ package nats
 import (
 	"context"
 	"fmt"
+	"log"
 	"strings"
 	"sync"
 	"time"
@@ -53,6 +54,10 @@ type client struct {
 	js     JSClient
 	jsErr  error // Stores JetStream initialization error
 	jsOnce sync.Once
+
+	// Subscription tracking for graceful shutdown (#238)
+	subsMu sync.Mutex
+	subs   []*Subscription
 
 	mu       sync.RWMutex
 	closed   bool
@@ -252,6 +257,11 @@ func (c *client) Subscribe(ctx context.Context, subject string, handler MsgHandl
 	if err := sub.start(ctx); err != nil {
 		return nil, fmt.Errorf("start subscription: %w", err)
 	}
+
+	// Track the subscription for graceful shutdown
+	c.subsMu.Lock()
+	c.subs = append(c.subs, sub)
+	c.subsMu.Unlock()
 
 	return sub, nil
 }
@@ -531,9 +541,9 @@ func (c *client) clearDraining() {
 // for the graceful drain to finish before closing.
 func (c *client) Close() error {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 
 	if c.closed {
+		c.mu.Unlock()
 		return ErrClientClosed
 	}
 
@@ -542,10 +552,34 @@ func (c *client) Close() error {
 	// We can't wait while holding the lock, so we'll just check and return
 	// an error telling the caller to wait for drain to complete.
 	if c.draining {
+		c.mu.Unlock()
 		return fmt.Errorf("drain in progress, wait for drain to complete before closing")
 	}
 
 	c.closed = true
+	c.mu.Unlock()
+
+	// Stop all tracked subscriptions with timeout
+	c.subsMu.Lock()
+	subs := append([]*Subscription{}, c.subs...) // Copy to avoid holding lock during Stop
+	c.subsMu.Unlock()
+
+	// Stop each subscription with its own timeout to prevent cascade failures
+	for _, sub := range subs {
+		// Skip subscriptions that are already stopped
+		if !sub.IsValid() {
+			continue
+		}
+
+		// Best effort - log but don't fail Close()
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if err := sub.Stop(ctx); err != nil {
+			log.Printf("[WARN] Failed to stop subscription: %v", err)
+		}
+		cancel()
+	}
+
+	// Close connection
 	c.conn.Close()
 	return nil
 }

@@ -109,6 +109,10 @@ func (s *Subscription) Stop(ctx context.Context) error {
 
 	if s.natsSub != nil {
 		// Drain with context deadline
+		// Note: This goroutine spawned for Drain() will exit shortly after Unsubscribe()
+		// is called on timeout, as Unsubscribe() causes Drain() to fail quickly.
+		// While the goroutine may continue briefly after timeout, it is short-lived
+		// and self-resolving (not a permanent resource leak).
 		drainDone := make(chan error, 1)
 		go func() {
 			drainDone <- s.natsSub.Drain()
@@ -120,7 +124,8 @@ func (s *Subscription) Stop(ctx context.Context) error {
 				return fmt.Errorf("drain subscription: %w", err)
 			}
 		case <-ctx.Done():
-			// Drain exceeded deadline, force unsubscribe to prevent resource leak
+			// Drain exceeded deadline, force unsubscribe to cause Drain() to fail quickly
+			// This terminates the goroutine above within a short time
 			_ = s.natsSub.Unsubscribe()
 			return fmt.Errorf("drain timeout: %w", ctx.Err())
 		}
