@@ -63,21 +63,29 @@ The `jsErr` field is read at line 335 without holding any lock, after the `sync.
 
 ### Fix #236: Add Closed-State Check
 
-Add a closed-state check before the `sync.Once.Do()`:
+Add a closed-state check inside the `sync.Once.Do()` to avoid TOCTOU race:
 
 ```go
 func (c *client) JS() (JSClient, error) {
-    // Check closed state before initialization
-    c.mu.RLock()
-    closed := c.closed
-    c.mu.RUnlock()
-
-    if closed {
-        return nil, ErrClientClosed
-    }
-
     c.jsOnce.Do(func() {
-        // ... initialization
+        // Check closed state inside jsOnce.Do to avoid TOCTOU race
+        c.mu.RLock()
+        closed := c.closed
+        c.mu.RUnlock()
+        if closed {
+            c.jsErr = ErrClientClosed
+            return
+        }
+
+        // Create JetStream context
+        js, err := c.conn.JetStream()
+        if err != nil {
+            c.jsErr = fmt.Errorf("create jetstream context: %w", err)
+            c.health.recordError(c.jsErr)
+            return
+        }
+
+        c.js = newJSClient(c, js)
     })
 
     return c.js, c.jsErr
@@ -86,19 +94,20 @@ func (c *client) JS() (JSClient, error) {
 
 ### Fix #237: Remove Redundant Lock
 
-Remove the `jsMu` lock from inside the `sync.Once.Do()` since `sync.Once` already provides memory barriers:
+Remove the `jsMu` lock from inside the `sync.Once.Do()` since `sync.Once` already provides memory barriers. The closed state check is also moved inside `jsOnce.Do()` to prevent TOCTOU race:
 
 ```go
 func (c *client) JS() (JSClient, error) {
-    c.mu.RLock()
-    closed := c.closed
-    c.mu.RUnlock()
-
-    if closed {
-        return nil, ErrClientClosed
-    }
-
     c.jsOnce.Do(func() {
+        // Check closed state inside jsOnce.Do to avoid TOCTOU race
+        c.mu.RLock()
+        closed := c.closed
+        c.mu.RUnlock()
+        if closed {
+            c.jsErr = ErrClientClosed
+            return
+        }
+
         // Create JetStream context (no jsMu lock needed)
         js, err := c.conn.JetStream()
         if err != nil {
@@ -119,9 +128,10 @@ func (c *client) JS() (JSClient, error) {
 ## Implementation Steps
 
 ### Phase 1: Add Closed-State Check
-1. Add `c.mu.RLock()` / `c.mu.RUnlock()` to read `closed` field
-2. Check if `closed` is true, return `ErrClientClosed` if so
-3. Place check before `c.jsOnce.Do()`
+1. Move closed state check inside `c.jsOnce.Do()` to avoid TOCTOU race
+2. Add `c.mu.RLock()` / `c.mu.RUnlock()` at start of `jsOnce.Do()` function
+3. If `closed` is true, set `c.jsErr = ErrClientClosed` and return early
+4. This ensures atomic check-and-initialize behavior
 
 ### Phase 2: Remove Redundant Lock
 1. Remove `c.jsMu.Lock()` and `c.jsMu.Unlock()` from inside `sync.Once.Do()`
