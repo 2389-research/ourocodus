@@ -513,6 +513,11 @@ func TestSendMessage_ContextTimeout(t *testing.T) {
 	if err := os.WriteFile(mockScript, []byte(scriptContent), 0o755); err != nil {
 		t.Fatalf("Failed to create hanging script: %v", err)
 	}
+	// Sync to ensure file is fully written before execution
+	if f, err := os.Open(mockScript); err == nil {
+		_ = f.Sync()
+		f.Close()
+	}
 
 	client, err := acp.NewClient(tmpDir, "test-api-key", acp.WithCommand(mockScript))
 	if err != nil {
@@ -555,6 +560,11 @@ func TestSendMessage_ContextCancellation(t *testing.T) {
 	scriptContent := "#!/bin/bash\nwhile read line; do\n  sleep 10\ndone\n"
 	if err := os.WriteFile(mockScript, []byte(scriptContent), 0o755); err != nil {
 		t.Fatalf("Failed to create hanging script: %v", err)
+	}
+	// Sync to ensure file is fully written before execution
+	if f, err := os.Open(mockScript); err == nil {
+		_ = f.Sync()
+		f.Close()
 	}
 
 	client, err := acp.NewClient(tmpDir, "test-api-key", acp.WithCommand(mockScript))
@@ -604,6 +614,11 @@ func TestSendMessage_ContextCancelDuringClose(t *testing.T) {
 	scriptContent := "#!/bin/bash\nwhile read line; do\n  sleep 10\ndone\n"
 	if err := os.WriteFile(mockScript, []byte(scriptContent), 0o755); err != nil {
 		t.Fatalf("Failed to create hanging script: %v", err)
+	}
+	// Sync to ensure file is fully written before execution
+	if f, err := os.Open(mockScript); err == nil {
+		_ = f.Sync()
+		f.Close()
 	}
 
 	client, err := acp.NewClient(tmpDir, "test-api-key", acp.WithCommand(mockScript))
