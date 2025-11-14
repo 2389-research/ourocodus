@@ -178,8 +178,8 @@ type acpClientAdapter struct {
 }
 
 // SendMessage sends a message to the ACP client
-func (a *acpClientAdapter) SendMessage(content string) (interface{}, error) {
-	return a.client.SendMessage(content)
+func (a *acpClientAdapter) SendMessage(ctx context.Context, content string) (interface{}, error) {
+	return a.client.SendMessage(ctx, content)
 }
 
 // Close closes the ACP client

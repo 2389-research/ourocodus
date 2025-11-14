@@ -129,7 +129,8 @@ func TestSendMessage_ValidRequest(t *testing.T) {
 	}()
 
 	// Send a message
-	msg, err := client.SendMessage("Hello, world!")
+	ctx := context.Background()
+	msg, err := client.SendMessage(ctx, "Hello, world!")
 	if err != nil {
 		t.Fatalf("Failed to send message: %v", err)
 	}
@@ -161,9 +162,10 @@ func TestSendMessage_MultipleSequential(t *testing.T) {
 
 	// Send multiple messages and verify they all work
 	messages := []string{"First message", "Second message", "Third message"}
+	ctx := context.Background()
 
 	for i, content := range messages {
-		msg, err := client.SendMessage(content)
+		msg, err := client.SendMessage(ctx, content)
 		if err != nil {
 			t.Fatalf("Failed to send message %d: %v", i+1, err)
 		}
@@ -221,7 +223,8 @@ func TestSendMessage_AfterClose(t *testing.T) {
 	}
 
 	// Try to send a message after closing
-	_, err = client.SendMessage("Should fail")
+	ctx2 := context.Background()
+	_, err = client.SendMessage(ctx2, "Should fail")
 	if err == nil {
 		t.Error("Expected error when sending message after Close(), got nil")
 	}
@@ -319,7 +322,8 @@ func TestSendMessage_ProcessCrash(t *testing.T) {
 	}()
 
 	// Try to send a message - should fail because process crashed
-	_, err = client.SendMessage("Hello")
+	ctx := context.Background()
+	_, err = client.SendMessage(ctx, "Hello")
 	if err == nil {
 		t.Error("Expected error when process crashes, got nil")
 	}
@@ -351,7 +355,8 @@ func TestSendMessage_InvalidJSON(t *testing.T) {
 	}()
 
 	// Try to send a message - should fail due to invalid JSON response
-	_, err = client.SendMessage("Hello")
+	ctx := context.Background()
+	_, err = client.SendMessage(ctx, "Hello")
 	if err == nil {
 		t.Error("Expected error when response is invalid JSON, got nil")
 	}

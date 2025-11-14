@@ -98,7 +98,7 @@ type mockACPClient struct {
 	closeFunc func(context.Context) error
 }
 
-func (m *mockACPClient) SendMessage(content string) (interface{}, error) {
+func (m *mockACPClient) SendMessage(ctx context.Context, content string) (interface{}, error) {
 	if m.sendFunc != nil {
 		return m.sendFunc(content)
 	}

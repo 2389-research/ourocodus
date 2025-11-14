@@ -355,7 +355,6 @@ func (s *Server) handleAgentMessage(ctx context.Context, conn WebSocketConn, raw
 		return s.handleValidationError(conn, validationErr)
 	}
 
-	_ = ctx // TODO: Pass context to ACP client when timeout/cancellation support is implemented in ACPClient.SendMessage
 
 	s.logger.Printf("[RELAY] Routing message to agent: userSession=%s agentID=%s",
 		msg.UserSessionID, msg.AgentID)
@@ -384,8 +383,8 @@ func (s *Server) handleAgentMessage(ctx context.Context, conn WebSocketConn, raw
 		return SendAgentNotReadyError(conn, s.logger, "Agent ACP client not initialized")
 	}
 
-	// Send message to agent
-	response, err := acpClient.SendMessage(msg.Content)
+	// Send message to agent (context enables timeout/cancellation - fixes issue #226)
+	response, err := acpClient.SendMessage(ctx, msg.Content)
 	if err != nil {
 		s.logger.Printf("Agent message failed: %v", err)
 		return SendAgentMessageFailedError(conn, s.logger, err)

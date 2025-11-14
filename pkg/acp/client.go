@@ -21,10 +21,27 @@ type Client struct {
 	stderrCancel context.CancelFunc
 	stderrDone   chan struct{}
 
-	closedMu sync.RWMutex
-	reqMu    sync.Mutex // Protects entire request/response cycle
-	nextID   int
-	closed   bool
+	// Lock hierarchy (prevent deadlocks):
+	// SendMessage: opMu → pendingMu (brief) → writeMu (brief) → wait
+	// readLoop: pendingMu only
+	// Close: never takes opMu, briefly takes writeMu
+	closedMu  sync.RWMutex
+	opMu      sync.Mutex // Serialize entire SendMessage operations
+	writeMu   sync.Mutex // Narrow: nextID + transport.Write only
+	nextID    int
+	closed    bool
+
+	// Response demultiplexing
+	pendingMu sync.Mutex
+	pending   map[int]chan responseResult
+	inFlight  sync.WaitGroup
+	done      chan struct{} // Closed on shutdown to wake waiters
+}
+
+// responseResult carries a response or error from readLoop to SendMessage
+type responseResult struct {
+	msg *AgentMessage
+	err error
 }
 
 // ClientOption configures a Client
@@ -185,11 +202,14 @@ func newClientFromTransport(transport Transport, logger Logger) (*Client, error)
 		stderrCtx:    ctx,
 		stderrCancel: cancel,
 		stderrDone:   make(chan struct{}),
+		pending:      make(map[int]chan responseResult),
+		done:         make(chan struct{}),
 	}
 
 	client.scanner.Buffer(make([]byte, 64*1024), 5*1024*1024)
 
 	go client.logStderr()
+	go client.readLoop()
 
 	return client, nil
 }
@@ -235,16 +255,23 @@ func (c *Client) logStderr() {
 	}
 }
 
-// SendMessage sends a message to the agent and returns the response.
-// Thread safety: Uses two-level locking strategy:
-//  1. closedMu (RLock) - Quick check if client is closed
-//  2. reqMu (Lock) - Protects entire request/response cycle
+// SendMessage sends a message to the agent and returns the response with context support.
 //
-// Why two locks?
-//   - closedMu allows concurrent Close() checks without blocking active requests
-//   - reqMu serializes request/response pairs to prevent interleaving
-//   - Example: Thread A sends request ID=1, Thread B sends ID=2; without reqMu, responses could mismatch
-func (c *Client) SendMessage(content string) (*AgentMessage, error) {
+// Context usage (fixes issue #226):
+//   - Enables timeout/cancellation for the entire request/response cycle
+//   - Returns ctx.Err() on timeout or cancellation
+//   - Prevents indefinite blocking if agent hangs
+//
+// Thread safety: Uses three-lock architecture (fixes issue #229):
+//   - opMu: Serializes entire SendMessage operations (one at a time)
+//   - writeMu: Protects only nextID increment and transport.Write (very brief)
+//   - closedMu: RWMutex for concurrent closed flag checks
+//   - Lock ordering: opMu → pendingMu (brief) → writeMu (brief) → wait
+//
+// The readLoop goroutine handles all reading, enabling context-aware waiting via select.
+// This prevents the SendMessage/Close race that occurred when holding a lock across scanner.Scan().
+func (c *Client) SendMessage(ctx context.Context, content string) (*AgentMessage, error) {
+	// Fast closed check (no lock held during check)
 	c.closedMu.RLock()
 	if c.closed {
 		c.closedMu.RUnlock()
@@ -252,13 +279,28 @@ func (c *Client) SendMessage(content string) (*AgentMessage, error) {
 	}
 	c.closedMu.RUnlock()
 
-	// Lock for entire request/response cycle to prevent interleaving
-	c.reqMu.Lock()
-	defer c.reqMu.Unlock()
+	// Serialize entire operation (maintains one-at-a-time semantics)
+	c.opMu.Lock()
+	defer c.opMu.Unlock()
 
-	// Generate message ID (no longer needs separate lock since reqMu protects it)
+	// Allocate ID (brief writeMu hold)
+	c.writeMu.Lock()
 	id := c.nextID
 	c.nextID++
+	c.writeMu.Unlock()
+
+	// Register response channel
+	respCh := make(chan responseResult, 1)
+	c.pendingMu.Lock()
+	c.pending[id] = respCh
+	c.pendingMu.Unlock()
+	c.inFlight.Add(1)
+	defer func() {
+		c.pendingMu.Lock()
+		delete(c.pending, id)
+		c.pendingMu.Unlock()
+		c.inFlight.Done()
+	}()
 
 	// Construct JSON-RPC request
 	req := Request{
@@ -270,23 +312,129 @@ func (c *Client) SendMessage(content string) (*AgentMessage, error) {
 		},
 	}
 
-	// Marshal request to JSON
+	// Marshal request
 	data, err := json.Marshal(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
-
-	// Write request to stdin (with newline as delimiter)
 	data = append(data, '\n')
-	if _, err = c.transport.Write(data); err != nil {
+
+	// Write with closed re-check (brief writeMu hold)
+	c.writeMu.Lock()
+	c.closedMu.RLock()
+	closed := c.closed
+	c.closedMu.RUnlock()
+	if closed {
+		c.writeMu.Unlock()
+		return nil, fmt.Errorf("client is closed")
+	}
+	_, err = c.transport.Write(data)
+	c.writeMu.Unlock()
+	if err != nil {
 		return nil, fmt.Errorf("failed to write request: %w", err)
 	}
 
-	// Read response from stdout and verify it matches the request ID
-	return c.readResponse(id)
+	// Wait for response or cancellation (opMu held, writeMu released)
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-c.done:
+		return nil, fmt.Errorf("client closed")
+	case res := <-respCh:
+		return res.msg, res.err
+	}
+}
+
+// readLoop is the background goroutine that continuously reads responses from the transport.
+// It demultiplexes responses by ID and dispatches them to waiting SendMessage calls via channels.
+// This pattern enables context-aware cancellation (issue #226) and prevents SendMessage/Close races (issue #229).
+//
+// On EOF or scanner error, readLoop broadcasts the error to all pending waiters and closes the done channel.
+func (c *Client) readLoop() {
+	for c.scanner.Scan() {
+		line := c.scanner.Bytes()
+
+		// Decode JSON-RPC response
+		var resp Response
+		if err := json.Unmarshal(line, &resp); err != nil {
+			c.logger.Printf("[ACP read] bad json: %v", err)
+			continue
+		}
+
+		// Extract response ID
+		var id int
+		switch v := resp.ID.(type) {
+		case float64:
+			id = int(v)
+		case int:
+			id = v
+		default:
+			c.logger.Printf("[ACP read] unexpected id type: %T", resp.ID)
+			continue
+		}
+
+		// Build responseResult
+		rr := responseResult{}
+		if resp.Error != nil {
+			rr.err = fmt.Errorf("ACP error (code %d): %s", resp.Error.Code, resp.Error.Message)
+		} else {
+			var msg AgentMessage
+			data, err := json.Marshal(resp.Result)
+			if err != nil {
+				rr.err = fmt.Errorf("failed to marshal result: %w", err)
+			} else if err := json.Unmarshal(data, &msg); err != nil {
+				rr.err = fmt.Errorf("failed to unmarshal agent message: %w", err)
+			} else {
+				rr.msg = &msg
+			}
+		}
+
+		// Dispatch to waiter (non-blocking send for robustness)
+		c.pendingMu.Lock()
+		ch := c.pending[id]
+		c.pendingMu.Unlock()
+
+		if ch != nil {
+			select {
+			case ch <- rr:
+			default:
+				// Waiter already exited (context canceled or timeout)
+				c.logger.Printf("[ACP read] waiter gone for id=%d", id)
+			}
+		} else {
+			// Unsolicited or late response
+			c.logger.Printf("[ACP read] no waiter for id=%d", id)
+		}
+	}
+
+	// Scanner ended - determine error
+	endErr := c.scanner.Err()
+	if endErr == nil {
+		endErr = io.EOF
+	}
+	c.logger.Printf("[ACP read] loop ended: %v", endErr)
+
+	// Broadcast termination to all pending waiters
+	c.pendingMu.Lock()
+	for id, ch := range c.pending {
+		select {
+		case ch <- responseResult{err: fmt.Errorf("read loop ended: %w", endErr)}:
+		default:
+			c.logger.Printf("[ACP read] could not notify waiter id=%d", id)
+		}
+	}
+	c.pendingMu.Unlock()
+
+	// Signal shutdown (double-close protection)
+	select {
+	case <-c.done:
+	default:
+		close(c.done)
+	}
 }
 
 // readResponse reads a single JSON-RPC response from stdout and validates the ID
+// DEPRECATED: This method will be removed once SendMessage is refactored to use readLoop.
 // Must be called with reqMu held (called from SendMessage)
 func (c *Client) readResponse(expectedID int) (*AgentMessage, error) {
 	// Read next line from stdout (protected by reqMu from caller)
@@ -339,6 +487,13 @@ func (c *Client) readResponse(expectedID int) (*AgentMessage, error) {
 // This prevents indefinite blocking during shutdown by respecting the context deadline.
 // If the context is canceled or times out before Close completes, an error is returned.
 //
+// Coordination with SendMessage (fixes issue #229):
+//   - Sets closed flag to prevent new writes
+//   - Briefly holds writeMu to block concurrent writes
+//   - Closes done channel to wake waiting SendMessage
+//   - Waits for in-flight request to drain (bounded by context)
+//   - Never takes opMu (so Close never blocks on SendMessage's opMu)
+//
 // The implementation directly calls transport.Close(ctx) without goroutine wrapper,
 // eliminating potential goroutine leaks (issue #212). The transport layer is responsible
 // for respecting the context timeout.
@@ -354,6 +509,30 @@ func (c *Client) Close(ctx context.Context) error {
 	// Signal logStderr goroutine to stop
 	if c.stderrCancel != nil {
 		c.stderrCancel()
+	}
+
+	// Prevent further writes (brief writeMu hold)
+	c.writeMu.Lock()
+	c.writeMu.Unlock()
+
+	// Wake waiting operations (double-close protection)
+	select {
+	case <-c.done:
+	default:
+		close(c.done)
+	}
+
+	// Wait for in-flight request to drain (bounded by context)
+	drained := make(chan struct{})
+	go func() {
+		c.inFlight.Wait()
+		close(drained)
+	}()
+	select {
+	case <-drained:
+		// Clean drain
+	case <-ctx.Done():
+		c.logger.Printf("[WARN] in-flight request not drained before context deadline")
 	}
 
 	// Close transport directly without goroutine wrapper (fixes #212)
