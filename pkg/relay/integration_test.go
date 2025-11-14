@@ -26,7 +26,7 @@ type integrationMockACPClient struct {
 	messages  []string // Track messages sent
 }
 
-func (m *integrationMockACPClient) SendMessage(content string) (interface{}, error) {
+func (m *integrationMockACPClient) SendMessage(ctx context.Context, content string) (interface{}, error) {
 	m.mu.Lock()
 	m.messages = append(m.messages, content)
 	m.mu.Unlock()

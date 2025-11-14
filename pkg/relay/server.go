@@ -355,7 +355,6 @@ func (s *Server) handleAgentMessage(ctx context.Context, conn WebSocketConn, raw
 		return s.handleValidationError(conn, validationErr)
 	}
 
-
 	s.logger.Printf("[RELAY] Routing message to agent: userSession=%s agentID=%s",
 		msg.UserSessionID, msg.AgentID)
 

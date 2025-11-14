@@ -25,11 +25,11 @@ type Client struct {
 	// SendMessage: opMu → pendingMu (brief) → writeMu (brief) → wait
 	// readLoop: pendingMu only
 	// Close: never takes opMu, briefly takes writeMu
-	closedMu  sync.RWMutex
-	opMu      sync.Mutex // Serialize entire SendMessage operations
-	writeMu   sync.Mutex // Narrow: nextID + transport.Write only
-	nextID    int
-	closed    bool
+	closedMu sync.RWMutex
+	opMu     sync.Mutex // Serialize entire SendMessage operations
+	writeMu  sync.Mutex // Narrow: nextID + transport.Write only
+	nextID   int
+	closed   bool
 
 	// Response demultiplexing
 	pendingMu sync.Mutex
