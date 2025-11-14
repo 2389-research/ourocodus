@@ -536,7 +536,7 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	// WebSocket hardening (issue #215)
 	const (
-		maxMessageSize = 1024 * 1024   // 1MB max message size
+		maxMessageSize = 1024 * 1024 // 1MB max message size
 		readDeadline   = 60 * time.Second
 		writeDeadline  = 10 * time.Second
 		pingInterval   = 30 * time.Second
@@ -546,11 +546,15 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	conn.SetReadLimit(maxMessageSize)
 
 	// Set initial read deadline
-	conn.SetReadDeadline(time.Now().Add(readDeadline))
+	if err := conn.SetReadDeadline(time.Now().Add(readDeadline)); err != nil {
+		s.logger.Printf("Failed to set initial read deadline: %v", err)
+	}
 
 	// Set pong handler to extend deadline on activity
 	conn.SetPongHandler(func(string) error {
-		conn.SetReadDeadline(time.Now().Add(readDeadline))
+		if err := conn.SetReadDeadline(time.Now().Add(readDeadline)); err != nil {
+			s.logger.Printf("Failed to extend read deadline on pong: %v", err)
+		}
 		return nil
 	})
 
@@ -583,27 +587,7 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	// Start ping goroutine for liveness checks (issue #215)
-	pingDone := make(chan struct{})
-	go func() {
-		ticker := time.NewTicker(pingInterval)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-ticker.C:
-				// Send ping with write deadline
-				conn.SetWriteDeadline(time.Now().Add(writeDeadline))
-				if err := conn.WriteMessage(websocket.PingMessage, []byte{}); err != nil {
-					s.logger.Printf("Failed to send ping: %v", err)
-					return // Connection dead, exit goroutine
-				}
-			case <-ctx.Done():
-				return // Request context cancelled
-			case <-pingDone:
-				return // Connection closed
-			}
-		}
-	}()
+	pingDone := s.startPingRoutine(ctx, conn, pingInterval, writeDeadline)
 	defer close(pingDone)
 
 	// Handle incoming messages
@@ -630,4 +614,33 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 	}
+}
+
+// startPingRoutine starts a goroutine that sends periodic pings to keep the connection alive.
+// Returns a channel that should be closed when the connection is done to stop the ping routine.
+func (s *Server) startPingRoutine(ctx context.Context, conn WebSocketConn, pingInterval, writeDeadline time.Duration) chan struct{} {
+	pingDone := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(pingInterval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				// Send ping with write deadline
+				if err := conn.SetWriteDeadline(time.Now().Add(writeDeadline)); err != nil {
+					s.logger.Printf("Failed to set write deadline for ping: %v", err)
+				}
+				if err := conn.WriteMessage(websocket.PingMessage, []byte{}); err != nil {
+					s.logger.Printf("Failed to send ping: %v", err)
+					return // Connection dead, exit goroutine
+				}
+			case <-ctx.Done():
+				return // Request context cancelled
+			case <-pingDone:
+				return // Connection closed
+			}
+		}
+	}()
+	return pingDone
 }
