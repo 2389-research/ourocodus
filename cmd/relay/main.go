@@ -88,15 +88,9 @@ func main() {
 		clock,
 		relay.NewGorillaUpgrader(func(r *http.Request) bool {
 			// Origin validation (issue #215 - Phase 1)
-			// Phase 1: Allow all origins for development
-			// TODO: In production, validate against allowed origins list
-			origin := r.Header.Get("Origin")
-			if origin == "" {
-				// No origin header - allow (same-origin request or non-browser client)
-				return true
-			}
-			// For now, allow all origins (development mode)
-			// In production, check against ALLOWED_ORIGINS environment variable
+			// Phase 1: Allow all origins for development.
+			// TODO: In production, validate against allowed origins list.
+			// Origin validation is deferred to Phase 2.
 			return true
 		}),
 		sessionManager,

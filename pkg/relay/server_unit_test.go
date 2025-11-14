@@ -358,7 +358,8 @@ func TestRouteMessage_ValidEchoMessage(t *testing.T) {
 	ctx := context.Background()
 	rawMessage := []byte(`{"version":"1.0","type":"test:echo","message":"hello"}`)
 
-	_, shouldClose := server.routeMessage(ctx, conn, rawMessage)
+	adapter := &SessionWebSocketAdapter{conn: conn}
+	_, shouldClose := server.routeMessage(ctx, conn, adapter, rawMessage)
 
 	if shouldClose {
 		t.Error("expected shouldClose=false for valid message")
@@ -383,7 +384,8 @@ func TestRouteMessage_ValidationError(t *testing.T) {
 	// Missing version field
 	rawMessage := []byte(`{"type":"test:echo","message":"hello"}`)
 
-	_, shouldClose := server.routeMessage(ctx, conn, rawMessage)
+	adapter := &SessionWebSocketAdapter{conn: conn}
+	_, shouldClose := server.routeMessage(ctx, conn, adapter, rawMessage)
 
 	if shouldClose {
 		t.Error("expected shouldClose=false for recoverable validation error")
@@ -417,7 +419,8 @@ func TestRouteMessage_VersionMismatch(t *testing.T) {
 	// Wrong version - non-recoverable
 	rawMessage := []byte(`{"version":"2.0","type":"test:echo"}`)
 
-	_, shouldClose := server.routeMessage(ctx, conn, rawMessage)
+	adapter := &SessionWebSocketAdapter{conn: conn}
+	_, shouldClose := server.routeMessage(ctx, conn, adapter, rawMessage)
 
 	if !shouldClose {
 		t.Error("expected shouldClose=true for version mismatch")
@@ -852,7 +855,8 @@ func TestHandleSessionCreate_ParseError(t *testing.T) {
 	ctx := context.Background()
 	rawMessage := []byte(`{invalid json}`)
 
-	_, shouldClose := server.handleSessionCreate(ctx, conn, rawMessage)
+	adapter := &SessionWebSocketAdapter{conn: conn}
+	_, shouldClose := server.handleSessionCreate(ctx, adapter, rawMessage)
 
 	if shouldClose {
 		t.Error("expected shouldClose=false for parse error")
@@ -893,7 +897,8 @@ func TestHandleSessionCreate_CreateSessionFails(t *testing.T) {
 	ctx := context.Background()
 	rawMessage := buildValidSessionCreateMessage()
 
-	_, shouldClose := server.handleSessionCreate(ctx, conn, rawMessage)
+	adapter := &SessionWebSocketAdapter{conn: conn}
+	_, shouldClose := server.handleSessionCreate(ctx, adapter, rawMessage)
 
 	if shouldClose {
 		t.Error("expected shouldClose=false for recoverable error")
@@ -1006,7 +1011,7 @@ func TestHandleAgentSpawn_SessionNotFound(t *testing.T) {
 
 	shouldClose := server.handleAgentSpawn(ctx, conn, rawMessage)
 
-	// After issue #358 fix, we keep connection open even for non-recoverable errors
+	// After issues #219 and #215 fix, we keep connection open even for non-recoverable errors
 	// This allows client to create missing resources
 	if shouldClose {
 		t.Error("expected shouldClose=false - connection should stay open for client to recover")
