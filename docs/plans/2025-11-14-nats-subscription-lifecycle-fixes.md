@@ -150,19 +150,24 @@ func (c *client) Close() error {
     c.closed = true
     c.mu.Unlock()
 
-    // Stop all tracked subscriptions with timeout
+    // Stop all tracked subscriptions with per-subscription timeout
     c.subsMu.Lock()
     subs := append([]*Subscription{}, c.subs...)  // Copy to avoid holding lock during Stop
     c.subsMu.Unlock()
 
-    ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-    defer cancel()
-
+    // Stop each subscription with its own timeout to prevent cascade failures
     for _, sub := range subs {
+        // Skip subscriptions that are already stopped
+        if !sub.IsValid() {
+            continue
+        }
+
         // Best effort - log but don't fail Close()
+        ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
         if err := sub.Stop(ctx); err != nil {
             log.Printf("[WARN] Failed to stop subscription: %v", err)
         }
+        cancel()
     }
 
     // Close connection
@@ -184,10 +189,13 @@ func (c *client) Close() error {
 
 ### Phase 3: Update Close() Method
 1. Copy tracked subscriptions (avoid holding lock during Stop)
-2. Create context with 5s timeout for draining
-3. Iterate and call `Stop()` on each subscription (best effort)
-4. Log warnings for failures, don't block Close()
-5. Close connection as final step
+2. Skip subscriptions that are already stopped (using `IsValid()`)
+3. Create per-subscription context with 5s timeout (prevents cascade failures)
+4. Iterate and call `Stop()` on each subscription (best effort)
+5. Call `cancel()` immediately after each `Stop()` to avoid context leaks
+6. Log warnings for failures, don't block Close()
+
+**Design Decision**: Each subscription gets its own 5-second timeout rather than sharing a single timeout across all subscriptions. This prevents one slow subscription from consuming all the timeout budget and causing cascade failures. The trade-off is that total Close() time could be `N * 5 seconds` in the worst case (if all N subscriptions timeout), but this is acceptable for graceful shutdown.
 
 ## Testing Strategy
 
