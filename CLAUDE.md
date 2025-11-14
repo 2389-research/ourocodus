@@ -297,6 +297,29 @@ The CI pipeline runs:
 | All checks | `make pre-commit` or `mise run pre-commit` | Run all quality checks |
 | Clean build | `make clean` | Remove build artifacts |
 
+## Security and Privacy
+
+### WebSocket Message Logging
+
+The relay logs WebSocket message metadata but never logs full message content to protect against PII and credential exposure.
+
+**Log format:**
+```
+[RELAY] dir=recv type=agent:spawn size=156B
+```
+
+**What is logged:**
+- Message direction (recv/send)
+- Message type (sanitized to prevent log injection)
+- Message size in bytes
+
+**What is NOT logged:**
+- Full message payloads
+- User data, emails, names
+- API keys, tokens, credentials
+
+This ensures GDPR/CCPA compliance while maintaining debuggability.
+
 ## For More Information
 
 - **General contribution guidelines**: See `CONTRIBUTING.md`
