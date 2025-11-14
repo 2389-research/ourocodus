@@ -15,6 +15,26 @@ import (
 	"github.com/2389-research/ourocodus/pkg/relay/session"
 )
 
+// contextWithMaxTimeout creates a context with a timeout that respects the parent's deadline.
+// If the parent context has a deadline sooner than maxTimeout, uses the parent's remaining time.
+// Otherwise, creates a new context with maxTimeout.
+func contextWithMaxTimeout(parent context.Context, maxTimeout time.Duration) (context.Context, context.CancelFunc) {
+	deadline, ok := parent.Deadline()
+	if !ok {
+		// No parent deadline, use maxTimeout
+		return context.WithTimeout(parent, maxTimeout)
+	}
+
+	remaining := time.Until(deadline)
+	if remaining < maxTimeout {
+		// Parent deadline is sooner, respect it
+		return context.WithDeadline(parent, deadline)
+	}
+
+	// maxTimeout is sooner
+	return context.WithTimeout(parent, maxTimeout)
+}
+
 // Server handles WebSocket connections with injected dependencies
 // Manages session lifecycle through sessionManager and routes messages
 // to appropriate ACP agents based on message type and session state
@@ -385,7 +405,8 @@ func (s *Server) handleAgentMessage(ctx context.Context, conn WebSocketConn, raw
 
 	// Send message to agent with timeout (fixes issue #226)
 	// Wrap with explicit timeout to prevent indefinite blocking if agent process hangs
-	acpCtx, acpCancel := context.WithTimeout(ctx, 30*time.Second)
+	// Respect parent context deadline if it's shorter than 30s
+	acpCtx, acpCancel := contextWithMaxTimeout(ctx, 30*time.Second)
 	defer acpCancel()
 
 	response, err := acpClient.SendMessage(acpCtx, msg.Content)

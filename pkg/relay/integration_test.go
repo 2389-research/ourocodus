@@ -20,8 +20,8 @@ import (
 // integrationMockACPClient simulates a successful ACP agent for integration testing
 // Separate from mockACPClient in server_unit_test.go to avoid conflicts
 type integrationMockACPClient struct {
-	sendFunc  func(string) (interface{}, error)
-	closeFunc func() error
+	sendFunc  func(context.Context, string) (interface{}, error)
+	closeFunc func(context.Context) error
 	mu        sync.Mutex
 	messages  []string // Track messages sent
 }
@@ -32,7 +32,7 @@ func (m *integrationMockACPClient) SendMessage(ctx context.Context, content stri
 	m.mu.Unlock()
 
 	if m.sendFunc != nil {
-		return m.sendFunc(content)
+		return m.sendFunc(ctx, content)
 	}
 	// Default: Return a successful agent response
 	return &acp.AgentMessage{
@@ -42,7 +42,7 @@ func (m *integrationMockACPClient) SendMessage(ctx context.Context, content stri
 
 func (m *integrationMockACPClient) Close(ctx context.Context) error {
 	if m.closeFunc != nil {
-		return m.closeFunc()
+		return m.closeFunc(ctx)
 	}
 	return nil
 }

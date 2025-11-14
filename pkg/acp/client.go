@@ -16,10 +16,11 @@ type Client struct {
 	scanner   *bufio.Scanner
 	logger    Logger
 
-	// Lifecycle management for logStderr goroutine
+	// Lifecycle management for background goroutines
 	stderrCtx    context.Context
 	stderrCancel context.CancelFunc
-	stderrDone   chan struct{}
+	stderrDone   chan struct{} // Closed when logStderr exits
+	readLoopDone chan struct{} // Closed when readLoop exits
 
 	// Lock hierarchy (prevent deadlocks):
 	// SendMessage: opMu → writeMu (brief) → pendingMu (brief) → wait
@@ -202,6 +203,7 @@ func newClientFromTransport(transport Transport, logger Logger) (*Client, error)
 		stderrCtx:    ctx,
 		stderrCancel: cancel,
 		stderrDone:   make(chan struct{}),
+		readLoopDone: make(chan struct{}),
 		pending:      make(map[int]chan responseResult),
 		done:         make(chan struct{}),
 	}
@@ -439,6 +441,11 @@ func (c *Client) readLoop() {
 	default:
 		close(c.done)
 	}
+
+	// Signal readLoop termination (nil-safe for tests)
+	if c.readLoopDone != nil {
+		close(c.readLoopDone)
+	}
 }
 
 // Close terminates the claude-code-acp process and cleans up resources with context-aware timeout support.
@@ -476,24 +483,41 @@ func (c *Client) Close(ctx context.Context) error {
 	}
 
 	// Wait for in-flight request to drain (bounded by context)
-	drained := make(chan struct{})
+	// Use a goroutine to make Wait cancellable, but ensure it always completes
+	waitDone := make(chan struct{})
 	go func() {
+		defer close(waitDone) // Always close to prevent goroutine leak
 		c.inFlight.Wait()
-		close(drained)
 	}()
+
 	select {
-	case <-drained:
-		// Clean drain
+	case <-waitDone:
+		// Clean drain - in-flight request completed
 	case <-ctx.Done():
+		// Context expired before drain completed
+		// The goroutine will still complete when inFlight is decremented,
+		// but we proceed with shutdown to respect the deadline
 		c.logger.Printf("[WARN] in-flight request not drained before context deadline")
 	}
 
-	// Close transport directly without goroutine wrapper (fixes #212)
+	// Close transport to unblock readLoop (fixes #212)
+	// This must happen BEFORE waiting for readLoop, otherwise readLoop will be stuck in scanner.Scan()
 	var transportErr error
 	if c.transport != nil {
 		transportErr = c.transport.Close(ctx)
 		if transportErr != nil {
 			transportErr = fmt.Errorf("failed to close transport: %w", transportErr)
+		}
+	}
+
+	// Wait for readLoop goroutine to exit after transport close
+	// Closing transport above will cause scanner.Scan() to return, allowing readLoop to exit
+	if c.readLoopDone != nil {
+		select {
+		case <-c.readLoopDone:
+			// ReadLoop exited cleanly after transport close
+		case <-ctx.Done():
+			c.logger.Printf("[WARN] readLoop did not exit before context deadline")
 		}
 	}
 
