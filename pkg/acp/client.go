@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"sync"
-	"time"
 )
 
 // Client manages communication with a single claude-code-acp runtime transport.
@@ -336,25 +335,14 @@ func (c *Client) readResponse(expectedID int) (*AgentMessage, error) {
 	return &msg, nil
 }
 
-// Close terminates the claude-code-acp process and cleans up resources.
-// This method delegates to CloseWithContext with a 5-second timeout to prevent
-// indefinite blocking during shutdown (issue #211).
-// For more control over the timeout, use CloseWithContext directly.
-func (c *Client) Close() error {
-	// Delegate to CloseWithContext with a reasonable default timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	return c.CloseWithContext(ctx)
-}
-
-// CloseWithContext terminates the claude-code-acp process with timeout support.
+// Close terminates the claude-code-acp process and cleans up resources with context-aware timeout support.
 // This prevents indefinite blocking during shutdown by respecting the context deadline.
 // If the context is canceled or times out before Close completes, an error is returned.
 //
-// Note: If the context times out, a goroutine may continue running in the background
-// attempting to close the transport. This is a known limitation when dealing with
-// potentially-blocking Close operations.
-func (c *Client) CloseWithContext(ctx context.Context) error {
+// The implementation directly calls transport.Close(ctx) without goroutine wrapper,
+// eliminating potential goroutine leaks (issue #212). The transport layer is responsible
+// for respecting the context timeout.
+func (c *Client) Close(ctx context.Context) error {
 	c.closedMu.Lock()
 	if c.closed {
 		c.closedMu.Unlock()
@@ -368,41 +356,22 @@ func (c *Client) CloseWithContext(ctx context.Context) error {
 		c.stderrCancel()
 	}
 
-	// Run transport close in goroutine with timeout to avoid indefinite blocking
-	type closeResult struct {
-		err error
-	}
-	transportDone := make(chan closeResult, 1)
-
-	go func() {
-		var err error
-		if c.transport != nil {
-			err = c.transport.Close()
-			if err != nil {
-				err = fmt.Errorf("failed to close transport: %w", err)
-			}
-		}
-		transportDone <- closeResult{err: err}
-	}()
-
-	// Wait for transport close with context timeout
+	// Close transport directly without goroutine wrapper (fixes #212)
 	var transportErr error
-	select {
-	case result := <-transportDone:
-		transportErr = result.err
-	case <-ctx.Done():
-		// Context canceled/timed out - return error but leave cleanup goroutine running
-		// The transport will eventually close, but we won't wait indefinitely
-		transportErr = fmt.Errorf("transport close timed out: %w", ctx.Err())
+	if c.transport != nil {
+		transportErr = c.transport.Close(ctx)
+		if transportErr != nil {
+			transportErr = fmt.Errorf("failed to close transport: %w", transportErr)
+		}
 	}
 
-	// Wait for logStderr goroutine with timeout
+	// Wait for logStderr goroutine to exit, respecting context deadline
 	if c.stderrDone != nil {
 		select {
 		case <-c.stderrDone:
 			// Clean shutdown
-		case <-time.After(2 * time.Second):
-			c.logger.Printf("[WARN] logStderr goroutine did not exit within timeout")
+		case <-ctx.Done():
+			c.logger.Printf("[WARN] logStderr goroutine did not exit before context deadline")
 		}
 	}
 

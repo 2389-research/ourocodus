@@ -517,7 +517,7 @@ func (c *fakeACPClient) SendMessage(content string) (interface{}, error) {
 	}, nil
 }
 
-func (c *fakeACPClient) Close() error {
+func (c *fakeACPClient) Close(ctx context.Context) error {
 	c.closed = true
 	return nil
 }

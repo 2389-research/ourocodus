@@ -183,8 +183,8 @@ func (a *acpClientAdapter) SendMessage(content string) (interface{}, error) {
 }
 
 // Close closes the ACP client
-func (a *acpClientAdapter) Close() error {
-	return a.client.Close()
+func (a *acpClientAdapter) Close(ctx context.Context) error {
+	return a.client.Close(ctx)
 }
 
 // FakeClientFactory implements ClientFactory for testing

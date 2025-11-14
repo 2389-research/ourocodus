@@ -50,7 +50,8 @@ func ValidateWorkspacePath(workspace, baseWorkspaceDir string) (string, error) {
 // CloseACPClientSafely safely closes an ACP client with double-close protection.
 // This helper extracts the client from the agent session atomically and closes it outside the lock.
 // It transitions the agent to the AgentTerminated state.
-func CloseACPClientSafely(agent *AgentSession, logger Logger, userSessionID, agentID string) error {
+// CRITICAL: Accepts context to allow proper cancellation handling (fixes Issue #212).
+func CloseACPClientSafely(agent *AgentSession, ctx context.Context, logger Logger, userSessionID, agentID string) error {
 	// Close ACP client (with double-close protection)
 	agent.mu.Lock()
 	acpClient := agent.acpClient
@@ -60,9 +61,9 @@ func CloseACPClientSafely(agent *AgentSession, logger Logger, userSessionID, age
 	agent.setAgentState(AgentTerminated)
 	agent.mu.Unlock()
 
-	// Close outside the lock
+	// Close outside the lock with context (no goroutine wrapper - fixes Issue #212)
 	if acpClient != nil {
-		if err := acpClient.Close(); err != nil {
+		if err := acpClient.Close(ctx); err != nil {
 			logger.Printf("Error closing ACP client: session=%s agentID=%s error=%v", userSessionID, agentID, err)
 			return err
 		}
@@ -71,6 +72,7 @@ func CloseACPClientSafely(agent *AgentSession, logger Logger, userSessionID, age
 }
 
 // StopContainerAndCleanupLauncher stops a container and removes it from the launcher maps.
+// Uses atomic take-and-delete pattern to prevent double-stop race (Issue #210).
 // Returns true if the operation failed (for error tracking).
 func StopContainerAndCleanupLauncher(
 	ctx context.Context,
@@ -83,11 +85,16 @@ func StopContainerAndCleanupLauncher(
 	}
 
 	key := launcherKey(userSessionID, agentID)
-	m.launchersMu.RLock()
+
+	// Mutex-protected take-and-delete pattern to prevent double-stop race (Issue #210)
+	m.launchersMu.Lock()
 	launcher := m.launchers[key]
 	handle := m.handles[key]
-	m.launchersMu.RUnlock()
+	delete(m.launchers, key) // Delete BEFORE releasing lock
+	delete(m.handles, key)
+	m.launchersMu.Unlock()
 
+	// Now safe - only one goroutine has these pointers
 	failed := false
 	if launcher != nil && handle != nil {
 		if err := launcher.Stop(ctx, handle); err != nil {
@@ -97,51 +104,5 @@ func StopContainerAndCleanupLauncher(
 		}
 	}
 
-	// Remove from launcher maps
-	m.launchersMu.Lock()
-	delete(m.launchers, key)
-	delete(m.handles, key)
-	m.launchersMu.Unlock()
-
 	return failed
-}
-
-// ACPClientHandle represents a handle to an ACP client for safe cleanup.
-type ACPClientHandle struct {
-	client        ACPClient
-	logger        Logger
-	userSessionID string
-	agentID       string
-}
-
-// Close safely closes the ACP client and logs any errors.
-func (h *ACPClientHandle) Close() error {
-	if h.client == nil {
-		return nil
-	}
-	if err := h.client.Close(); err != nil {
-		h.logger.Printf("Error closing ACP client: session=%s agentID=%s error=%v",
-			h.userSessionID, h.agentID, err)
-		return err
-	}
-	return nil
-}
-
-// ExtractACPClient extracts the ACP client from an agent session with double-close protection.
-// Returns a handle that can be safely closed outside the lock.
-func ExtractACPClient(agent *AgentSession, logger Logger, userSessionID, agentID string) *ACPClientHandle {
-	agent.mu.Lock()
-	acpClient := agent.acpClient
-	if acpClient != nil {
-		agent.acpClient = nil // Clear before Close to prevent double-close
-	}
-	agent.setAgentState(AgentTerminated)
-	agent.mu.Unlock()
-
-	return &ACPClientHandle{
-		client:        acpClient,
-		logger:        logger,
-		userSessionID: userSessionID,
-		agentID:       agentID,
-	}
 }

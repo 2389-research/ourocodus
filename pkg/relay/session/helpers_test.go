@@ -1,6 +1,7 @@
 package session
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -146,7 +147,7 @@ func TestCloseACPClientSafely(t *testing.T) {
 			setupAgent: func() *AgentSession {
 				agent := NewAgentSession("agent1", "/workspace", time.Now())
 				agent.acpClient = &mockACPClient{
-					closeFunc: func() error { return nil },
+					closeFunc: func(context.Context) error { return nil },
 				}
 				return agent
 			},
@@ -158,7 +159,7 @@ func TestCloseACPClientSafely(t *testing.T) {
 			setupAgent: func() *AgentSession {
 				agent := NewAgentSession("agent1", "/workspace", time.Now())
 				agent.acpClient = &mockACPClient{
-					closeFunc: func() error { return errors.New("close failed") },
+					closeFunc: func(context.Context) error { return errors.New("close failed") },
 				}
 				return agent
 			},
@@ -184,8 +185,9 @@ func TestCloseACPClientSafely(t *testing.T) {
 				messages: []string{},
 				mu:       sync.Mutex{},
 			}
+			ctx := context.Background()
 
-			err := CloseACPClientSafely(agent, logger, "session1", "agent1")
+			err := CloseACPClientSafely(agent, ctx, logger, "session1", "agent1")
 			if (err != nil) != tt.wantErr {
 				t.Errorf("CloseACPClientSafely() error = %v, wantErr %v", err, tt.wantErr)
 			}
@@ -200,117 +202,6 @@ func TestCloseACPClientSafely(t *testing.T) {
 				t.Errorf("Agent state = %v, want %v", agent.state, AgentTerminated)
 			}
 			agent.mu.Unlock()
-		})
-	}
-}
-
-func TestExtractACPClient(t *testing.T) {
-	tests := []struct {
-		name       string
-		setupAgent func() *AgentSession
-		wantNil    bool
-	}{
-		{
-			name: "extract existing client",
-			setupAgent: func() *AgentSession {
-				agent := NewAgentSession("agent1", "/workspace", time.Now())
-				agent.acpClient = &mockACPClient{
-					closeFunc: func() error { return nil },
-				}
-				return agent
-			},
-			wantNil: false,
-		},
-		{
-			name: "extract nil client",
-			setupAgent: func() *AgentSession {
-				agent := NewAgentSession("agent1", "/workspace", time.Now())
-				agent.acpClient = nil
-				return agent
-			},
-			wantNil: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			agent := tt.setupAgent()
-			logger := &mockLogger{
-				messages: []string{},
-				mu:       sync.Mutex{},
-			}
-
-			handle := ExtractACPClient(agent, logger, "session1", "agent1")
-
-			if handle == nil {
-				t.Fatal("ExtractACPClient() returned nil handle")
-			}
-
-			// Verify client was extracted
-			if tt.wantNil && handle.client != nil {
-				t.Error("Expected nil client in handle")
-			}
-			if !tt.wantNil && handle.client == nil {
-				t.Error("Expected non-nil client in handle")
-			}
-
-			// Verify agent's client was cleared
-			agent.mu.Lock()
-			if agent.acpClient != nil {
-				t.Error("ACP client was not cleared from agent session")
-			}
-			if agent.state != AgentTerminated {
-				t.Errorf("Agent state = %v, want %v", agent.state, AgentTerminated)
-			}
-			agent.mu.Unlock()
-		})
-	}
-}
-
-func TestACPClientHandle_Close(t *testing.T) {
-	tests := []struct {
-		name    string
-		client  ACPClient
-		wantErr bool
-	}{
-		{
-			name: "successful close",
-			client: &mockACPClient{
-				closeFunc: func() error { return nil },
-			},
-			wantErr: false,
-		},
-		{
-			name: "close with error",
-			client: &mockACPClient{
-				closeFunc: func() error { return errors.New("close failed") },
-			},
-			wantErr: true,
-		},
-		{
-			name:    "nil client",
-			client:  nil,
-			wantErr: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			logger := &mockLogger{
-				messages: []string{},
-				mu:       sync.Mutex{},
-			}
-			handle := &ACPClientHandle{
-				client:        tt.client,
-				logger:        logger,
-				userSessionID: "session1",
-				agentID:       "agent1",
-			}
-
-			err := handle.Close()
-			if (err != nil) != tt.wantErr {
-				t.Errorf("ACPClientHandle.Close() error = %v, wantErr %v", err, tt.wantErr)
-			}
 		})
 	}
 }

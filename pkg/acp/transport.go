@@ -16,7 +16,10 @@ import (
 type Transport interface {
 	io.Reader
 	io.Writer
-	io.Closer
+
+	// Close terminates the transport and releases resources.
+	// The provided context controls shutdown timeout and cancellation.
+	Close(ctx context.Context) error
 
 	// Stderr returns a reader for diagnostic output. May be nil if stderr is unavailable.
 	Stderr() io.Reader
@@ -119,7 +122,7 @@ func (t *hostProcessTransport) Stderr() io.Reader {
 	return t.stderr
 }
 
-func (t *hostProcessTransport) Close() error {
+func (t *hostProcessTransport) Close(ctx context.Context) error {
 	var waitErr error
 	t.closeOnce.Do(func() {
 		_ = t.stdin.Close()
@@ -134,7 +137,17 @@ func (t *hostProcessTransport) Close() error {
 			waitErr = err
 		case <-time.After(5 * time.Second):
 			_ = t.cmd.Process.Kill()
-			waitErr = <-done
+
+			select {
+			case err := <-done:
+				waitErr = err
+			case <-time.After(2 * time.Second):
+				waitErr = fmt.Errorf("process %d did not exit after kill", t.cmd.Process.Pid)
+			case <-ctx.Done():
+				waitErr = fmt.Errorf("close cancelled by context: %w", ctx.Err())
+			}
+		case <-ctx.Done():
+			waitErr = fmt.Errorf("close cancelled by context before graceful shutdown: %w", ctx.Err())
 		}
 
 		_ = t.stdout.Close()

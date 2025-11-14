@@ -95,7 +95,7 @@ func (m *mockWebSocket) WasClosed() bool {
 
 type mockACPClient struct {
 	sendFunc  func(string) (interface{}, error)
-	closeFunc func() error
+	closeFunc func(context.Context) error
 }
 
 func (m *mockACPClient) SendMessage(content string) (interface{}, error) {
@@ -105,9 +105,9 @@ func (m *mockACPClient) SendMessage(content string) (interface{}, error) {
 	return nil, nil
 }
 
-func (m *mockACPClient) Close() error {
+func (m *mockACPClient) Close(ctx context.Context) error {
 	if m.closeFunc != nil {
-		return m.closeFunc()
+		return m.closeFunc(ctx)
 	}
 	return nil
 }

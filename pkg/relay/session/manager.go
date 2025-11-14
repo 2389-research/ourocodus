@@ -411,12 +411,13 @@ func (m *Manager) TerminateAgent(ctx context.Context, userSessionID, agentID str
 	m.logger.Printf("[SESSION] Terminating agent: session=%s agentID=%s", userSessionID, agentID)
 
 	// Stop container and cleanup launcher (container mode only)
+	// Uses atomic take-and-delete pattern to prevent double-stop race (Issue #210)
 	if StopContainerAndCleanupLauncher(ctx, m, userSessionID, agentID, m.logger) {
 		m.logger.Printf("WARN: Failed to stop container and cleanup launcher: session=%s agentID=%s", userSessionID, agentID)
 	}
 
-	// Close ACP client safely (with double-close protection)
-	_ = CloseACPClientSafely(agent, m.logger, userSessionID, agentID)
+	// Close ACP client safely with context (fixes Issue #212)
+	_ = CloseACPClientSafely(agent, ctx, m.logger, userSessionID, agentID)
 
 	userSession.mu.Lock()
 	userSession.removeAgent(agentID)
@@ -473,31 +474,19 @@ func (m *Manager) TerminateUserSession(ctx context.Context, userSessionID string
 				defer wg.Done()
 				failed := false
 
-				// Create context with timeout for this agent
-				agentCtx, cancel := context.WithTimeout(ctx, agentTimeout)
+				// CRITICAL P1 FIX: Create dedicated shutdown context independent of request context
+				// This ensures cleanup completes even if HTTP request times out (prevents zombie processes)
+				shutdownCtx, cancel := context.WithTimeout(context.Background(), agentTimeout)
 				defer cancel()
 
-				// Extract ACP client (with double-close protection)
-				handle := ExtractACPClient(a, m.logger, userSessionID, id)
-
-				// Close with timeout
-				done := make(chan error, 1)
-				go func() {
-					done <- handle.Close()
-				}()
-
-				select {
-				case err := <-done:
-					if err != nil {
-						failed = true
-					}
-				case <-agentCtx.Done():
-					m.logger.Printf("Agent close timeout: userSession=%s agentID=%s", userSessionID, id)
+				// Close ACP client safely with context (fixes Issue #212)
+				if err := CloseACPClientSafely(a, shutdownCtx, m.logger, userSessionID, id); err != nil {
 					failed = true
 				}
 
 				// Stop container and cleanup launcher (container mode only)
-				if StopContainerAndCleanupLauncher(agentCtx, m, userSessionID, id, m.logger) {
+				// Uses atomic take-and-delete pattern to prevent double-stop race (Issue #210)
+				if StopContainerAndCleanupLauncher(shutdownCtx, m, userSessionID, id, m.logger) {
 					failed = true
 				}
 

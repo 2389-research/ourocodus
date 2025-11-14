@@ -134,14 +134,29 @@ func (t *containerAttachTransport) Write(p []byte) (int, error) {
 	return t.hijackedResp.Conn.Write(p)
 }
 
-func (t *containerAttachTransport) Close() error {
-	// Close stdout pipe
-	if t.stdout != nil {
-		_ = t.stdout.Close()
+func (t *containerAttachTransport) Close(ctx context.Context) error {
+	// Close operations are synchronous, but we respect context cancellation
+	done := make(chan struct{})
+	go func() {
+		// Close stdout pipe
+		if t.stdout != nil {
+			_ = t.stdout.Close()
+		}
+		// Close hijacked connection
+		t.hijackedResp.Close()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		// Note: If context is cancelled, cleanup continues in background goroutine.
+		// This is a known limitation due to Docker API not supporting context-aware Close().
+		// The goroutine will complete cleanup and exit, but timing is unpredictable.
+		// See Issue #212 for discussion of this tradeoff.
+		return fmt.Errorf("close cancelled by context: %w", ctx.Err())
 	}
-	// Close hijacked connection
-	t.hijackedResp.Close()
-	return nil
 }
 
 func (t *containerAttachTransport) Stderr() io.Reader {

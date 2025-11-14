@@ -7,6 +7,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -86,7 +87,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to create client: %v", err)
 	}
-	defer client.Close()
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = client.Close(ctx)
+	}()
 
 	fmt.Println("✓ Client created successfully")
 	fmt.Println()
@@ -140,7 +145,9 @@ func main() {
 
 	// Close client
 	fmt.Println("Closing client...")
-	if err := client.Close(); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := client.Close(ctx); err != nil {
 		log.Fatalf("Failed to close client: %v", err)
 	}
 
