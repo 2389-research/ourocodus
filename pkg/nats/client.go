@@ -52,7 +52,6 @@ type client struct {
 
 	js     JSClient
 	jsErr  error // Stores JetStream initialization error
-	jsMu   sync.Mutex
 	jsOnce sync.Once
 
 	mu       sync.RWMutex
@@ -316,10 +315,16 @@ func (c *client) Request(ctx context.Context, subject string, data []byte, opts 
 // JS returns the JetStream client interface.
 func (c *client) JS() (JSClient, error) {
 	c.jsOnce.Do(func() {
-		c.jsMu.Lock()
-		defer c.jsMu.Unlock()
-
+		// Check closed state inside jsOnce.Do to avoid TOCTOU race
+		c.mu.RLock()
+		closed := c.closed
+		c.mu.RUnlock()
+		if closed {
+			c.jsErr = ErrClientClosed
+			return
+		}
 		// Create JetStream context
+		// sync.Once provides memory barriers, no additional lock needed (#237)
 		js, err := c.conn.JetStream()
 		if err != nil {
 			// Store error for subsequent calls
