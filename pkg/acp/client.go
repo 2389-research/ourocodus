@@ -22,9 +22,9 @@ type Client struct {
 	stderrDone   chan struct{}
 
 	// Lock hierarchy (prevent deadlocks):
-	// SendMessage: opMu → pendingMu (brief) → writeMu (brief) → wait
+	// SendMessage: opMu → writeMu (brief) → pendingMu (brief) → wait
 	// readLoop: pendingMu only
-	// Close: never takes opMu, briefly takes writeMu
+	// Close: never takes opMu
 	closedMu sync.RWMutex
 	opMu     sync.Mutex // Serialize entire SendMessage operations
 	writeMu  sync.Mutex // Narrow: nextID + transport.Write only
@@ -280,7 +280,7 @@ func (c *Client) broadcastError(err error) {
 //   - opMu: Serializes entire SendMessage operations (one at a time)
 //   - writeMu: Protects only nextID increment and transport.Write (very brief)
 //   - closedMu: RWMutex for concurrent closed flag checks
-//   - Lock ordering: opMu → pendingMu (brief) → writeMu (brief) → wait
+//   - Lock ordering: opMu → writeMu (brief) → pendingMu (brief) → wait
 //
 // The readLoop goroutine handles all reading, enabling context-aware waiting via select.
 // This prevents the SendMessage/Close race that occurred when holding a lock across scanner.Scan().
