@@ -255,6 +255,20 @@ func (c *Client) logStderr() {
 	}
 }
 
+// broadcastError sends an error to all pending waiters (must be called with pendingMu NOT held)
+func (c *Client) broadcastError(err error) {
+	c.pendingMu.Lock()
+	defer c.pendingMu.Unlock()
+
+	for id, ch := range c.pending {
+		select {
+		case ch <- responseResult{err: err}:
+		default:
+			c.logger.Printf("[ACP read] could not notify waiter id=%d", id)
+		}
+	}
+}
+
 // SendMessage sends a message to the agent and returns the response with context support.
 //
 // Context usage (fixes issue #226):
@@ -357,8 +371,10 @@ func (c *Client) readLoop() {
 		// Decode JSON-RPC response
 		var resp Response
 		if err := json.Unmarshal(line, &resp); err != nil {
-			c.logger.Printf("[ACP read] bad json: %v", err)
-			continue
+			// JSON parse error is a protocol violation - terminate read loop
+			c.logger.Printf("[ACP read] fatal: invalid JSON: %v", err)
+			c.broadcastError(fmt.Errorf("invalid JSON response: %w", err))
+			break
 		}
 
 		// Extract response ID
@@ -415,15 +431,7 @@ func (c *Client) readLoop() {
 	c.logger.Printf("[ACP read] loop ended: %v", endErr)
 
 	// Broadcast termination to all pending waiters
-	c.pendingMu.Lock()
-	for id, ch := range c.pending {
-		select {
-		case ch <- responseResult{err: fmt.Errorf("read loop ended: %w", endErr)}:
-		default:
-			c.logger.Printf("[ACP read] could not notify waiter id=%d", id)
-		}
-	}
-	c.pendingMu.Unlock()
+	c.broadcastError(fmt.Errorf("read loop ended: %w", endErr))
 
 	// Signal shutdown (double-close protection)
 	select {
@@ -433,64 +441,13 @@ func (c *Client) readLoop() {
 	}
 }
 
-// readResponse reads a single JSON-RPC response from stdout and validates the ID
-// DEPRECATED: This method will be removed once SendMessage is refactored to use readLoop.
-// Must be called with reqMu held (called from SendMessage)
-func (c *Client) readResponse(expectedID int) (*AgentMessage, error) {
-	// Read next line from stdout (protected by reqMu from caller)
-	if !c.scanner.Scan() {
-		if err := c.scanner.Err(); err != nil {
-			return nil, fmt.Errorf("failed to read response: %w", err)
-		}
-		return nil, fmt.Errorf("no response from agent (EOF)")
-	}
-	line := c.scanner.Bytes()
-
-	// Parse JSON-RPC response
-	var resp Response
-	if err := json.Unmarshal(line, &resp); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
-	}
-
-	// Verify response ID matches request ID
-	if respID, ok := resp.ID.(float64); ok {
-		if int(respID) != expectedID {
-			return nil, fmt.Errorf("mismatched response id: got %v, want %d", resp.ID, expectedID)
-		}
-	} else if respID, ok := resp.ID.(int); ok {
-		if respID != expectedID {
-			return nil, fmt.Errorf("mismatched response id: got %v, want %d", resp.ID, expectedID)
-		}
-	} else if resp.ID != expectedID {
-		return nil, fmt.Errorf("mismatched response id: got %v, want %d", resp.ID, expectedID)
-	}
-
-	// Check for JSON-RPC error
-	if resp.Error != nil {
-		return nil, fmt.Errorf("ACP error (code %d): %s", resp.Error.Code, resp.Error.Message)
-	}
-
-	// Parse result as AgentMessage
-	var msg AgentMessage
-	resultData, err := json.Marshal(resp.Result)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal result: %w", err)
-	}
-	if err := json.Unmarshal(resultData, &msg); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal agent message: %w", err)
-	}
-
-	return &msg, nil
-}
-
 // Close terminates the claude-code-acp process and cleans up resources with context-aware timeout support.
 // This prevents indefinite blocking during shutdown by respecting the context deadline.
 // If the context is canceled or times out before Close completes, an error is returned.
 //
 // Coordination with SendMessage (fixes issue #229):
 //   - Sets closed flag to prevent new writes
-//   - Briefly holds writeMu to block concurrent writes
-//   - Closes done channel to wake waiting SendMessage
+//   - Closes done channel to wake waiting SendMessage operations
 //   - Waits for in-flight request to drain (bounded by context)
 //   - Never takes opMu (so Close never blocks on SendMessage's opMu)
 //
@@ -510,10 +467,6 @@ func (c *Client) Close(ctx context.Context) error {
 	if c.stderrCancel != nil {
 		c.stderrCancel()
 	}
-
-	// Prevent further writes (brief writeMu hold)
-	c.writeMu.Lock()
-	c.writeMu.Unlock()
 
 	// Wake waiting operations (double-close protection)
 	select {
