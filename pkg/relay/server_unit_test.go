@@ -76,6 +76,19 @@ func (m *mockWebSocketConn) Close() error {
 	return nil
 }
 
+// WebSocket hardening methods (issue #215) - no-op for testing
+func (m *mockWebSocketConn) SetReadLimit(limit int64) {}
+
+func (m *mockWebSocketConn) SetReadDeadline(t time.Time) error { return nil }
+
+func (m *mockWebSocketConn) SetWriteDeadline(t time.Time) error { return nil }
+
+func (m *mockWebSocketConn) SetPongHandler(h func(appData string) error) {}
+
+func (m *mockWebSocketConn) WriteMessage(messageType int, data []byte) error {
+	return m.writeError
+}
+
 // Unit tests for server methods
 
 func TestAddTimestamp(t *testing.T) {
@@ -501,8 +514,10 @@ func TestMapError_UnknownError(t *testing.T) {
 	if code != "INTERNAL_ERROR" {
 		t.Errorf("expected code INTERNAL_ERROR, got %s", code)
 	}
-	if message != "something unexpected happened" {
-		t.Errorf("expected error message, got %s", message)
+	// After issue #219 fix, unknown errors are sanitized
+	expected := "An internal error occurred. Please contact support if this persists."
+	if message != expected {
+		t.Errorf("expected sanitized message %q, got %q", expected, message)
 	}
 	if !recoverable {
 		t.Error("expected recoverable=true for unknown errors")
@@ -991,8 +1006,10 @@ func TestHandleAgentSpawn_SessionNotFound(t *testing.T) {
 
 	shouldClose := server.handleAgentSpawn(ctx, conn, rawMessage)
 
-	if !shouldClose {
-		t.Error("expected shouldClose=true for non-recoverable error")
+	// After issue #358 fix, we keep connection open even for non-recoverable errors
+	// This allows client to create missing resources
+	if shouldClose {
+		t.Error("expected shouldClose=false - connection should stay open for client to recover")
 	}
 
 	errorMsg, ok := conn.written[0].(ErrorMessage)

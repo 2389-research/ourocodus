@@ -6,13 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/2389-research/ourocodus/pkg/acp"
-	"github.com/2389-research/ourocodus/pkg/agent/container"
 	"github.com/2389-research/ourocodus/pkg/relay/session"
+	"github.com/gorilla/websocket"
 )
 
 // contextWithMaxTimeout creates a context with a timeout that respects the parent's deadline.
@@ -79,10 +78,10 @@ func (s *Server) handleValidationError(conn WebSocketConn, err error) bool {
 	if verr, ok := err.(ValidationError); ok {
 		validationErr = verr
 	} else {
-		// Fallback for unexpected errors
+		// Fallback for unexpected errors - sanitize error message
 		validationErr = ValidationError{
 			Code:        "INVALID_MESSAGE",
-			Message:     err.Error(),
+			Message:     sanitizeError(err),
 			Recoverable: true,
 		}
 	}
@@ -236,10 +235,12 @@ func (s *Server) handleSessionCreate(ctx context.Context, conn WebSocketConn, ra
 	sessionWS := &SessionWebSocketAdapter{conn: conn}
 	userSession, err := s.sessionManager.CreateUserSession(ctx, sessionWS)
 	if err != nil {
+		// Log full error server-side for debugging
 		s.logger.Printf("[RELAY] Failed to create user session: %v", err)
+		// Send sanitized error to client
 		errorMsg := NewErrorMessage(
 			"SESSION_CREATE_FAILED",
-			fmt.Sprintf("Failed to create session: %v", err),
+			sanitizeError(err),
 			true, // Recoverable - client can retry
 		)
 		if writeErr := conn.WriteJSON(errorMsg); writeErr != nil {
@@ -272,13 +273,13 @@ func (s *Server) handleSessionCreate(ctx context.Context, conn WebSocketConn, ra
 // - ValidationError: Protocol validation failure (recoverability depends on error)
 // - Other errors: Unexpected failures (recoverable, client can retry)
 func (s *Server) mapError(err error) (code, message string, recoverable bool) {
-	// Check for typed session errors
+	// Check for typed session errors - use sanitized messages
 	if errors.Is(err, session.ErrSessionNotFound) {
-		return "SESSION_NOT_FOUND", err.Error(), false
+		return "SESSION_NOT_FOUND", sanitizeError(err), false
 	}
 
 	if errors.Is(err, session.ErrAgentNotFound) {
-		return "AGENT_NOT_FOUND", err.Error(), false
+		return "AGENT_NOT_FOUND", sanitizeError(err), false
 	}
 
 	// Check for validation errors
@@ -287,8 +288,8 @@ func (s *Server) mapError(err error) (code, message string, recoverable bool) {
 		return validationErr.Code, validationErr.Message, validationErr.Recoverable
 	}
 
-	// Unknown error - treat as recoverable generic failure
-	return "INTERNAL_ERROR", err.Error(), true
+	// Unknown error - treat as recoverable generic failure, sanitize message
+	return "INTERNAL_ERROR", sanitizeError(err), true
 }
 
 // handleAgentSpawn handles agent:spawn messages
@@ -311,27 +312,11 @@ func (s *Server) handleAgentSpawn(ctx context.Context, conn WebSocketConn, rawMe
 	// Spawn agent in user session
 	err = s.sessionManager.SpawnAgent(ctx, msg.UserSessionID, msg.AgentID, msg.Workspace)
 	if err != nil {
-		s.logger.Printf("Failed to spawn agent: %v", err)
-
-		// Map error to protocol error code
-		errorCode, errorMessage, recoverable := s.mapError(err)
-
-		// Override generic message for spawn-specific context
-		if errors.Is(err, container.ErrContainerSetupFailed) && strings.Contains(strings.ToLower(err.Error()), "no such image") {
-			errorCode = "AGENT_SPAWN_FAILED"
-			errorMessage = "Failed to spawn agent: Docker image 'ourocodus/agent:latest' not found. Build it with: make agent-image"
-		} else if errorCode == "INTERNAL_ERROR" {
-			errorCode = "AGENT_SPAWN_FAILED"
-			errorMessage = fmt.Sprintf("Failed to spawn agent: %v", err)
-		}
-
-		errorMsg := NewErrorMessage(errorCode, errorMessage, recoverable)
-		if writeErr := conn.WriteJSON(errorMsg); writeErr != nil {
-			s.logger.Printf("Failed to send error response: %v", writeErr)
-			return true // Close on write failure
-		}
-
-		return !recoverable // Close if non-recoverable
+		// Log full error server-side for debugging
+		s.logger.Printf("[ERROR] Agent spawn failed: %+v", err)
+		// Map error to protocol error code (distinguishes SESSION_NOT_FOUND vs generic spawn failures)
+		// Keep connection open even for non-recoverable errors - client can create missing resources
+		return SendMappedError(conn, s.logger, err, s.mapError)
 	}
 
 	s.logger.Printf("[RELAY] Agent spawned: userSession=%s agentID=%s", msg.UserSessionID, msg.AgentID)
@@ -549,6 +534,26 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// WebSocket hardening (issue #215)
+	const (
+		maxMessageSize = 1024 * 1024   // 1MB max message size
+		readDeadline   = 60 * time.Second
+		writeDeadline  = 10 * time.Second
+		pingInterval   = 30 * time.Second
+	)
+
+	// Set read limit to prevent OOM attacks
+	conn.SetReadLimit(maxMessageSize)
+
+	// Set initial read deadline
+	conn.SetReadDeadline(time.Now().Add(readDeadline))
+
+	// Set pong handler to extend deadline on activity
+	conn.SetPongHandler(func(string) error {
+		conn.SetReadDeadline(time.Now().Add(readDeadline))
+		return nil
+	})
+
 	// Track session ID for cleanup on disconnect (issue #214)
 	var createdSessionID string
 
@@ -576,6 +581,30 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
+
+	// Start ping goroutine for liveness checks (issue #215)
+	pingDone := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(pingInterval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				// Send ping with write deadline
+				conn.SetWriteDeadline(time.Now().Add(writeDeadline))
+				if err := conn.WriteMessage(websocket.PingMessage, []byte{}); err != nil {
+					s.logger.Printf("Failed to send ping: %v", err)
+					return // Connection dead, exit goroutine
+				}
+			case <-ctx.Done():
+				return // Request context cancelled
+			case <-pingDone:
+				return // Connection closed
+			}
+		}
+	}()
+	defer close(pingDone)
 
 	// Handle incoming messages
 	for {
