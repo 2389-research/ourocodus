@@ -127,34 +127,34 @@ func main() {
 
 	log.Println("[SHUTDOWN] Signal received, gracefully stopping server...")
 
-	// Create shutdown context with timeout
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
-	defer cancel()
-
 	// Track if any cleanup step fails (issue #216)
 	var shutdownErrors []error
 
-	// Attempt graceful HTTP server shutdown
-	if err := httpServer.Shutdown(shutdownCtx); err != nil {
-		log.Printf("[SHUTDOWN] Server shutdown error: %v", err)
+	// Phase 1: HTTP server shutdown (10s timeout)
+	log.Println("[SHUTDOWN] Phase 1: Stopping HTTP server...")
+	httpCtx, httpCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	if err := httpServer.Shutdown(httpCtx); err != nil {
+		log.Printf("[SHUTDOWN] HTTP server shutdown error: %v", err)
 		shutdownErrors = append(shutdownErrors, fmt.Errorf("HTTP shutdown: %w", err))
 	} else {
 		log.Println("[SHUTDOWN] HTTP server stopped")
 	}
+	httpCancel()
 
-	// Cleanup all active sessions (agents, containers, worktrees, credentials)
-	log.Println("[SHUTDOWN] Cleaning up active sessions...")
+	// Phase 2: Session termination (2min timeout for graceful cleanup)
+	log.Println("[SHUTDOWN] Phase 2: Cleaning up active sessions...")
 	activeSessions := sessionManager.List(nil) // nil filter = all sessions
 	if len(activeSessions) > 0 {
 		log.Printf("[SHUTDOWN] Found %d active session(s) to terminate", len(activeSessions))
 
+		sessionsCtx, sessionsCancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		successCount := 0
 		failCount := 0
 		for _, session := range activeSessions {
 			sessionID := session.GetID()
 			log.Printf("[SHUTDOWN] Terminating session: %s", sessionID)
 
-			if _, err := sessionManager.TerminateUserSession(shutdownCtx, sessionID); err != nil {
+			if _, err := sessionManager.TerminateUserSession(sessionsCtx, sessionID); err != nil {
 				log.Printf("[SHUTDOWN] WARN: Failed to terminate session %s: %v", sessionID, err)
 				failCount++
 				shutdownErrors = append(shutdownErrors, fmt.Errorf("session %s: %w", sessionID, err))
@@ -162,21 +162,24 @@ func main() {
 				successCount++
 			}
 		}
+		sessionsCancel()
 
 		log.Printf("[SHUTDOWN] Session cleanup complete: %d succeeded, %d failed", successCount, failCount)
 	} else {
 		log.Println("[SHUTDOWN] No active sessions to clean up")
 	}
 
-	// Drain NATS connection if available
+	// Phase 3: NATS drain (10s timeout)
 	if natsClient != nil {
-		log.Println("[SHUTDOWN] Draining NATS connection...")
-		if err := natsClient.Drain(shutdownCtx); err != nil {
+		log.Println("[SHUTDOWN] Phase 3: Draining NATS connection...")
+		natsCtx, natsCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		if err := natsClient.Drain(natsCtx); err != nil {
 			log.Printf("[SHUTDOWN] NATS drain error: %v", err)
 			shutdownErrors = append(shutdownErrors, fmt.Errorf("NATS drain: %w", err))
 		} else {
 			log.Println("[SHUTDOWN] NATS connection drained successfully")
 		}
+		natsCancel()
 	}
 
 	// Docker client will be closed by defer at line 71
@@ -221,9 +224,11 @@ func initializeAgentInfrastructure(ctx context.Context, logger *relay.StdLogger,
 		log.Fatalf("Failed to create Docker client: %v", err)
 	}
 
-	// Verify Docker is accessible
-	if _, err := dockerClient.Ping(ctx); err != nil {
-		log.Fatalf("Docker daemon is not accessible: %v", err)
+	// Verify Docker is accessible (with 5s timeout)
+	pingCtx, pingCancel := context.WithTimeout(ctx, 5*time.Second)
+	defer pingCancel()
+	if _, err := dockerClient.Ping(pingCtx); err != nil {
+		log.Fatalf("Docker daemon is not accessible (timeout: 5s): %v", err)
 	}
 	log.Printf("[INIT] Docker client initialized successfully")
 
@@ -370,7 +375,11 @@ func cleanupOrphanedContainers(ctx context.Context, cli *client.Client) error {
 	filterArgs := filters.NewArgs()
 	filterArgs.Add("label", "ourocodus.agent=true")
 
-	containers, err := cli.ContainerList(ctx, dockercontainer.ListOptions{
+	// List containers with 10s timeout
+	listCtx, listCancel := context.WithTimeout(ctx, 10*time.Second)
+	defer listCancel()
+
+	containers, err := cli.ContainerList(listCtx, dockercontainer.ListOptions{
 		All:     true,
 		Filters: filterArgs,
 	})
@@ -401,17 +410,22 @@ func cleanupOrphanedContainers(ctx context.Context, cli *client.Client) error {
 			continue
 		}
 
-		// Stop and remove
+		// Stop container with 30s timeout (allows graceful shutdown)
+		stopCtx, stopCancel := context.WithTimeout(ctx, 30*time.Second)
 		timeout := 10
-		if err := cli.ContainerStop(ctx, cont.ID, dockercontainer.StopOptions{Timeout: &timeout}); err != nil {
+		if err := cli.ContainerStop(stopCtx, cont.ID, dockercontainer.StopOptions{Timeout: &timeout}); err != nil {
 			log.Printf("[CLEANUP] WARN: Failed to stop orphaned container %s: %v", shortID, err)
 		}
+		stopCancel()
 
-		if err := cli.ContainerRemove(ctx, cont.ID, dockercontainer.RemoveOptions{Force: true}); err != nil {
+		// Remove container with 10s timeout
+		removeCtx, removeCancel := context.WithTimeout(ctx, 10*time.Second)
+		if err := cli.ContainerRemove(removeCtx, cont.ID, dockercontainer.RemoveOptions{Force: true}); err != nil {
 			log.Printf("[CLEANUP] WARN: Failed to remove orphaned container %s: %v", shortID, err)
 		} else {
 			log.Printf("[CLEANUP] Cleaned up orphaned container: %s", shortID)
 		}
+		removeCancel()
 	}
 
 	return nil
