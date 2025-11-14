@@ -225,7 +225,7 @@ func Test_FullFlow_CreateSession_SpawnAgent_SendMessage(t *testing.T) {
 	var testClient *integrationMockACPClient
 	clientFactory.clientFunc = func(workspace string) (session.ACPClient, error) {
 		testClient = &integrationMockACPClient{
-			sendFunc: func(content string) (interface{}, error) {
+			sendFunc: func(ctx context.Context, content string) (interface{}, error) {
 				return &acp.AgentMessage{
 					Content: fmt.Sprintf("Mock agent says: %s", content),
 				}, nil
@@ -573,7 +573,7 @@ func Test_HandleAgentMessage_Success_FullFlow(t *testing.T) {
 	var capturedContent string
 	clientFactory.clientFunc = func(workspace string) (session.ACPClient, error) {
 		return &integrationMockACPClient{
-			sendFunc: func(content string) (interface{}, error) {
+			sendFunc: func(ctx context.Context, content string) (interface{}, error) {
 				capturedContent = content
 				return &acp.AgentMessage{
 					Content: "Agent processed: " + content,

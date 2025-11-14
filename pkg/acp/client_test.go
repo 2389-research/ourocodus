@@ -355,13 +355,14 @@ func TestSendMessage_InvalidJSON(t *testing.T) {
 	}()
 
 	// Try to send a message - should fail due to invalid JSON response
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 	_, err = client.SendMessage(ctx, "Hello")
 	if err == nil {
 		t.Error("Expected error when response is invalid JSON, got nil")
 	}
 
-	// Error should mention JSON parsing failure
+	// Error should mention JSON parsing failure or read loop termination
 	if err.Error() == "" {
 		t.Error("Expected non-empty error message for invalid JSON")
 	}
