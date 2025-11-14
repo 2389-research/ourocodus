@@ -25,7 +25,7 @@ type Client struct {
 	// Lock hierarchy (prevent deadlocks):
 	// SendMessage: opMu → writeMu (brief) → pendingMu (brief) → wait
 	// readLoop: pendingMu only
-	// Close: never takes opMu
+	// Close: never takes opMu, briefly takes writeMu
 	closedMu sync.RWMutex
 	opMu     sync.Mutex // Serialize entire SendMessage operations
 	writeMu  sync.Mutex // Narrow: nextID + transport.Write only
@@ -502,9 +502,12 @@ func (c *Client) Close(ctx context.Context) error {
 
 	// Close transport to unblock readLoop (fixes #212)
 	// This must happen BEFORE waiting for readLoop, otherwise readLoop will be stuck in scanner.Scan()
+	// Hold writeMu to ensure no concurrent Write is in progress (prevents race with SendMessage)
 	var transportErr error
 	if c.transport != nil {
+		c.writeMu.Lock()
 		transportErr = c.transport.Close(ctx)
+		c.writeMu.Unlock()
 		if transportErr != nil {
 			transportErr = fmt.Errorf("failed to close transport: %w", transportErr)
 		}
