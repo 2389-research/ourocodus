@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/2389-research/ourocodus/pkg/acp"
 	"github.com/2389-research/ourocodus/pkg/agent/container"
@@ -382,8 +383,12 @@ func (s *Server) handleAgentMessage(ctx context.Context, conn WebSocketConn, raw
 		return SendAgentNotReadyError(conn, s.logger, "Agent ACP client not initialized")
 	}
 
-	// Send message to agent (context enables timeout/cancellation - fixes issue #226)
-	response, err := acpClient.SendMessage(ctx, msg.Content)
+	// Send message to agent with timeout (fixes issue #226)
+	// Wrap with explicit timeout to prevent indefinite blocking if agent process hangs
+	acpCtx, acpCancel := context.WithTimeout(ctx, 30*time.Second)
+	defer acpCancel()
+
+	response, err := acpClient.SendMessage(acpCtx, msg.Content)
 	if err != nil {
 		s.logger.Printf("Agent message failed: %v", err)
 		return SendAgentMessageFailedError(conn, s.logger, err)
