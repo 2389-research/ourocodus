@@ -219,9 +219,9 @@ func (m *AgentWorktreeManager) cleanupStaleWorktree(ctx context.Context, worktre
 	}
 
 	// Directory exists - try to remove it from git's worktree tracking
-	// This uses the existing Remove method which handles all cleanup
-	if err := m.Remove(ctx, worktreePath); err != nil {
-		// If Remove fails, try manual cleanup
+	// Call removeUnlocked since Create() already holds the mutex
+	if err := m.removeUnlocked(ctx, worktreePath); err != nil {
+		// If removeUnlocked fails, try manual cleanup
 		// This can happen if git doesn't know about the directory
 		if err := os.RemoveAll(worktreePath); err != nil {
 			return fmt.Errorf("failed to remove stale directory: %w", err)
@@ -229,7 +229,7 @@ func (m *AgentWorktreeManager) cleanupStaleWorktree(ctx context.Context, worktre
 	}
 
 	// Verify directory was actually removed (defensive check)
-	// Even if Remove() succeeded, ensure the directory is gone
+	// Even if removeUnlocked() succeeded, ensure the directory is gone
 	if _, err := os.Stat(worktreePath); err == nil {
 		// Directory still exists, force removal
 		if err := os.RemoveAll(worktreePath); err != nil {
@@ -263,6 +263,12 @@ func (m *AgentWorktreeManager) Remove(ctx context.Context, worktreePath string) 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	return m.removeUnlocked(ctx, worktreePath)
+}
+
+// removeUnlocked is the internal implementation of Remove without locking.
+// Callers must hold m.mu.
+func (m *AgentWorktreeManager) removeUnlocked(ctx context.Context, worktreePath string) error {
 	// Validate worktree path for safety
 	if err := validateWorktreePath(worktreePath); err != nil {
 		return err
