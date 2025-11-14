@@ -52,6 +52,10 @@ Separate the write lock from the read wait. A background goroutine handles all r
 
 ```go
 type Client struct {
+    // Stderr logging goroutine (pre-existing, unmodified by this design)
+    stderrCancel context.CancelFunc  // Signals logStderr goroutine to stop
+    stderrDone   chan struct{}       // Closed when logStderr exits
+
     // 1. Operation Lock - Serializes entire SendMessage calls
     opMu      sync.Mutex
 
@@ -63,18 +67,23 @@ type Client struct {
     closedMu  sync.RWMutex
     closed    bool
 
-    // Response demultiplexing
+    // Response demultiplexing (NEW)
     pendingMu sync.Mutex
     pending   map[int]chan responseResult
     inFlight  sync.WaitGroup
-    done      chan struct{}
+    done      chan struct{}  // Closed on shutdown to wake waiters
 }
 
-type responseResult struct {
+type responseResult struct {  // NEW
     msg *AgentMessage
     err error
 }
 ```
+
+**Note on stderrCancel:** This field is part of the pre-existing stderr logging mechanism
+(the `logStderr` goroutine that tails the agent process's stderr). It's not modified by
+this design but is referenced in Close() to ensure clean shutdown. Close() calls
+`c.stderrCancel()` to signal the logging goroutine before proceeding with other cleanup.
 
 ### Three-Lock Rationale
 
@@ -97,14 +106,32 @@ type responseResult struct {
 
 ### Lock Ordering Rules
 
-**SendMessage:** opMu → pendingMu (brief) → writeMu (brief) → wait
+**SendMessage:** opMu → writeMu (brief) → pendingMu (brief) → wait
 **readLoop:** pendingMu only
-**Close:** Never takes opMu; briefly takes writeMu
+**Close:** Never takes opMu
+
+**Nested Lock Pattern:**
+SendMessage has a TOCTOU-prevention pattern where `closedMu` is checked twice:
+1. Early check: `closedMu.RLock()` → fast-path return if closed
+2. Pre-write check: Inside `writeMu` hold, re-check `closedMu.RLock()` before Write
+
+Full ordering with nested checks:
+```
+SendMessage:
+  closedMu.RLock() (early exit check) → closedMu.RUnlock()
+  → opMu.Lock()
+    → writeMu.Lock()
+      → closedMu.RLock() (re-check before write) → closedMu.RUnlock()
+    → writeMu.Unlock()
+    → pendingMu.Lock() → pendingMu.Unlock()
+  → wait (select on channels)
+```
 
 This ordering prevents deadlocks because:
-- Close never competes for opMu
-- readLoop only touches pendingMu
-- No circular dependencies
+- Close never competes for opMu (can't deadlock with SendMessage)
+- readLoop only touches pendingMu (no interaction with other locks)
+- No circular dependencies in lock acquisition
+- closedMu is always RLock (read-only) during checks, never held across other locks
 
 ### SendMessage Flow
 
@@ -197,7 +224,16 @@ func (c *Client) readLoop() {
         c.pendingMu.Unlock()
 
         if ch != nil {
-            select { case ch <- rr: default: }  // Non-blocking
+            select {
+            case ch <- rr:
+                // Successfully delivered
+            default:
+                // Waiter already exited (context canceled or timeout)
+                c.logger.Printf("[ACP read] waiter gone for id=%d", id)
+            }
+        } else {
+            // No waiter registered (unsolicited or late response)
+            c.logger.Printf("[ACP read] no waiter for id=%d", id)
         }
     }
 
@@ -363,14 +399,55 @@ Run all tests with `-race` flag to verify:
 3. Verify double-close protection
 
 ### Phase 5: Call Site Updates
-1. Update all `SendMessage()` calls to pass context
-2. Update test mocks
-3. Update integration tests
+
+Break down into prioritized sub-phases to avoid missing mocks or integration test failures:
+
+**Phase 5a (Critical Path - High Risk):**
+- `pkg/relay/server.go` - HandleAgentMessage (production message routing)
+  - Add 30-second timeout wrapper for defense-in-depth
+- `pkg/relay/session/manager.go` - StopContainerSession (issue #228 fix)
+  - Ensure context deadline propagates correctly
+
+**Phase 5b (Interfaces and Adapters):**
+- `pkg/relay/session/models.go` - ACPClient interface signature
+- `pkg/relay/session/client_factory.go` - acpClientAdapter implementation
+- `pkg/relay/session/manager_test.go` - mockACPClient test helper
+
+**Phase 5c (Test Infrastructure):**
+- `pkg/acp/client_test.go` - All test cases using real client (5 locations)
+- `examples/smoke-tests/session/main.go` - fakeACPClient for smoke tests
+- `pkg/relay/integration_test.go` - integrationMockACPClient
+
+**Files Modified (Complete List):**
+1. pkg/acp/client.go (core implementation)
+2. pkg/acp/client_test.go (update + new tests)
+3. pkg/relay/server.go (add timeout wrapper)
+4. pkg/relay/session/models.go (interface)
+5. pkg/relay/session/client_factory.go (adapter)
+6. pkg/relay/session/manager_test.go (mock)
+7. examples/smoke-tests/session/main.go (fake)
+8. pkg/relay/integration_test.go (mock)
 
 ### Phase 6: Testing
-1. Add new unit tests
-2. Run with race detector
-3. Verify leak tests pass
+
+**Core Context Tests (Added):**
+1. `TestSendMessage_ContextTimeout` - Verifies timeout support (issue #226)
+2. `TestSendMessage_ContextCancellation` - Verifies cancellation support
+3. `TestSendMessage_ContextCancelDuringClose` - Verifies done channel interaction
+
+**Additional Edge-Case Tests (Recommended):**
+4. `TestSendMessage_OutOfOrderResponses` - Verify readLoop correctly routes responses even if they arrive out of order
+5. `TestSendMessage_DuplicateResponseID` - Confirm responses with duplicate IDs don't corrupt state
+6. `TestSendMessage_UnregisteredID` - Verify responses with unregistered IDs are logged and don't block readLoop
+7. `TestClose_DuringPartialWrite` - Simulate transport failure during concurrent Close; verify state consistency
+8. `TestClose_DoubleClose` - Explicit test confirming panic safety on double-close
+9. `TestSendMessage_ConcurrentRequests` - Multiple concurrent SendMessage calls with different contexts
+
+**Verification Steps:**
+1. Run full test suite with race detector: `go test -race ./pkg/acp/...`
+2. Verify no goroutine leaks with existing leak tests
+3. Verify integration tests pass after call site updates
+4. Run smoke tests to ensure end-to-end functionality
 
 ## Risks and Mitigations
 
