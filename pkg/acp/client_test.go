@@ -500,3 +500,156 @@ func (t *mockTransportForClose) Close(ctx context.Context) error {
 func (t *mockTransportForClose) Stderr() io.Reader {
 	return nil
 }
+
+// TestSendMessage_ContextTimeout verifies that SendMessage respects context timeouts (issue #226)
+func TestSendMessage_ContextTimeout(t *testing.T) {
+	t.Parallel()
+	tmpDir := t.TempDir()
+
+	// Create a mock process that never responds (simulates hanging agent)
+	mockScript := filepath.Join(tmpDir, "hanging-agent.sh")
+	scriptContent := "#!/bin/bash\nwhile read line; do\n  sleep 10  # Never send response\ndone\n"
+	if err := os.WriteFile(mockScript, []byte(scriptContent), 0o755); err != nil {
+		t.Fatalf("Failed to create hanging script: %v", err)
+	}
+
+	client, err := acp.NewClient(tmpDir, "test-api-key", acp.WithCommand(mockScript))
+	if err != nil {
+		t.Fatalf("Failed to create client: %v", err)
+	}
+	defer func() {
+		ctx := context.Background()
+		_ = client.Close(ctx)
+	}()
+
+	// Send message with a short timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	_, err = client.SendMessage(ctx, "test message")
+	elapsed := time.Since(start)
+
+	// Verify timeout occurred
+	if err == nil {
+		t.Error("Expected error due to context timeout, got nil")
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("Expected context.DeadlineExceeded error, got: %v", err)
+	}
+
+	// Verify timeout happened quickly (not waiting indefinitely)
+	if elapsed > 500*time.Millisecond {
+		t.Errorf("Timeout took too long: %v (expected ~100ms)", elapsed)
+	}
+}
+
+// TestSendMessage_ContextCancellation verifies that SendMessage respects context cancellation (issue #226)
+func TestSendMessage_ContextCancellation(t *testing.T) {
+	t.Parallel()
+	tmpDir := t.TempDir()
+
+	// Create a mock process that never responds
+	mockScript := filepath.Join(tmpDir, "hanging-agent.sh")
+	scriptContent := "#!/bin/bash\nwhile read line; do\n  sleep 10\ndone\n"
+	if err := os.WriteFile(mockScript, []byte(scriptContent), 0o755); err != nil {
+		t.Fatalf("Failed to create hanging script: %v", err)
+	}
+
+	client, err := acp.NewClient(tmpDir, "test-api-key", acp.WithCommand(mockScript))
+	if err != nil {
+		t.Fatalf("Failed to create client: %v", err)
+	}
+	defer func() {
+		ctx := context.Background()
+		_ = client.Close(ctx)
+	}()
+
+	// Create cancellable context
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Cancel after 50ms
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		cancel()
+	}()
+
+	start := time.Now()
+	_, err = client.SendMessage(ctx, "test message")
+	elapsed := time.Since(start)
+
+	// Verify cancellation occurred
+	if err == nil {
+		t.Error("Expected error due to context cancellation, got nil")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("Expected context.Canceled error, got: %v", err)
+	}
+
+	// Verify cancellation happened quickly
+	if elapsed > 200*time.Millisecond {
+		t.Errorf("Cancellation took too long: %v (expected ~50ms)", elapsed)
+	}
+}
+
+// TestSendMessage_ContextCancelDuringClose verifies interaction between context cancellation
+// and Close's done channel (ensures both signals are handled correctly)
+func TestSendMessage_ContextCancelDuringClose(t *testing.T) {
+	t.Parallel()
+	tmpDir := t.TempDir()
+
+	// Create a mock process that never responds
+	mockScript := filepath.Join(tmpDir, "hanging-agent.sh")
+	scriptContent := "#!/bin/bash\nwhile read line; do\n  sleep 10\ndone\n"
+	if err := os.WriteFile(mockScript, []byte(scriptContent), 0o755); err != nil {
+		t.Fatalf("Failed to create hanging script: %v", err)
+	}
+
+	client, err := acp.NewClient(tmpDir, "test-api-key", acp.WithCommand(mockScript))
+	if err != nil {
+		t.Fatalf("Failed to create client: %v", err)
+	}
+
+	// Start a SendMessage that will hang
+	ctx := context.Background()
+	done := make(chan error, 1)
+	go func() {
+		_, err := client.SendMessage(ctx, "test message")
+		done <- err
+	}()
+
+	// Give it time to start waiting
+	time.Sleep(50 * time.Millisecond)
+
+	// Close the client (should wake the waiting SendMessage)
+	// Use a 2-second timeout for Close since it waits for in-flight requests
+	closeCtx, closeCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer closeCancel()
+
+	closeErr := client.Close(closeCtx)
+
+	// Close may timeout waiting for the hanging process, which is expected
+	if closeErr != nil {
+		if !strings.Contains(closeErr.Error(), "context deadline exceeded") {
+			t.Errorf("Close returned unexpected error: %v", closeErr)
+		}
+	}
+
+	// Verify SendMessage woke up quickly (even though Close may have timed out)
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Error("Expected error from SendMessage after Close, got nil")
+		}
+		// Should get "client closed" error or similar
+		if !strings.Contains(err.Error(), "closed") && !strings.Contains(err.Error(), "EOF") {
+			t.Logf("Got error: %v (expected 'closed' or 'EOF')", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("SendMessage did not return after Close")
+	}
+
+	// Note: Close might take the full timeout (up to 2s) waiting for the hanging
+	// process to exit, which is expected behavior. The important part is that
+	// SendMessage returned immediately when done channel was closed.
+}
