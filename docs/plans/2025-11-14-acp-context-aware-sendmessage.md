@@ -279,14 +279,10 @@ func (c *Client) Close(ctx context.Context) error {
         c.stderrCancel()
     }
 
-    // 3. Prevent new writes
-    c.writeMu.Lock()
-    c.writeMu.Unlock()
-
-    // 4. Wake waiting operations
+    // 3. Wake waiting operations (no additional lock needed - closed flag already set)
     select { case <-c.done: default: close(c.done) }
 
-    // 5. Wait for in-flight (bounded)
+    // 4. Wait for in-flight (bounded)
     drained := make(chan struct{})
     go func() { c.inFlight.Wait(); close(drained) }()
     select {
@@ -295,7 +291,7 @@ func (c *Client) Close(ctx context.Context) error {
         c.logger.Printf("[WARN] in-flight not drained before deadline")
     }
 
-    // 6. Close transport
+    // 5. Close transport
     return c.transport.Close(ctx)
 }
 ```
