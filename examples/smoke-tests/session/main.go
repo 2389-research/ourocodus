@@ -510,7 +510,7 @@ type fakeACPClient struct {
 	closed    bool
 }
 
-func (c *fakeACPClient) SendMessage(content string) (interface{}, error) {
+func (c *fakeACPClient) SendMessage(ctx context.Context, content string) (interface{}, error) {
 	return map[string]interface{}{
 		"type":    "text",
 		"content": "fake response from " + c.workspace,

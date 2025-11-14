@@ -8,11 +8,32 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/2389-research/ourocodus/pkg/acp"
 	"github.com/2389-research/ourocodus/pkg/agent/container"
 	"github.com/2389-research/ourocodus/pkg/relay/session"
 )
+
+// contextWithMaxTimeout creates a context with a timeout that respects the parent's deadline.
+// If the parent context has a deadline sooner than maxTimeout, uses the parent's remaining time.
+// Otherwise, creates a new context with maxTimeout.
+func contextWithMaxTimeout(parent context.Context, maxTimeout time.Duration) (context.Context, context.CancelFunc) {
+	deadline, ok := parent.Deadline()
+	if !ok {
+		// No parent deadline, use maxTimeout
+		return context.WithTimeout(parent, maxTimeout)
+	}
+
+	remaining := time.Until(deadline)
+	if remaining < maxTimeout {
+		// Parent deadline is sooner, respect it
+		return context.WithDeadline(parent, deadline)
+	}
+
+	// maxTimeout is sooner
+	return context.WithTimeout(parent, maxTimeout)
+}
 
 // Server handles WebSocket connections with injected dependencies
 // Manages session lifecycle through sessionManager and routes messages
@@ -355,8 +376,6 @@ func (s *Server) handleAgentMessage(ctx context.Context, conn WebSocketConn, raw
 		return s.handleValidationError(conn, validationErr)
 	}
 
-	_ = ctx // TODO: Pass context to ACP client when timeout/cancellation support is implemented in ACPClient.SendMessage
-
 	s.logger.Printf("[RELAY] Routing message to agent: userSession=%s agentID=%s",
 		msg.UserSessionID, msg.AgentID)
 
@@ -384,8 +403,13 @@ func (s *Server) handleAgentMessage(ctx context.Context, conn WebSocketConn, raw
 		return SendAgentNotReadyError(conn, s.logger, "Agent ACP client not initialized")
 	}
 
-	// Send message to agent
-	response, err := acpClient.SendMessage(msg.Content)
+	// Send message to agent with timeout (fixes issue #226)
+	// Wrap with explicit timeout to prevent indefinite blocking if agent process hangs
+	// Respect parent context deadline if it's shorter than 30s
+	acpCtx, acpCancel := contextWithMaxTimeout(ctx, 30*time.Second)
+	defer acpCancel()
+
+	response, err := acpClient.SendMessage(acpCtx, msg.Content)
 	if err != nil {
 		s.logger.Printf("Agent message failed: %v", err)
 		return SendAgentMessageFailedError(conn, s.logger, err)
