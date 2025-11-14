@@ -1,7 +1,5 @@
 package relay
 
-import "fmt"
-
 // SendErrorMessage sends an error message over the WebSocket connection.
 // Returns true if the connection should be closed (write error), false otherwise.
 func SendErrorMessage(conn WebSocketConn, logger Logger, errorCode, errorMessage string, recoverable bool) bool {
@@ -22,8 +20,11 @@ func SendAgentNotReadyError(conn WebSocketConn, logger Logger, reason string) bo
 // SendAgentMessageFailedError sends an AGENT_MESSAGE_FAILED error message.
 // Returns true if the connection should be closed (write error), false otherwise.
 func SendAgentMessageFailedError(conn WebSocketConn, logger Logger, err error) bool {
+	// Log full error server-side
+	logger.Printf("[ERROR] Failed to send message to agent: %v", err)
+	// Send sanitized error to client
 	return SendErrorMessage(conn, logger, "AGENT_MESSAGE_FAILED",
-		fmt.Sprintf("Failed to send message to agent: %v", err), true)
+		sanitizeError(err), true)
 }
 
 // SendMappedError sends an error message after mapping an error to a protocol error code.

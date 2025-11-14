@@ -76,6 +76,19 @@ func (m *mockWebSocketConn) Close() error {
 	return nil
 }
 
+// WebSocket hardening methods (issue #215) - no-op for testing
+func (m *mockWebSocketConn) SetReadLimit(limit int64) {}
+
+func (m *mockWebSocketConn) SetReadDeadline(t time.Time) error { return nil }
+
+func (m *mockWebSocketConn) SetWriteDeadline(t time.Time) error { return nil }
+
+func (m *mockWebSocketConn) SetPongHandler(h func(appData string) error) {}
+
+func (m *mockWebSocketConn) WriteMessage(messageType int, data []byte) error {
+	return m.writeError
+}
+
 // Unit tests for server methods
 
 func TestAddTimestamp(t *testing.T) {
@@ -345,7 +358,8 @@ func TestRouteMessage_ValidEchoMessage(t *testing.T) {
 	ctx := context.Background()
 	rawMessage := []byte(`{"version":"1.0","type":"test:echo","message":"hello"}`)
 
-	_, shouldClose := server.routeMessage(ctx, conn, rawMessage)
+	adapter := &SessionWebSocketAdapter{conn: conn}
+	_, shouldClose := server.routeMessage(ctx, conn, adapter, rawMessage)
 
 	if shouldClose {
 		t.Error("expected shouldClose=false for valid message")
@@ -370,7 +384,8 @@ func TestRouteMessage_ValidationError(t *testing.T) {
 	// Missing version field
 	rawMessage := []byte(`{"type":"test:echo","message":"hello"}`)
 
-	_, shouldClose := server.routeMessage(ctx, conn, rawMessage)
+	adapter := &SessionWebSocketAdapter{conn: conn}
+	_, shouldClose := server.routeMessage(ctx, conn, adapter, rawMessage)
 
 	if shouldClose {
 		t.Error("expected shouldClose=false for recoverable validation error")
@@ -404,7 +419,8 @@ func TestRouteMessage_VersionMismatch(t *testing.T) {
 	// Wrong version - non-recoverable
 	rawMessage := []byte(`{"version":"2.0","type":"test:echo"}`)
 
-	_, shouldClose := server.routeMessage(ctx, conn, rawMessage)
+	adapter := &SessionWebSocketAdapter{conn: conn}
+	_, shouldClose := server.routeMessage(ctx, conn, adapter, rawMessage)
 
 	if !shouldClose {
 		t.Error("expected shouldClose=true for version mismatch")
@@ -501,8 +517,10 @@ func TestMapError_UnknownError(t *testing.T) {
 	if code != "INTERNAL_ERROR" {
 		t.Errorf("expected code INTERNAL_ERROR, got %s", code)
 	}
-	if message != "something unexpected happened" {
-		t.Errorf("expected error message, got %s", message)
+	// After issue #219 fix, unknown errors are sanitized
+	expected := "An internal error occurred. Please contact support if this persists."
+	if message != expected {
+		t.Errorf("expected sanitized message %q, got %q", expected, message)
 	}
 	if !recoverable {
 		t.Error("expected recoverable=true for unknown errors")
@@ -837,7 +855,8 @@ func TestHandleSessionCreate_ParseError(t *testing.T) {
 	ctx := context.Background()
 	rawMessage := []byte(`{invalid json}`)
 
-	_, shouldClose := server.handleSessionCreate(ctx, conn, rawMessage)
+	adapter := &SessionWebSocketAdapter{conn: conn}
+	_, shouldClose := server.handleSessionCreate(ctx, adapter, rawMessage)
 
 	if shouldClose {
 		t.Error("expected shouldClose=false for parse error")
@@ -878,7 +897,8 @@ func TestHandleSessionCreate_CreateSessionFails(t *testing.T) {
 	ctx := context.Background()
 	rawMessage := buildValidSessionCreateMessage()
 
-	_, shouldClose := server.handleSessionCreate(ctx, conn, rawMessage)
+	adapter := &SessionWebSocketAdapter{conn: conn}
+	_, shouldClose := server.handleSessionCreate(ctx, adapter, rawMessage)
 
 	if shouldClose {
 		t.Error("expected shouldClose=false for recoverable error")
@@ -991,8 +1011,10 @@ func TestHandleAgentSpawn_SessionNotFound(t *testing.T) {
 
 	shouldClose := server.handleAgentSpawn(ctx, conn, rawMessage)
 
-	if !shouldClose {
-		t.Error("expected shouldClose=true for non-recoverable error")
+	// After issues #219 and #215 fix, we keep connection open even for non-recoverable errors
+	// This allows client to create missing resources
+	if shouldClose {
+		t.Error("expected shouldClose=false - connection should stay open for client to recover")
 	}
 
 	errorMsg, ok := conn.written[0].(ErrorMessage)

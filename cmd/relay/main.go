@@ -87,7 +87,10 @@ func main() {
 		logger,
 		clock,
 		relay.NewGorillaUpgrader(func(r *http.Request) bool {
-			// Allow all origins for development (Phase 1)
+			// Origin validation (issue #215 - Phase 1)
+			// Phase 1: Allow all origins for development.
+			// TODO: In production, validate against allowed origins list.
+			// Origin validation is deferred to Phase 2.
 			return true
 		}),
 		sessionManager,

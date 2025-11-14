@@ -6,13 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/2389-research/ourocodus/pkg/acp"
-	"github.com/2389-research/ourocodus/pkg/agent/container"
 	"github.com/2389-research/ourocodus/pkg/relay/session"
+	"github.com/gorilla/websocket"
 )
 
 // contextWithMaxTimeout creates a context with a timeout that respects the parent's deadline.
@@ -69,6 +68,16 @@ func (s *Server) sendHandshake(conn WebSocketConn) error {
 	return nil
 }
 
+// sendHandshakeWithAdapter sends handshake using the adapter for write synchronization
+func (s *Server) sendHandshakeWithAdapter(adapter *SessionWebSocketAdapter) error {
+	handshake := NewConnectionEstablished(s.serverID, s.clock.Now())
+	if err := adapter.WriteJSON(handshake); err != nil {
+		s.logger.Printf("Failed to send handshake: %v", err)
+		return err
+	}
+	return nil
+}
+
 // handleValidationError processes validation errors and sends appropriate responses
 // Returns true if connection should be closed
 func (s *Server) handleValidationError(conn WebSocketConn, err error) bool {
@@ -79,10 +88,10 @@ func (s *Server) handleValidationError(conn WebSocketConn, err error) bool {
 	if verr, ok := err.(ValidationError); ok {
 		validationErr = verr
 	} else {
-		// Fallback for unexpected errors
+		// Fallback for unexpected errors - sanitize error message
 		validationErr = ValidationError{
 			Code:        "INVALID_MESSAGE",
-			Message:     err.Error(),
+			Message:     sanitizeError(err),
 			Recoverable: true,
 		}
 	}
@@ -128,7 +137,8 @@ func (s *Server) handleEcho(conn WebSocketConn, rawMessage []byte) bool {
 
 // routeMessage routes incoming messages to appropriate handlers based on type
 // Returns true if connection should be closed
-func (s *Server) routeMessage(ctx context.Context, conn WebSocketConn, rawMessage []byte) (sessionID string, shouldClose bool) {
+// adapter parameter is the SessionWebSocketAdapter for this connection (reused for all writes)
+func (s *Server) routeMessage(ctx context.Context, conn WebSocketConn, adapter *SessionWebSocketAdapter, rawMessage []byte) (sessionID string, shouldClose bool) {
 	// Validate message
 	if err := ValidateMessage(rawMessage); err != nil {
 		return "", s.handleValidationError(conn, err)
@@ -151,7 +161,7 @@ func (s *Server) routeMessage(ctx context.Context, conn WebSocketConn, rawMessag
 	switch base.Type {
 	case "session:create":
 		s.logger.Printf("[RELAY] Handling session:create")
-		return s.handleSessionCreate(ctx, conn, rawMessage)
+		return s.handleSessionCreate(ctx, adapter, rawMessage)
 	case "session:end":
 		s.logger.Printf("[RELAY] Handling session:end")
 		return "", s.handleSessionEnd(ctx, conn, rawMessage)
@@ -202,6 +212,22 @@ func (a *SessionWebSocketAdapter) WriteJSON(v interface{}) error {
 	return a.conn.WriteJSON(v)
 }
 
+// WriteMessage sends a binary message with mutex protection
+// Used for control frames like pings that must be synchronized with data writes
+func (a *SessionWebSocketAdapter) WriteMessage(messageType int, data []byte) error {
+	a.writeMu.Lock()
+	defer a.writeMu.Unlock()
+	return a.conn.WriteMessage(messageType, data)
+}
+
+// SetWriteDeadline sets write deadline with mutex protection
+// Deadline applies to all subsequent writes until changed
+func (a *SessionWebSocketAdapter) SetWriteDeadline(t time.Time) error {
+	a.writeMu.Lock()
+	defer a.writeMu.Unlock()
+	return a.conn.SetWriteDeadline(t)
+}
+
 func (a *SessionWebSocketAdapter) Close() error {
 	// Note: Close does not need mutex protection as it's typically called once
 	// during cleanup. The underlying connection handles concurrent Close calls.
@@ -211,14 +237,14 @@ func (a *SessionWebSocketAdapter) Close() error {
 // handleSessionCreate handles session:create messages
 // Creates a new user session and responds with session:created
 // Returns (sessionID, shouldClose) where sessionID is non-empty if a session was created
-func (s *Server) handleSessionCreate(ctx context.Context, conn WebSocketConn, rawMessage []byte) (string, bool) {
+func (s *Server) handleSessionCreate(ctx context.Context, adapter *SessionWebSocketAdapter, rawMessage []byte) (string, bool) {
 	s.logger.Printf("[RELAY] handleSessionCreate: parsing message")
 
 	// Parse message
 	msg, err := parseSessionCreateMessage(rawMessage)
 	if err != nil {
 		s.logger.Printf("[RELAY] handleSessionCreate: parse error: %v", err)
-		return "", s.handleValidationError(conn, err)
+		return "", s.handleValidationError(adapter.conn, err)
 	}
 
 	s.logger.Printf("[RELAY] handleSessionCreate: validating message")
@@ -226,23 +252,23 @@ func (s *Server) handleSessionCreate(ctx context.Context, conn WebSocketConn, ra
 	// Validate message (currently no-op, but for consistency)
 	if validationErr := validateSessionCreateMessage(msg); validationErr != nil {
 		s.logger.Printf("[RELAY] handleSessionCreate: validation error: %v", validationErr)
-		return "", s.handleValidationError(conn, validationErr)
+		return "", s.handleValidationError(adapter.conn, validationErr)
 	}
 
 	s.logger.Printf("[RELAY] handleSessionCreate: creating user session")
 
-	// Create user session
-	// Wrap our WebSocketConn in session.WebSocketConn adapter
-	sessionWS := &SessionWebSocketAdapter{conn: conn}
-	userSession, err := s.sessionManager.CreateUserSession(ctx, sessionWS)
+	// Create user session using the existing adapter (already has write mutex)
+	userSession, err := s.sessionManager.CreateUserSession(ctx, adapter)
 	if err != nil {
+		// Log full error server-side for debugging
 		s.logger.Printf("[RELAY] Failed to create user session: %v", err)
+		// Send sanitized error to client
 		errorMsg := NewErrorMessage(
 			"SESSION_CREATE_FAILED",
-			fmt.Sprintf("Failed to create session: %v", err),
+			sanitizeError(err),
 			true, // Recoverable - client can retry
 		)
-		if writeErr := conn.WriteJSON(errorMsg); writeErr != nil {
+		if writeErr := adapter.WriteJSON(errorMsg); writeErr != nil {
 			s.logger.Printf("Failed to send error response: %v", writeErr)
 		}
 		return "", false // Keep connection open for retry
@@ -254,7 +280,7 @@ func (s *Server) handleSessionCreate(ctx context.Context, conn WebSocketConn, ra
 	// Send session:created response
 	s.logger.Printf("[RELAY] handleSessionCreate: sending session:created response")
 	response := NewSessionCreatedMessage(sessionID, s.clock.Now())
-	if err := conn.WriteJSON(response); err != nil {
+	if err := adapter.WriteJSON(response); err != nil {
 		s.logger.Printf("[RELAY] Failed to send session:created: %v", err)
 		return sessionID, true // Close connection on write failure (session will be cleaned up by defer)
 	}
@@ -272,13 +298,13 @@ func (s *Server) handleSessionCreate(ctx context.Context, conn WebSocketConn, ra
 // - ValidationError: Protocol validation failure (recoverability depends on error)
 // - Other errors: Unexpected failures (recoverable, client can retry)
 func (s *Server) mapError(err error) (code, message string, recoverable bool) {
-	// Check for typed session errors
+	// Check for typed session errors - use sanitized messages
 	if errors.Is(err, session.ErrSessionNotFound) {
-		return "SESSION_NOT_FOUND", err.Error(), false
+		return "SESSION_NOT_FOUND", sanitizeError(err), false
 	}
 
 	if errors.Is(err, session.ErrAgentNotFound) {
-		return "AGENT_NOT_FOUND", err.Error(), false
+		return "AGENT_NOT_FOUND", sanitizeError(err), false
 	}
 
 	// Check for validation errors
@@ -287,8 +313,8 @@ func (s *Server) mapError(err error) (code, message string, recoverable bool) {
 		return validationErr.Code, validationErr.Message, validationErr.Recoverable
 	}
 
-	// Unknown error - treat as recoverable generic failure
-	return "INTERNAL_ERROR", err.Error(), true
+	// Unknown error - treat as recoverable generic failure, sanitize message
+	return "INTERNAL_ERROR", sanitizeError(err), true
 }
 
 // handleAgentSpawn handles agent:spawn messages
@@ -311,27 +337,11 @@ func (s *Server) handleAgentSpawn(ctx context.Context, conn WebSocketConn, rawMe
 	// Spawn agent in user session
 	err = s.sessionManager.SpawnAgent(ctx, msg.UserSessionID, msg.AgentID, msg.Workspace)
 	if err != nil {
-		s.logger.Printf("Failed to spawn agent: %v", err)
-
-		// Map error to protocol error code
-		errorCode, errorMessage, recoverable := s.mapError(err)
-
-		// Override generic message for spawn-specific context
-		if errors.Is(err, container.ErrContainerSetupFailed) && strings.Contains(strings.ToLower(err.Error()), "no such image") {
-			errorCode = "AGENT_SPAWN_FAILED"
-			errorMessage = "Failed to spawn agent: Docker image 'ourocodus/agent:latest' not found. Build it with: make agent-image"
-		} else if errorCode == "INTERNAL_ERROR" {
-			errorCode = "AGENT_SPAWN_FAILED"
-			errorMessage = fmt.Sprintf("Failed to spawn agent: %v", err)
-		}
-
-		errorMsg := NewErrorMessage(errorCode, errorMessage, recoverable)
-		if writeErr := conn.WriteJSON(errorMsg); writeErr != nil {
-			s.logger.Printf("Failed to send error response: %v", writeErr)
-			return true // Close on write failure
-		}
-
-		return !recoverable // Close if non-recoverable
+		// Log full error server-side for debugging
+		s.logger.Printf("[ERROR] Agent spawn failed: %+v", err)
+		// Map error to protocol error code (distinguishes SESSION_NOT_FOUND vs generic spawn failures)
+		// Keep connection open even for non-recoverable errors - client can create missing resources
+		return SendMappedError(conn, s.logger, err, s.mapError)
 	}
 
 	s.logger.Printf("[RELAY] Agent spawned: userSession=%s agentID=%s", msg.UserSessionID, msg.AgentID)
@@ -549,6 +559,34 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// WebSocket hardening (issue #215)
+	const (
+		maxMessageSize = 1024 * 1024 // 1MB max message size
+		readDeadline   = 60 * time.Second
+		writeDeadline  = 10 * time.Second
+		pingInterval   = 30 * time.Second
+	)
+
+	// Set read limit to prevent OOM attacks
+	conn.SetReadLimit(maxMessageSize)
+
+	// Set initial read deadline
+	if err := conn.SetReadDeadline(time.Now().Add(readDeadline)); err != nil {
+		s.logger.Printf("Failed to set initial read deadline: %v", err)
+	}
+
+	// Set pong handler to extend deadline on activity
+	conn.SetPongHandler(func(string) error {
+		if err := conn.SetReadDeadline(time.Now().Add(readDeadline)); err != nil {
+			s.logger.Printf("Failed to extend read deadline on pong: %v", err)
+		}
+		return nil
+	})
+
+	// Wrap connection in adapter for write synchronization (issue #213)
+	// This must be created before any writes to ensure all writes are synchronized
+	adapter := &SessionWebSocketAdapter{conn: conn}
+
 	// Track session ID for cleanup on disconnect (issue #214)
 	var createdSessionID string
 
@@ -570,12 +608,17 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	s.logger.Printf("[SERVER] WebSocket connection established from %s", r.RemoteAddr)
 
-	// Send handshake
-	if err := s.sendHandshake(conn); err != nil {
+	// Send handshake using adapter for synchronized writes
+	if err := s.sendHandshakeWithAdapter(adapter); err != nil {
 		return
 	}
 
 	ctx := r.Context()
+
+	// Start ping goroutine for liveness checks (issue #215)
+	// Use adapter to synchronize ping writes with data writes
+	pingDone := s.startPingRoutine(ctx, adapter, pingInterval, writeDeadline)
+	defer close(pingDone)
 
 	// Handle incoming messages
 	for {
@@ -592,7 +635,7 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 			s.logger.Printf("[RELAY] Received message (%d bytes, type=%s)", len(message), base.Type)
 		}
 
-		sessionID, shouldClose := s.routeMessage(ctx, conn, message)
+		sessionID, shouldClose := s.routeMessage(ctx, conn, adapter, message)
 		// Track session ID if one was created during this connection
 		if sessionID != "" {
 			createdSessionID = sessionID
@@ -601,4 +644,42 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 	}
+}
+
+// startPingRoutine starts a goroutine that sends periodic pings to keep the connection alive.
+// Returns a channel that should be closed when the connection is done to stop the ping routine.
+// Uses the adapter to ensure ping writes are synchronized with all other writes (issue #213).
+func (s *Server) startPingRoutine(ctx context.Context, adapter *SessionWebSocketAdapter, pingInterval, writeDeadline time.Duration) chan struct{} {
+	pingDone := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(pingInterval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				// Set write deadline for this ping only
+				if err := adapter.SetWriteDeadline(time.Now().Add(writeDeadline)); err != nil {
+					s.logger.Printf("Failed to set write deadline for ping: %v", err)
+				}
+
+				// Send ping message (synchronized by adapter's mutex)
+				if err := adapter.WriteMessage(websocket.PingMessage, []byte{}); err != nil {
+					s.logger.Printf("Failed to send ping: %v", err)
+					return // Connection dead, exit goroutine
+				}
+
+				// Clear deadline to prevent it from affecting subsequent writes
+				// SetWriteDeadline(zero) = no deadline
+				if err := adapter.SetWriteDeadline(time.Time{}); err != nil {
+					s.logger.Printf("Failed to clear write deadline after ping: %v", err)
+				}
+			case <-ctx.Done():
+				return // Request context cancelled
+			case <-pingDone:
+				return // Connection closed
+			}
+		}
+	}()
+	return pingDone
 }

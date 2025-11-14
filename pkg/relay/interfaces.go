@@ -2,6 +2,7 @@ package relay
 
 import (
 	"context"
+	"time"
 
 	"github.com/2389-research/ourocodus/pkg/relay/session"
 	"github.com/gorilla/websocket"
@@ -27,6 +28,12 @@ type WebSocketConn interface {
 	WriteJSON(v interface{}) error
 	ReadMessage() (messageType int, p []byte, err error)
 	Close() error
+	// WebSocket hardening methods (issue #215)
+	SetReadLimit(limit int64)
+	SetReadDeadline(t time.Time) error
+	SetWriteDeadline(t time.Time) error
+	SetPongHandler(h func(appData string) error)
+	WriteMessage(messageType int, data []byte) error
 }
 
 // Upgrader abstracts WebSocket upgrade operations
