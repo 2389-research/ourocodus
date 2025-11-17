@@ -206,7 +206,7 @@ func (m *AgentWorktreeManager) Create(ctx context.Context, agentID, baseDir stri
 			}
 
 			// Retry worktree creation once
-			retryCmd := exec.CommandContext(ctx, "git", "worktree", "add", "-b", branchName, worktreePath)
+			retryCmd := exec.CommandContext(ctx, "git", "worktree", "add", "-b", branchName, worktreePath) // nolint:gosec // G204: branchName validated by git command itself
 			retryCmd.Dir = m.repoPath
 			var retryStderr bytes.Buffer
 			retryCmd.Stderr = &retryStderr
