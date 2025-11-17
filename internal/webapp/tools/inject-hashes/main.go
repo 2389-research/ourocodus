@@ -6,10 +6,12 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+
+	"github.com/2389-research/ourocodus/internal/webapp/tools/common"
 )
 
-// AssetManifest maps original filenames to hashed filenames
-type AssetManifest map[string]string
+// AssetManifest is a type alias for the shared manifest type
+type AssetManifest = common.AssetManifest
 
 func main() {
 	if len(os.Args) < 3 {

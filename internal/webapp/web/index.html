@@ -10,7 +10,7 @@
     <link rel="manifest" href="/manifest.webmanifest">
     <link rel="apple-touch-icon" href="/icon-192.png">
     <title>Ourocodus</title>
-    <link rel="stylesheet" href="styles.min.55e70520.css">
+    <link rel="stylesheet" href="styles.min.33e3c02c.css">
     <link rel="stylesheet" href="tailwind.99d1fe80.css">
 </head>
 <body>
@@ -78,7 +78,7 @@
                     <!-- Agent cards will be rendered here -->
                 </div>
 
-                <button id="terminateAll" class="btn btn-danger" style="display: none;" onclick="app.connection.terminateAll()">
+                <button id="terminateAll" class="btn btn-danger" style="display: none;">
                     <span class="btn-icon">🗑️</span>
                     Terminate All Agents
                 </button>
@@ -87,12 +87,12 @@
             <div id="chatContainer" class="chat-container" style="display: none;">
                 <div class="chat-header">
                     <span id="chatAgentName"></span>
-                    <button onclick="app.connection.closeChat()">×</button>
+                    <button id="closeChatBtn">×</button>
                 </div>
                 <div id="chatMessages" class="chat-messages"></div>
                 <div class="chat-input">
                     <input type="text" id="chatInput" placeholder="Type a message...">
-                    <button onclick="app.connection.sendChatMessage()">Send</button>
+                    <button id="sendChatMessageBtn">Send</button>
                 </div>
             </div>
 
@@ -190,6 +190,6 @@
     </div>
 
     <script src="logger.e107c653.js"></script>
-    <script src="app.7cbf6905.js"></script>
+    <script src="app.417e2f42.js"></script>
 </body>
 </html>
