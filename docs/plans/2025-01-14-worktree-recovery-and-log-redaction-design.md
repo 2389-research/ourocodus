@@ -14,7 +14,7 @@ This design addresses two relay service improvements: automatic recovery from st
 
 When users manually delete worktree directories without running `git worktree remove`, Git retains stale registrations. Subsequent agent spawns fail with:
 
-```
+```text
 fatal: '/path/to/workspaces/agent-echo' is a missing but already registered worktree;
 use 'add -f' to override, or 'prune' or 'remove' to clear
 ```

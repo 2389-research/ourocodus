@@ -304,7 +304,7 @@ The CI pipeline runs:
 The relay logs WebSocket message metadata but never logs full message content to protect against PII and credential exposure.
 
 **Log format:**
-```
+```text
 [RELAY] dir=recv type=agent:spawn size=156B
 ```
 

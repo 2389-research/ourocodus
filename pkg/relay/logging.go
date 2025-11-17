@@ -5,6 +5,11 @@ import (
 	"regexp"
 )
 
+const (
+	maxMessageSizeForExtraction = 1024 * 1024 // 1MB - protects against DoS via oversized messages
+	maxTypeLength               = 48          // Maximum length for sanitized message type
+)
+
 var unsafeCharsRegex = regexp.MustCompile(`[^a-zA-Z0-9:/_-]`)
 
 // extractMessageType safely extracts the "type" field from a JSON message.
@@ -12,7 +17,7 @@ var unsafeCharsRegex = regexp.MustCompile(`[^a-zA-Z0-9:/_-]`)
 // The returned type is sanitized to prevent log injection.
 func extractMessageType(data []byte) string {
 	// Limit parsing to reasonable message size to avoid DoS
-	if len(data) > 1024*1024 { // 1MB
+	if len(data) > maxMessageSizeForExtraction {
 		return "unknown_large"
 	}
 
@@ -28,7 +33,7 @@ func extractMessageType(data []byte) string {
 		return "unknown"
 	}
 
-	return sanitizeType(msg.Type, 48)
+	return sanitizeType(msg.Type, maxTypeLength)
 }
 
 // sanitizeType removes unsafe characters and truncates to maxLen.
