@@ -199,19 +199,31 @@ func (m *AgentWorktreeManager) Create(ctx context.Context, agentID, baseDir stri
 		if strings.Contains(stderrStr, "already registered") {
 			// Last resort: prune all stale worktrees and retry once
 			log.Printf("[WARN] Worktree already registered after cleanup, pruning all stale worktrees")
+			// #nosec G204 -- git command with validated repository path
 			pruneCmd := exec.CommandContext(ctx, "git", "worktree", "prune", "--verbose")
 			pruneCmd.Dir = m.repoPath
-			if pruneErr := pruneCmd.Run(); pruneErr != nil {
-				log.Printf("[WARN] Failed to prune worktrees: %v", pruneErr)
+			var pruneOutput bytes.Buffer
+			pruneCmd.Stdout = &pruneOutput
+			pruneCmd.Stderr = &pruneOutput
+			pruneErr := pruneCmd.Run()
+			if pruneErr != nil {
+				log.Printf("[WARN] Failed to prune worktrees: %v (output: %s)", pruneErr, pruneOutput.String())
+			} else {
+				log.Printf("[INFO] Prune output: %s", pruneOutput.String())
 			}
 
 			// Retry worktree creation once
-			retryCmd := exec.CommandContext(ctx, "git", "worktree", "add", "-b", branchName, worktreePath) // nolint:gosec // G204: branchName validated by git command itself
+			// #nosec G204 -- git command with validated arguments
+			retryCmd := exec.CommandContext(ctx, "git", "worktree", "add", "-b", branchName, worktreePath)
 			retryCmd.Dir = m.repoPath
 			var retryStderr bytes.Buffer
 			retryCmd.Stderr = &retryStderr
 			if retryErr := retryCmd.Run(); retryErr != nil {
-				return nil, fmt.Errorf("failed to create worktree after prune: %w (stderr: %s)", retryErr, retryStderr.String())
+				pruneStatus := "succeeded"
+				if pruneErr != nil {
+					pruneStatus = fmt.Sprintf("failed: %v", pruneErr)
+				}
+				return nil, fmt.Errorf("failed to create worktree after prune (prune %s): %w (stderr: %s)", pruneStatus, retryErr, retryStderr.String())
 			}
 			log.Printf("[INFO] Successfully created worktree after prune recovery")
 		} else {
