@@ -628,12 +628,8 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 
-		var base BaseMessage
-		if err := json.Unmarshal(message, &base); err != nil {
-			s.logger.Printf("[RELAY] Received message (%d bytes, type=unknown parse error)", len(message))
-		} else {
-			s.logger.Printf("[RELAY] Received message (%d bytes, type=%s)", len(message), base.Type)
-		}
+		messageType := extractMessageType(message)
+		s.logger.Printf("[RELAY] dir=recv type=%s size=%dB", messageType, len(message))
 
 		sessionID, shouldClose := s.routeMessage(ctx, conn, adapter, message)
 		// Track session ID if one was created during this connection
