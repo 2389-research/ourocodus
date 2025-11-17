@@ -183,6 +183,33 @@ export class App {
             });
         }
 
+        // Setup Terminate All button
+        const terminateAllBtn = document.getElementById('terminateAll');
+        if (terminateAllBtn) {
+            terminateAllBtn.addEventListener('click', () => {
+                this.logger.debug('Terminate All button clicked');
+                this.connection.terminateAll();
+            });
+        }
+
+        // Setup Close Chat button
+        const closeChatBtn = document.getElementById('closeChatBtn');
+        if (closeChatBtn) {
+            closeChatBtn.addEventListener('click', () => {
+                this.logger.debug('Close Chat button clicked');
+                this.connection.closeChat();
+            });
+        }
+
+        // Setup Send Chat Message button
+        const sendChatMessageBtn = document.getElementById('sendChatMessageBtn');
+        if (sendChatMessageBtn) {
+            sendChatMessageBtn.addEventListener('click', () => {
+                this.logger.debug('Send Chat Message button clicked');
+                this.connection.sendChatMessage();
+            });
+        }
+
         // Setup Disconnect button
         const disconnectBtn = document.getElementById('disconnectBtn');
         if (disconnectBtn) {
