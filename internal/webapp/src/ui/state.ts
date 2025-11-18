@@ -4,6 +4,7 @@
 
 import { Logger } from '../logger';
 import { RelayConnection } from '../connection';
+import { ThemeService } from '../services/theme-service';
 
 /**
  * Modal Manager - Handles modal display and interaction
@@ -106,6 +107,7 @@ class ModalManager {
 export class App {
     private logger: Logger;
     connection: RelayConnection;
+    private theme: ThemeService;
     private connectionCheckInterval: ReturnType<typeof setInterval> | null;
     private connectionCheckTimeout: ReturnType<typeof setTimeout> | null;
     private isConnecting: boolean;
@@ -130,6 +132,18 @@ export class App {
 
     init() {
         this.logger.info('Initializing Ourocodus PWA');
+
+        // Initialize theme service
+        this.theme = new ThemeService();
+
+        // Wire theme toggle button
+        const themeToggleBtn = document.getElementById('themeToggle');
+        if (themeToggleBtn) {
+            themeToggleBtn.addEventListener('click', () => {
+                this.logger.debug('Theme toggle clicked');
+                this.theme.toggle();
+            });
+        }
 
         // Register service worker for offline support
         this.registerServiceWorker();
