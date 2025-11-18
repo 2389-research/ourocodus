@@ -22,6 +22,8 @@ export class RelayConnection {
     public currentAgentRole: string | null; // Currently selected agent for single-agent card view
     private wsUrl: string;
     private pendingSpawnRole: string | null;
+    public onAgentReady?: () => void;
+    public onError?: () => void;
 
     // Map-based state for multiple agents: role → { role, status, messages, workspace }
     public agents: Map<string, AgentState>;
@@ -242,6 +244,11 @@ export class RelayConnection {
 
         this.pendingSpawnRole = null;
         this.resetSpawnButton();
+
+        // Notify app that agent is ready
+        if (this.onAgentReady) {
+            this.onAgentReady();
+        }
     }
 
     /**
@@ -364,6 +371,11 @@ export class RelayConnection {
             this.logger.info('Resetting spawn button after agent spawn error');
             this.pendingSpawnRole = null;
             this.resetSpawnButton();
+
+            // Notify app of error
+            if (this.onError) {
+                this.onError();
+            }
         }
     }
 
