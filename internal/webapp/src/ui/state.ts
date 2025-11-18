@@ -6,6 +6,7 @@ import { Logger } from '../logger';
 import { RelayConnection } from '../connection';
 import { ThemeService } from '../services/theme-service';
 import { LoadingService } from '../services/loading-service';
+import { NotificationService } from '../services/notification-service';
 
 /**
  * Modal Manager - Handles modal display and interaction
@@ -110,6 +111,7 @@ export class App {
     connection: RelayConnection;
     private theme: ThemeService;
     private loading: LoadingService;
+    private notifications: NotificationService;
     private connectionCheckInterval: ReturnType<typeof setInterval> | null;
     private connectionCheckTimeout: ReturnType<typeof setTimeout> | null;
     private isConnecting: boolean;
@@ -138,13 +140,27 @@ export class App {
         // Initialize services
         this.theme = new ThemeService();
         this.loading = new LoadingService();
+        this.notifications = new NotificationService();
 
-        // Set up connection callbacks for loading states
+        // Set up connection callbacks for loading and error states
         this.connection.onAgentReady = () => {
             this.loading.hide();
         };
         this.connection.onError = () => {
             this.loading.hide();
+        };
+        this.connection.onShowError = (message: string, recoverable: boolean, retryCallback?: () => void) => {
+            this.notifications.showError(message, {
+                recoverable,
+                retryCallback: retryCallback ? async () => {
+                    // Show loading when retrying
+                    const spawnSection = document.getElementById('agentSpawnSection');
+                    if (spawnSection) {
+                        this.loading.show(spawnSection, 'Retrying...');
+                    }
+                    retryCallback();
+                } : undefined
+            });
         };
 
         // Wire theme toggle button
