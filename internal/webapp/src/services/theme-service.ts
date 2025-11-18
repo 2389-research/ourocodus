@@ -49,8 +49,7 @@ export class ThemeService {
     private updateIcon(): void {
         const icon = document.getElementById('themeIcon');
         if (icon) {
-            // Show sun for light theme (switch to dark)
-            // Show moon for dark theme (switch to light)
+            // Show moon in dark mode (click to switch to light), show sun in light mode (click to switch to dark)
             icon.textContent = this.currentTheme === 'dark' ? '🌙' : '☀️';
         }
     }

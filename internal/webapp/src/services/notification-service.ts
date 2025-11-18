@@ -5,6 +5,7 @@
 interface NotificationOptions {
     recoverable?: boolean;
     retryCallback?: () => void | Promise<void>;
+    autoDismissMs?: number;
 }
 
 export class NotificationService {
@@ -83,9 +84,10 @@ export class NotificationService {
 
         this.container?.appendChild(notification);
 
-        // Auto-dismiss after 10 seconds if not recoverable
+        // Auto-dismiss after configured timeout if not recoverable
         if (!options?.recoverable) {
-            setTimeout(() => this.dismiss(id), 10000);
+            const timeout = options?.autoDismissMs ?? 10000;
+            setTimeout(() => this.dismiss(id), timeout);
         }
     }
 

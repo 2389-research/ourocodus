@@ -107,6 +107,8 @@ class ModalManager {
  * Application initialization
  */
 export class App {
+    private static readonly AGENT_SPAWN_SECTION_ID = 'agentSpawnSection';
+
     private logger: Logger;
     connection: RelayConnection;
     private theme: ThemeService;
@@ -161,12 +163,17 @@ export class App {
             this.notifications.showError(message, {
                 recoverable,
                 retryCallback: retryCallback ? async () => {
-                    // Show loading when retrying
-                    const spawnSection = document.getElementById('agentSpawnSection');
-                    if (spawnSection) {
-                        this.loading.show(spawnSection, 'Retrying...');
+                    try {
+                        // Show loading when retrying
+                        const spawnSection = document.getElementById(App.AGENT_SPAWN_SECTION_ID);
+                        if (spawnSection) {
+                            this.loading.show(spawnSection, 'Retrying...');
+                        }
+                        await retryCallback();
+                    } catch (err) {
+                        this.logger.error('Error during retryCallback:', err);
+                        this.loading.hide();
                     }
-                    retryCallback();
                 } : undefined
             });
         };
@@ -393,7 +400,7 @@ export class App {
         const roleInput = document.getElementById('agentRole');
         const workspaceInput = document.getElementById('agentWorkspace');
         const btn = document.getElementById('spawnAgentBtn');
-        const spawnSection = document.getElementById('agentSpawnSection');
+        const spawnSection = document.getElementById(App.AGENT_SPAWN_SECTION_ID);
 
         if (!roleInput || !workspaceInput) {
             this.logger.error('Agent spawn inputs not found');

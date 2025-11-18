@@ -5,6 +5,8 @@
 export class LoadingService {
     private overlay: HTMLElement | null = null;
     private messageEl: HTMLElement | null = null;
+    private targetElement: HTMLElement | null = null;
+    private originalPosition: string = '';
 
     /**
      * Show loading overlay on target element
@@ -30,8 +32,16 @@ export class LoadingService {
         this.overlay.appendChild(spinner);
         this.overlay.appendChild(this.messageEl);
 
-        // Position relative to target
-        target.style.position = 'relative';
+        // Store original position and set relative if needed
+        this.targetElement = target;
+        const computedPosition = window.getComputedStyle(target).position;
+        if (computedPosition === 'static') {
+            this.originalPosition = '';
+            target.style.position = 'relative';
+        } else {
+            this.originalPosition = computedPosition;
+        }
+
         target.appendChild(this.overlay);
     }
 
@@ -53,5 +63,12 @@ export class LoadingService {
             this.overlay = null;
             this.messageEl = null;
         }
+
+        // Restore original position if it was static
+        if (this.targetElement && this.originalPosition === '') {
+            this.targetElement.style.position = 'static';
+        }
+        this.targetElement = null;
+        this.originalPosition = '';
     }
 }
