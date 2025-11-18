@@ -9,14 +9,112 @@ class ProtocolInspector {
         this.currentState = 'disconnected';
         this.userSessionId = null;
         this.reconnectAttempts = 0;
+        this.messages = []; // Store messages for search/export
+        this.searchQuery = '';
 
         if (!this.messageList || !this.stateIndicator || !this.sessionPanel) {
             console.error('[Protocol Inspector] Required DOM elements not found');
             return;
         }
 
+        // Wire up inspector controls
+        this.setupControls();
+
         window.addEventListener('message', this.handleMessage.bind(this));
         console.log('[Protocol Inspector] Initialized');
+    }
+
+    setupControls() {
+        // Search functionality
+        const searchInput = document.getElementById('inspectorSearch');
+        if (searchInput) {
+            let searchTimeout;
+            searchInput.addEventListener('input', (e) => {
+                clearTimeout(searchTimeout);
+                searchTimeout = setTimeout(() => {
+                    this.searchQuery = e.target.value.toLowerCase();
+                    this.filterMessages();
+                }, 150);
+            });
+        }
+
+        // Export functionality
+        const exportBtn = document.getElementById('inspectorExport');
+        if (exportBtn) {
+            exportBtn.addEventListener('click', () => {
+                this.exportJSON();
+            });
+        }
+
+        // Clear functionality
+        const clearBtn = document.getElementById('inspectorClear');
+        if (clearBtn) {
+            clearBtn.addEventListener('click', () => {
+                this.clearMessages();
+            });
+        }
+    }
+
+    filterMessages() {
+        const messageElements = this.messageList.querySelectorAll('.message-entry');
+
+        messageElements.forEach((el, index) => {
+            if (!this.searchQuery) {
+                el.style.display = '';
+                return;
+            }
+
+            const message = this.messages[index];
+            if (!message) {
+                el.style.display = '';
+                return;
+            }
+
+            // Search in raw data and type
+            const matchesContent = message.data.toLowerCase().includes(this.searchQuery);
+            const matchesType = message.type.toLowerCase().includes(this.searchQuery);
+
+            el.style.display = (matchesContent || matchesType) ? '' : 'none';
+        });
+    }
+
+    exportJSON() {
+        const data = this.messages.map(msg => ({
+            timestamp: new Date(msg.timestamp).toISOString(),
+            type: msg.type,
+            direction: msg.direction,
+            data: msg.data
+        }));
+
+        const json = JSON.stringify(data, null, 2);
+        const blob = new Blob([json], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `ourocodus-protocol-${Date.now()}.json`;
+        a.click();
+
+        URL.revokeObjectURL(url);
+        console.log('[Protocol Inspector] Exported', this.messages.length, 'messages');
+    }
+
+    clearMessages() {
+        if (!confirm('Clear all protocol messages?')) {
+            return;
+        }
+
+        this.messages = [];
+        this.searchQuery = '';
+        this.messageList.innerHTML = '';
+
+        // Clear search input
+        const searchInput = document.getElementById('inspectorSearch');
+        if (searchInput) {
+            searchInput.value = '';
+        }
+
+        console.log('[Protocol Inspector] Messages cleared');
     }
 
     handleMessage(event) {
@@ -54,6 +152,14 @@ class ProtocolInspector {
     }
 
     appendMessage(data, type, timestamp) {
+        // Store message for search/export
+        this.messages.push({
+            data: data,
+            type: type,
+            direction: type === 'sent' ? 'send' : (type === 'received' ? 'recv' : 'system'),
+            timestamp: timestamp
+        });
+
         const entry = document.createElement('div');
         entry.className = 'message-entry message-' + type;
 
