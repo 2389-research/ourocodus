@@ -14,7 +14,23 @@
         <div class="right-panel">
             <div class="message-stream">
                 <h2>Message Stream</h2>
-                <div id="message-list"></div>
+                <div class="inspector-controls">
+                    <input
+                        type="text"
+                        id="inspectorSearch"
+                        class="inspector-search"
+                        placeholder="Search messages..."
+                    >
+                    <div class="inspector-buttons">
+                        <button id="inspectorExport" class="btn btn-small">
+                            Export JSON
+                        </button>
+                        <button id="inspectorClear" class="btn btn-small btn-danger">
+                            Clear
+                        </button>
+                    </div>
+                </div>
+                <div id="message-list" class="inspector-messages"></div>
             </div>
             <div class="connection-state">
                 <h2>Connection</h2>
