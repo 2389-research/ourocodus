@@ -22,6 +22,10 @@ export class RelayConnection {
     public currentAgentRole: string | null; // Currently selected agent for single-agent card view
     private wsUrl: string;
     private pendingSpawnRole: string | null;
+    public lastSpawnRequest: { role: string; workspace: string } | null;
+    public onAgentReady?: () => void;
+    public onError?: () => void;
+    public onShowError?: (message: string, recoverable: boolean, retryCallback?: () => void) => void;
 
     // Map-based state for multiple agents: role → { role, status, messages, workspace }
     public agents: Map<string, AgentState>;
@@ -40,6 +44,7 @@ export class RelayConnection {
         this.currentChatRole = null;
         this.currentAgentRole = null;
         this.pendingSpawnRole = null;
+        this.lastSpawnRequest = null;
 
         // Map-based state for multiple agents
         this.agents = new Map<string, AgentState>();
@@ -242,6 +247,11 @@ export class RelayConnection {
 
         this.pendingSpawnRole = null;
         this.resetSpawnButton();
+
+        // Notify app that agent is ready
+        if (this.onAgentReady) {
+            this.onAgentReady();
+        }
     }
 
     /**
@@ -364,6 +374,11 @@ export class RelayConnection {
             this.logger.info('Resetting spawn button after agent spawn error');
             this.pendingSpawnRole = null;
             this.resetSpawnButton();
+
+            // Notify app of error
+            if (this.onError) {
+                this.onError();
+            }
         }
     }
 
@@ -371,33 +386,62 @@ export class RelayConnection {
      * Show error notification
      */
     showErrorNotification(code: string, message: string, recoverable: boolean): void {
-        // Create error notification element
-        const errorDiv = document.createElement('div');
-        errorDiv.className = 'error-notification';
-        errorDiv.innerHTML = `
-            <div class="error-header">
-                <span class="error-icon">⚠️</span>
-                <span class="error-code">${code}</span>
-                <button class="error-close">&times;</button>
-            </div>
-            <div class="error-message">${message}</div>
-            ${recoverable ? '<div class="error-hint">You can retry this operation</div>' : '<div class="error-hint error-fatal">This error is not recoverable</div>'}
-        `;
+        const fullMessage = `${code}: ${message}`;
 
-        // Add to page
-        document.body.appendChild(errorDiv);
+        // Use the notification service callback if available
+        if (this.onShowError) {
+            const retryCallback = recoverable && this.lastSpawnRequest ? () => {
+                const { role, workspace } = this.lastSpawnRequest!;
+                this.spawnAgent(role, workspace);
+            } : undefined;
 
-        // Auto-dismiss after 10 seconds
-        setTimeout(() => {
-            errorDiv.classList.add('error-fade-out');
-            setTimeout(() => errorDiv.remove(), 300);
-        }, 10000);
+            this.onShowError(fullMessage, recoverable, retryCallback);
+        } else {
+            // Fallback to old implementation if callback not set (XSS-safe: no innerHTML)
+            const errorDiv = document.createElement('div');
+            errorDiv.className = 'error-notification';
 
-        // Close button
-        errorDiv.querySelector('.error-close').addEventListener('click', () => {
-            errorDiv.classList.add('error-fade-out');
-            setTimeout(() => errorDiv.remove(), 300);
-        });
+            const header = document.createElement('div');
+            header.className = 'error-header';
+
+            const iconSpan = document.createElement('span');
+            iconSpan.className = 'error-icon';
+            iconSpan.textContent = '⚠️';
+
+            const codeSpan = document.createElement('span');
+            codeSpan.className = 'error-code';
+            codeSpan.textContent = code;
+
+            const closeBtn = document.createElement('button');
+            closeBtn.className = 'error-close';
+            closeBtn.textContent = '×';
+
+            header.append(iconSpan, codeSpan, closeBtn);
+
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'error-message';
+            messageDiv.textContent = message;
+
+            const hintDiv = document.createElement('div');
+            hintDiv.className = recoverable ? 'error-hint' : 'error-hint error-fatal';
+            hintDiv.textContent = recoverable
+                ? 'You can retry this operation'
+                : 'This error is not recoverable';
+
+            errorDiv.append(header, messageDiv, hintDiv);
+
+            document.body.appendChild(errorDiv);
+
+            setTimeout(() => {
+                errorDiv.classList.add('error-fade-out');
+                setTimeout(() => errorDiv.remove(), 300);
+            }, 10000);
+
+            closeBtn.addEventListener('click', () => {
+                errorDiv.classList.add('error-fade-out');
+                setTimeout(() => errorDiv.remove(), 300);
+            });
+        }
     }
 
     /**
@@ -489,6 +533,9 @@ export class RelayConnection {
             this.logger.error('Cannot spawn agent: no session');
             return false;
         }
+
+        // Track last spawn request for retry functionality
+        this.lastSpawnRequest = { role, workspace };
 
         const message = {
             type: 'agent:spawn',
@@ -939,6 +986,7 @@ export class RelayConnection {
         this.currentAgentRole = null;
         this.currentChatRole = null;
         this.pendingSpawnRole = null;
+        this.lastSpawnRequest = null;
 
         this.closeChat();
         this.renderAgentCards();

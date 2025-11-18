@@ -58,20 +58,13 @@ class ProtocolInspector {
     filterMessages() {
         const messageElements = this.messageList.querySelectorAll('.message-entry');
 
-        messageElements.forEach((el) => {
+        messageElements.forEach((el, index) => {
             if (!this.searchQuery) {
                 el.style.display = '';
                 return;
             }
 
-            const timestampStr = el.getAttribute('data-timestamp');
-            if (!timestampStr) {
-                el.style.display = '';
-                return;
-            }
-
-            const timestamp = Number(timestampStr);
-            const message = this.messages.find(msg => msg.timestamp === timestamp);
+            const message = this.messages[index];
             if (!message) {
                 el.style.display = '';
                 return;
@@ -145,12 +138,11 @@ class ProtocolInspector {
                 this.processProtocolMessage(msg.data);
                 break;
 
-            case 'ws:close': {
+            case 'ws:close':
                 this.updateState('disconnected');
                 const reason = msg.reason || 'No reason provided';
                 this.appendMessage('Connection closed: ' + msg.code + ' (' + reason + ')', 'system', msg.timestamp);
                 break;
-            }
 
             case 'ws:error':
                 this.updateState('error');
@@ -170,7 +162,6 @@ class ProtocolInspector {
 
         const entry = document.createElement('div');
         entry.className = 'message-entry message-' + type;
-        entry.setAttribute('data-timestamp', timestamp);
 
         const time = new Date(timestamp).toLocaleTimeString();
         let direction = '•';

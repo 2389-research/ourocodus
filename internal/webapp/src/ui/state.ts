@@ -4,6 +4,9 @@
 
 import { Logger } from '../logger';
 import { RelayConnection } from '../connection';
+import { ThemeService } from '../services/theme-service';
+import { LoadingService } from '../services/loading-service';
+import { NotificationService } from '../services/notification-service';
 
 /**
  * Modal Manager - Handles modal display and interaction
@@ -104,8 +107,13 @@ class ModalManager {
  * Application initialization
  */
 export class App {
+    private static readonly AGENT_SPAWN_SECTION_ID = 'agentSpawnSection';
+
     private logger: Logger;
     connection: RelayConnection;
+    private theme: ThemeService;
+    private loading: LoadingService;
+    private notifications: NotificationService;
     private connectionCheckInterval: ReturnType<typeof setInterval> | null;
     private connectionCheckTimeout: ReturnType<typeof setTimeout> | null;
     private isConnecting: boolean;
@@ -130,6 +138,54 @@ export class App {
 
     init() {
         this.logger.info('Initializing Ourocodus PWA');
+
+        // Initialize services
+        this.theme = new ThemeService();
+        this.loading = new LoadingService();
+        this.notifications = new NotificationService();
+
+        // Set up connection callbacks for loading and error states
+        this.connection.onAgentReady = () => {
+            try {
+                this.loading.hide();
+            } catch (error) {
+                this.logger.error('Error in onAgentReady callback:', error);
+            }
+        };
+        this.connection.onError = () => {
+            try {
+                this.loading.hide();
+            } catch (error) {
+                this.logger.error('Error in onError callback:', error);
+            }
+        };
+        this.connection.onShowError = (message: string, recoverable: boolean, retryCallback?: () => void) => {
+            this.notifications.showError(message, {
+                recoverable,
+                retryCallback: retryCallback ? async () => {
+                    try {
+                        // Show loading when retrying
+                        const spawnSection = document.getElementById(App.AGENT_SPAWN_SECTION_ID);
+                        if (spawnSection) {
+                            this.loading.show(spawnSection, 'Retrying...');
+                        }
+                        await retryCallback();
+                    } catch (err) {
+                        this.logger.error('Error during retryCallback:', err);
+                        this.loading.hide();
+                    }
+                } : undefined
+            });
+        };
+
+        // Wire theme toggle button
+        const themeToggleBtn = document.getElementById('themeToggle');
+        if (themeToggleBtn) {
+            themeToggleBtn.addEventListener('click', () => {
+                this.logger.debug('Theme toggle clicked');
+                this.theme.toggle();
+            });
+        }
 
         // Register service worker for offline support
         this.registerServiceWorker();
@@ -344,6 +400,7 @@ export class App {
         const roleInput = document.getElementById('agentRole');
         const workspaceInput = document.getElementById('agentWorkspace');
         const btn = document.getElementById('spawnAgentBtn');
+        const spawnSection = document.getElementById(App.AGENT_SPAWN_SECTION_ID);
 
         if (!roleInput || !workspaceInput) {
             this.logger.error('Agent spawn inputs not found');
@@ -361,13 +418,20 @@ export class App {
         (btn as HTMLButtonElement).disabled = true;
         btn!.textContent = 'Spawning...';
 
+        // Show loading indicator
+        if (spawnSection) {
+            this.loading.show(spawnSection, 'Initializing workspace...');
+        }
+
         if (this.connection.spawnAgent(role, workspace)) {
             this.logger.info('Agent spawn initiated');
             // Button will be re-enabled when agent:ready is received
+            // Loading will be hidden when agent:ready or error is received
         } else {
             this.logger.error('Failed to spawn agent');
             (btn as HTMLButtonElement).disabled = false;
             btn!.innerHTML = '<span class="btn-icon">🤖</span> Spawn Agent';
+            this.loading.hide();
         }
     }
 

@@ -145,12 +145,11 @@ class ProtocolInspector {
                 this.processProtocolMessage(msg.data);
                 break;
 
-            case 'ws:close': {
+            case 'ws:close':
                 this.updateState('disconnected');
                 const reason = msg.reason || 'No reason provided';
                 this.appendMessage('Connection closed: ' + msg.code + ' (' + reason + ')', 'system', msg.timestamp);
                 break;
-            }
 
             case 'ws:error':
                 this.updateState('error');

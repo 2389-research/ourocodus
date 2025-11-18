@@ -911,6 +911,12 @@ body {
     max-width: 80%;
 }
 
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
 /* Notifications */
 .notification-container {
     position: fixed;
