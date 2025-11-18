@@ -32,6 +32,7 @@ export class NotificationService {
      * Show error notification with optional retry
      */
     public showError(message: string, options?: NotificationOptions): void {
+        this.ensureContainer();
         const id = `notification-${this.notificationId++}`;
 
         const notification = document.createElement('div');

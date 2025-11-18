@@ -144,10 +144,18 @@ export class App {
 
         // Set up connection callbacks for loading and error states
         this.connection.onAgentReady = () => {
-            this.loading.hide();
+            try {
+                this.loading.hide();
+            } catch (error) {
+                this.logger.error('Error in onAgentReady callback:', error);
+            }
         };
         this.connection.onError = () => {
-            this.loading.hide();
+            try {
+                this.loading.hide();
+            } catch (error) {
+                this.logger.error('Error in onError callback:', error);
+            }
         };
         this.connection.onShowError = (message: string, recoverable: boolean, retryCallback?: () => void) => {
             this.notifications.showError(message, {

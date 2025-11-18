@@ -14,18 +14,19 @@
         <div class="right-panel">
             <div class="message-stream">
                 <h2>Message Stream</h2>
-                <div class="inspector-controls">
+                <div class="inspector-controls" role="toolbar" aria-label="Protocol inspector controls">
                     <input
                         type="text"
                         id="inspectorSearch"
                         class="inspector-search"
                         placeholder="Search messages..."
+                        aria-label="Search protocol messages"
                     >
                     <div class="inspector-buttons">
-                        <button id="inspectorExport" class="btn btn-small">
+                        <button id="inspectorExport" class="btn btn-small" aria-label="Export messages as JSON">
                             Export JSON
                         </button>
-                        <button id="inspectorClear" class="btn btn-small btn-danger">
+                        <button id="inspectorClear" class="btn btn-small btn-danger" aria-label="Clear all messages">
                             Clear
                         </button>
                     </div>
