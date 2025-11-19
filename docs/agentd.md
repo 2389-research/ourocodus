@@ -47,23 +47,41 @@ Spawns a new agent in an isolated environment.
 
 ```bash
 # Spawn with auto-generated ID
-agentd spawn
+agentd spawn --api-key sk-...
 
 # Spawn with custom ID
+agentd spawn alice --api-key sk-...
+
+# Spawn using environment variable for API key
+export ANTHROPIC_API_KEY=sk-...
 agentd spawn alice
 
 # Spawn with custom Docker image
-agentd spawn bob --image ourocodus/agent:dev
+agentd spawn bob --api-key sk-... --image ourocodus/agent:dev
 
 # Spawn with environment variables
-agentd spawn charlie --env "DEBUG=1" --env "LOG_LEVEL=trace"
+agentd spawn charlie --api-key sk-... --env "DEBUG=1" --env "LOG_LEVEL=trace"
 ```
+
+**Flags:**
+- `--workspace <path>` - Custom worktree path (default: .agentd/worktrees/<id>)
+- `--image <name>` - Docker image (default: ourocodus/agent:latest)
+- `--env KEY=VALUE` - Environment variables (repeatable)
+- `--api-key <key>` - Anthropic API key (or set ANTHROPIC_API_KEY env var)
+
+**API Key Requirement:**
+The spawn command requires an Anthropic API key for agent communication. Provide it via:
+1. `--api-key` flag: `agentd spawn alice --api-key sk-...`
+2. `ANTHROPIC_API_KEY` environment variable: `export ANTHROPIC_API_KEY=sk-...`
+
+The API key is written to `.creds/.env` in the agent's workspace with 0600 permissions and mounted read-only at `/root/.creds/` in the container. This ensures credentials are never visible in `docker inspect` or container environment variables.
 
 **What happens:**
 1. Creates a new git worktree at `.agentd/worktrees/agent-<id>`
 2. Creates a new branch `agent-<id>-<timestamp>`
-3. Starts a Docker container with the worktree mounted at `/workspace`
-4. Mounts credentials from `.agentd/credentials/<id>` if present
+3. Writes API key to `.creds/.env` with secure permissions (0700 directory, 0600 file)
+4. Starts a Docker container with the worktree mounted at `/workspace`
+5. Mounts `.creds` directory read-only at `/root/.creds` in the container
 
 **Output:**
 ```
@@ -71,7 +89,7 @@ agentd spawn charlie --env "DEBUG=1" --env "LOG_LEVEL=trace"
 
 🌳 Worktree: /path/to/.agentd/worktrees/agent-alice (branch: agent-alice-20251119-120000)
 📦 Container: abc123def456 (running)
-🔑 Credentials: (none)
+🔑 Credentials: /root/.creds (read-only)
 
 ✓ Agent alice ready
 ```
@@ -183,29 +201,55 @@ agentd attach alice
 - Running multiple commands interactively
 - Troubleshooting issues
 
-### 🔄 repl - ACP REPL (Coming Soon)
+### 🔄 repl - Interactive REPL with Agent
 
-Interactive REPL for communicating with agents via the Agent Communication Protocol (ACP).
+Connect to a running agent and interact via the Agent Communication Protocol (ACP).
 
 ```bash
-# Requires relay server to be running
-agentd repl alice
+agentd repl <agent-id>
 ```
 
-**Current Status:** Not yet implemented. ACP communication requires the relay server.
+Opens an interactive REPL session with the agent. The agent must be running (spawned). This command attaches directly to the agent's stdin/stdout where the ACP process runs as PID 1.
 
-**To interact with agents via ACP:**
-1. Start the relay server: `make relay`
-2. Open the PWA: `http://localhost:8080`
-3. Connect to your agent from the UI
+**Usage:**
 
-**Why the relay?**
-- Agents run ACP servers inside containers
-- The relay provides WebSocket endpoints for clients
-- Handles agent session management and message routing
-- Enables multiple clients to connect to the same agent
+```bash
+# Start REPL with agent
+$ agentd repl alice
+✓ Connected to agent 'alice'
+  Press Ctrl+D to exit
 
-**Alternative:** Use `agentd attach <agent-id>` for shell access
+> Hello agent!
+Echo: Hello agent!
+
+> help
+Echo: help
+
+> ^D
+✓ Disconnected from agent 'alice'
+```
+
+**Controls:**
+- `Ctrl+D` - Exit REPL cleanly
+- `Ctrl+C` - Interrupt current operation and exit
+
+**Notes:**
+- Agent must be in "running" state (verify with `agentd list`)
+- Uses direct docker attach to the ACP process (PID 1)
+- All input is sent to the agent's stdin
+- All output from the agent is displayed in real-time
+- For non-interactive commands, use `agentd send` instead
+- For full shell access, use `agentd attach` instead
+
+**Requirements:**
+- Running agent spawned with `agentd spawn`
+- Agent container must be accessible via Docker API
+- Terminal must support raw mode for proper I/O handling
+
+**Alternative interaction methods:**
+- Use `agentd send <agent-id> "<command>"` for one-off commands
+- Use `agentd attach <agent-id>` for interactive shell access
+- Use the relay server + PWA for WebSocket-based communication
 
 ### 🩺 doctor - Validate Environment
 
