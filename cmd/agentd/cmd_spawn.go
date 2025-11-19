@@ -57,6 +57,15 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 	// Get or generate agent ID
 	agentID := generateAgentID(args)
 
+	// Check if agent already exists in Docker
+	existingContainerID, err := findAgentContainerID(ctx, agentID)
+	if err != nil {
+		return fmt.Errorf("failed to check for existing agent: %w", err)
+	}
+	if existingContainerID != "" {
+		return fmt.Errorf("agent '%s' already exists\nUse 'agentd list' to see active agents or 'agentd stop %s' to remove it", agentID, agentID)
+	}
+
 	_, _ = color.New(color.FgCyan, color.Bold).Printf("✨ Creating isolated agent '%s'...\n\n", agentID)
 
 	// Create launcher (wiring pkg/ components)
