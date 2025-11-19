@@ -10,7 +10,7 @@ import (
 
 var (
 	// Banner colors
-	bannerColor = color.New(color.FgCyan, color.Bold)
+	bannerColor  = color.New(color.FgCyan, color.Bold)
 	taglineColor = color.New(color.FgHiBlack)
 )
 

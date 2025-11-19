@@ -3,7 +3,12 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
+	"os"
+	"os/signal"
 
+	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/client"
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 )
@@ -58,10 +63,70 @@ func runREPL(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("agent '%s' is not running (status: %s)", agentID, agent.Status)
 	}
 
-	// TODO: Implement docker attach
-	_, _ = color.New(color.FgGreen).Printf("✓ Found agent '%s' (container: %s)\n", agentID, formatContainerID(agent.ContainerID))
-	fmt.Println("REPL implementation coming in next task...")
+	// Connect to Docker
+	dockerClient, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	if err != nil {
+		return fmt.Errorf("failed to create Docker client: %w", err)
+	}
+	defer func() { _ = dockerClient.Close() }()
 
+	// Print connection message
+	_, _ = color.New(color.FgGreen).Printf("✓ Connected to agent '%s'\n", agentID)
+	_, _ = color.New(color.FgHiBlack).Println("  Press Ctrl+D to exit")
+
+	// Attach to container
+	attachResp, err := dockerClient.ContainerAttach(ctx, agent.ContainerID, container.AttachOptions{
+		Stream: true,
+		Stdin:  true,
+		Stdout: true,
+		Stderr: true,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to attach to container: %w", err)
+	}
+	defer attachResp.Close()
+
+	// Set up terminal
+	oldState, err := setRawTerminal()
+	if err != nil {
+		_, _ = color.New(color.FgYellow).Printf("Warning: Failed to set raw mode: %v\n", err)
+		// Continue without raw mode
+	}
+	if oldState != nil {
+		defer func() { _ = restoreTerminal(oldState) }()
+	}
+
+	// Handle Ctrl+C gracefully
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt)
+	go func() {
+		<-sigChan
+		fmt.Println()
+		_ = restoreTerminal(oldState)
+		os.Exit(0)
+	}()
+
+	// Bidirectional copy
+	errChan := make(chan error, 2)
+
+	// Copy container output to stdout
+	go func() {
+		_, err := io.Copy(os.Stdout, attachResp.Reader)
+		errChan <- err
+	}()
+
+	// Copy stdin to container
+	go func() {
+		_, err := io.Copy(attachResp.Conn, os.Stdin)
+		errChan <- err
+	}()
+
+	// Wait for either copy to finish
+	if err := <-errChan; err != nil && err != io.EOF {
+		return fmt.Errorf("REPL error: %w", err)
+	}
+
+	_, _ = color.New(color.FgGreen).Printf("\n✓ Disconnected from agent '%s'\n", agentID)
 	return nil
 }
 
