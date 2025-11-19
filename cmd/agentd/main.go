@@ -31,5 +31,5 @@ func init() {
 	rootCmd.AddCommand(spawnCmd)
 	rootCmd.AddCommand(listCmd)
 	rootCmd.AddCommand(stopCmd)
-	// Future commands will be added here
+	rootCmd.AddCommand(logsCmd)
 }

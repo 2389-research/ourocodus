@@ -20,13 +20,17 @@ var listFormat string
 var listCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all active agents",
-	Long:  "Shows all active agents with their status, workspace, and container information",
-	RunE:  runList,
+	Long:  "Shows all active agents with their status, workspace, and container information.",
+	Example: `  # List all running agents
+  agentd list
+
+  # List in JSON format
+  agentd list --format json`,
+	RunE: runList,
 }
 
 func init() {
 	listCmd.Flags().StringVar(&listFormat, "format", "table", "Output format (table|json)")
-	rootCmd.AddCommand(listCmd)
 }
 
 func runList(cmd *cobra.Command, args []string) error {

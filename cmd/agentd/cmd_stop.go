@@ -16,17 +16,25 @@ var stopCmd = &cobra.Command{
 	Use:   "stop <agent-id> [agent-id...]",
 	Short: "Stop agent(s) and cleanup resources",
 	Long: `Stop gracefully shuts down agents and cleans up all resources:
-  - Stops Docker container
+  - Stops Docker container (30s graceful timeout)
   - Removes git worktree and branch
   - Cleans up credential files
 
 This command is idempotent - safe to call multiple times.`,
+	Example: `  # Stop single agent
+  agentd stop alice
+
+  # Stop multiple agents
+  agentd stop alice bob charlie
+
+  # Idempotent - safe to retry
+  agentd stop alice  # Returns success even if already stopped`,
 	Args: cobra.MinimumNArgs(1),
 	RunE: runStop,
 }
 
 func init() {
-	rootCmd.AddCommand(stopCmd)
+	// Command registered in main.go
 }
 
 func runStop(cmd *cobra.Command, args []string) error {

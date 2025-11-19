@@ -19,8 +19,23 @@ import (
 var doctorCmd = &cobra.Command{
 	Use:   "doctor",
 	Short: "Validate environment for running agents",
-	Long:  "Checks Docker, git, disk space, and performs spawn smoke test",
-	RunE:  runDoctor,
+	Long: `Validates your environment is ready to run agents:
+  ✓ Docker daemon connectivity and version
+  ✓ File sharing permissions (macOS)
+  ✓ Agent image availability
+  ✓ Git worktree support
+  ✓ Disk space requirements
+  ✓ Container spawn smoke test
+
+Run this before spawning agents to catch configuration issues early.`,
+	Example: `  # Validate environment
+  agentd doctor
+
+  # Doctor checks are helpful when:
+  # - First time using agentd
+  # - After Docker Desktop updates
+  # - Debugging spawn failures`,
+	RunE: runDoctor,
 }
 
 type Check struct {

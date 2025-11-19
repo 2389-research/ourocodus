@@ -22,12 +22,23 @@ var (
 var spawnCmd = &cobra.Command{
 	Use:   "spawn [agent-id]",
 	Short: "Spawn an isolated agent",
-	Long: `Spawn creates an isolated agent environment with:
-  - Git worktree for workspace isolation
-  - Docker container for process isolation
-  - Credential volumes for access isolation
+	Long: `Spawn creates an isolated agent environment with three-layer isolation:
+  🌳 Git worktree - Isolated workspace on a dedicated branch
+  📦 Docker container - Isolated process with resource limits
+  🔑 Credentials - Mounted read-only for security
 
 If no agent-id is provided, one will be generated automatically.`,
+	Example: `  # Spawn agent with auto-generated ID
+  agentd spawn
+
+  # Spawn agent with custom ID
+  agentd spawn alice
+
+  # Spawn with custom image
+  agentd spawn bob --image ourocodus/agent:dev
+
+  # Spawn with environment variables
+  agentd spawn charlie --env "DEBUG=1" --env "LOG_LEVEL=trace"`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runSpawn,
 }
@@ -36,8 +47,6 @@ func init() {
 	spawnCmd.Flags().StringVar(&spawnWorkspace, "workspace", "", "Custom worktree path (default: .agentd/worktrees/<id>)")
 	spawnCmd.Flags().StringVar(&spawnImage, "image", "ourocodus/agent:latest", "Docker image")
 	spawnCmd.Flags().StringArrayVar(&spawnEnv, "env", nil, "Environment variables (KEY=VALUE)")
-
-	rootCmd.AddCommand(spawnCmd)
 }
 
 func runSpawn(cmd *cobra.Command, args []string) error {
