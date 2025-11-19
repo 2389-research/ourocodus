@@ -9,6 +9,7 @@ import (
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
+	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 )
@@ -98,9 +99,9 @@ func runREPL(cmd *cobra.Command, args []string) error {
 	// Bidirectional copy
 	errChan := make(chan error, 2)
 
-	// Copy container output to stdout
+	// Copy container output to stdout (demultiplex Docker stream)
 	go func() {
-		_, err := io.Copy(os.Stdout, attachResp.Reader)
+		_, err := stdcopy.StdCopy(os.Stdout, os.Stderr, attachResp.Reader)
 		errChan <- err
 	}()
 
