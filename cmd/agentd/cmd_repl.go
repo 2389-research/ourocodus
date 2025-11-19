@@ -99,12 +99,7 @@ func runREPL(cmd *cobra.Command, args []string) error {
 	// Handle Ctrl+C gracefully
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt)
-	go func() {
-		<-sigChan
-		fmt.Println()
-		_ = restoreTerminal(oldState)
-		os.Exit(0)
-	}()
+	defer signal.Stop(sigChan)
 
 	// Bidirectional copy
 	errChan := make(chan error, 2)
@@ -121,13 +116,21 @@ func runREPL(cmd *cobra.Command, args []string) error {
 		errChan <- err
 	}()
 
-	// Wait for either copy to finish
-	if err := <-errChan; err != nil && err != io.EOF {
-		return fmt.Errorf("REPL error: %w", err)
+	// Wait for completion or signal
+	select {
+	case <-sigChan:
+		// User interrupted - clean exit
+		fmt.Println()
+		_, _ = color.New(color.FgGreen).Printf("✓ Disconnected from agent '%s'\n", agentID)
+		return nil
+	case err := <-errChan:
+		// Connection closed or error
+		if err != nil && err != io.EOF {
+			return fmt.Errorf("REPL error: %w", err)
+		}
+		_, _ = color.New(color.FgGreen).Printf("\n✓ Disconnected from agent '%s'\n", agentID)
+		return nil
 	}
-
-	_, _ = color.New(color.FgGreen).Printf("\n✓ Disconnected from agent '%s'\n", agentID)
-	return nil
 }
 
 // findAgentByID searches for an agent by ID
