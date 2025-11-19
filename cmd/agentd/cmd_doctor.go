@@ -18,7 +18,7 @@ import (
 
 var doctorCmd = &cobra.Command{
 	Use:   "doctor",
-	Short: "Validate environment for running agents",
+	Short: "🩺 Validate environment for running agents",
 	Long: `Validates your environment is ready to run agents:
   ✓ Docker daemon connectivity and version
   ✓ File sharing permissions (macOS)
@@ -82,7 +82,10 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 
 	fmt.Println()
 	if allPassed {
-		successColor.Println("Environment ready!")
+		fmt.Println()
+		color.New(color.FgGreen, color.Bold).Print("✨ Environment ready!")
+		color.New(color.FgHiBlack).Println(" All systems go for spawning agents.")
+		fmt.Println()
 		return nil
 	}
 

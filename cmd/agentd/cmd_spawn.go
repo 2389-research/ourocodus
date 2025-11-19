@@ -21,7 +21,7 @@ var (
 
 var spawnCmd = &cobra.Command{
 	Use:   "spawn [agent-id]",
-	Short: "Spawn an isolated agent",
+	Short: "✨ Spawn an isolated agent",
 	Long: `Spawn creates an isolated agent environment with three-layer isolation:
   🌳 Git worktree - Isolated workspace on a dedicated branch
   📦 Docker container - Isolated process with resource limits
@@ -55,7 +55,7 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 	// Get or generate agent ID
 	agentID := generateAgentID(args)
 
-	infoColor.Printf("Creating isolated agent '%s'...\n\n", agentID)
+	color.New(color.FgCyan, color.Bold).Printf("✨ Creating isolated agent '%s'...\n\n", agentID)
 
 	// Create launcher (wiring pkg/ components)
 	launcher, err := createLauncher()

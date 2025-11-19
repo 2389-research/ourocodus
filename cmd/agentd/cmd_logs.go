@@ -20,7 +20,7 @@ var (
 
 var logsCmd = &cobra.Command{
 	Use:   "logs <agent-id>",
-	Short: "Stream agent container logs",
+	Short: "📜 Stream agent container logs",
 	Long: `Stream logs from an agent's container in real-time.
 
 By default, follows the log output. Use Ctrl-C to stop streaming.`,

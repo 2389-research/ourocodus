@@ -10,12 +10,13 @@ import (
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/client"
+	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 )
 
 var stopCmd = &cobra.Command{
 	Use:   "stop <agent-id> [agent-id...]",
-	Short: "Stop agent(s) and cleanup resources",
+	Short: "🛑 Stop agent(s) and cleanup resources",
 	Long: `Stop gracefully shuts down agents and cleans up all resources:
   - Stops Docker container (30s graceful timeout)
   - Removes git worktree and branch
@@ -61,7 +62,7 @@ func runStop(cmd *cobra.Command, args []string) error {
 }
 
 func stopAgent(ctx context.Context, _ interface{}, agentID string) error {
-	infoColor.Printf("Stopping agent '%s'...\n", agentID)
+	color.New(color.FgYellow, color.Bold).Printf("🛑 Stopping agent '%s'...\n", agentID)
 
 	// First, try to find the container in Docker by agent-id label
 	containerID, workspacePath, err := findAgentContainer(ctx, agentID)

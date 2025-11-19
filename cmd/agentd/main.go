@@ -4,18 +4,24 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/fatih/color"
 	"github.com/spf13/cobra"
+)
+
+var (
+	// Banner colors
+	bannerColor = color.New(color.FgCyan, color.Bold)
+	taglineColor = color.New(color.FgHiBlack)
 )
 
 var rootCmd = &cobra.Command{
 	Use:   "agentd",
-	Short: "agentd - Multi-agent isolation orchestrator",
-	Long: `agentd demonstrates Ourocodus's three-layer isolation architecture:
-  - Git worktrees isolate code
-  - Docker containers isolate processes
-  - Credential volumes isolate access
-
-Multiple agents work concurrently without conflicts.`,
+	Short: "✨ agentd - Multi-agent isolation orchestrator",
+	Long: bannerColor.Sprint("agentd") + " demonstrates Ourocodus's three-layer isolation architecture:\n\n" +
+		"  🌳 Git worktrees isolate code\n" +
+		"  📦 Docker containers isolate processes\n" +
+		"  🔑 Credential volumes isolate access\n\n" +
+		taglineColor.Sprint("Multiple agents work concurrently without conflicts."),
 	Version: Version,
 }
 

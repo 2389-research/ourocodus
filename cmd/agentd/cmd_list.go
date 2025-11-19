@@ -19,7 +19,7 @@ var listFormat string
 
 var listCmd = &cobra.Command{
 	Use:   "list",
-	Short: "List all active agents",
+	Short: "📋 List all active agents",
 	Long:  "Shows all active agents with their status, workspace, and container information.",
 	Example: `  # List all running agents
   agentd list
@@ -43,7 +43,7 @@ func runList(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(agents) == 0 {
-		fmt.Println("No agents running.")
+		color.New(color.FgHiBlack).Println("✨ No agents running.")
 		return nil
 	}
 
@@ -116,13 +116,17 @@ func listAgentsFromDocker(ctx context.Context) ([]agentInfo, error) {
 func printListTableFromAgentInfo(agents []agentInfo) error {
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 
-	// Print header
+	// Print header with color
+	headerColor := color.New(color.FgCyan, color.Bold)
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "AGENT\tSTATUS\tWORKSPACE\tCONTAINER\tCREATED")
+	headerColor.Fprintln(w, "AGENT\tSTATUS\tWORKSPACE\tCONTAINER\tCREATED")
 
 	for _, agent := range agents {
+		// Color the agent ID
+		agentName := color.New(color.FgWhite, color.Bold).Sprint(agent.AgentID)
+
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
-			agent.AgentID,
+			agentName,
 			formatStateString(agent.Status),
 			formatWorkspace(agent.Workspace),
 			formatContainerID(agent.ContainerID),
