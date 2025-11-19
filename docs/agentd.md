@@ -129,6 +129,60 @@ agentd logs alice --tail 50 --follow=false
 
 Press `Ctrl-C` to stop streaming.
 
+### 💬 send - Send Command to Agent
+
+Send a shell command to a running agent and get the response.
+
+```bash
+# Run a simple command
+agentd send alice "ls -la /workspace"
+
+# Check git status
+agentd send bob "git status"
+
+# Run a script
+agentd send charlie "./scripts/build.sh"
+
+# Multiple commands
+agentd send alice "pwd && whoami"
+
+# With custom timeout (default: 30s)
+agentd send alice "sleep 10" --timeout 15
+
+# With custom shell (default: /bin/bash)
+agentd send alice "echo $SHELL" --shell /bin/zsh
+```
+
+**Use cases:**
+- Quick checks without SSHing into containers
+- Running scripts or one-off commands
+- Triggering agent actions
+- Debugging agent environment
+
+### 📎 attach - Interactive Agent Shell
+
+Attach to a running agent's container and get an interactive bash shell.
+
+```bash
+# Attach to agent alice
+agentd attach alice
+```
+
+**Once attached:**
+- Explore workspace: `ls /workspace`
+- Check processes: `ps aux`
+- View logs: `tail -f /var/log/*.log`
+- Run git commands: `git status`
+- Debug environment: `env | grep AGENT`
+
+**Detach:** Press `Ctrl-D` or type `exit`
+
+**Use cases:**
+- Interactive debugging
+- Exploring agent environment
+- Running multiple commands interactively
+- Troubleshooting issues
+
 ### 🩺 doctor - Validate Environment
 
 Runs comprehensive environment checks before spawning agents.

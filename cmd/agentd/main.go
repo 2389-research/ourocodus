@@ -38,4 +38,6 @@ func init() {
 	rootCmd.AddCommand(listCmd)
 	rootCmd.AddCommand(stopCmd)
 	rootCmd.AddCommand(logsCmd)
+	rootCmd.AddCommand(attachCmd)
+	rootCmd.AddCommand(sendCmd)
 }
