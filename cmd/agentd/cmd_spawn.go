@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/2389-research/ourocodus/pkg/agent/container"
@@ -69,6 +70,17 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 	config, err := buildSpawnConfig(agentID)
 	if err != nil {
 		return fmt.Errorf("failed to build spawn config: %w", err)
+	}
+
+	// Determine workspace path
+	workspacePath := spawnWorkspace
+	if workspacePath == "" {
+		workspacePath = fmt.Sprintf(".agentd/worktrees/%s", agentID)
+	}
+
+	// Write credential file before spawning
+	if err := writeCredentialFile(workspacePath, config.APIKey); err != nil {
+		return fmt.Errorf("failed to write credentials: %w", err)
 	}
 
 	// Spawn agent
@@ -148,6 +160,24 @@ func parseEnvFlags(envFlags []string) ([]string, error) {
 		}
 	}
 	return envFlags, nil
+}
+
+// writeCredentialFile creates .creds/.env file with API key
+func writeCredentialFile(workspace, apiKey string) error {
+	// Create .creds directory with 0700 permissions
+	credsDir := filepath.Join(workspace, ".creds")
+	if err := os.MkdirAll(credsDir, 0o700); err != nil {
+		return fmt.Errorf("failed to create .creds directory: %w", err)
+	}
+
+	// Write .env file with 0600 permissions
+	envFile := filepath.Join(credsDir, ".env")
+	content := fmt.Sprintf("ANTHROPIC_API_KEY=%s\n", apiKey)
+	if err := os.WriteFile(envFile, []byte(content), 0o600); err != nil {
+		return fmt.Errorf("failed to write .env file: %w", err)
+	}
+
+	return nil
 }
 
 // hasCredentialFiles checks if a credentials directory contains any files
