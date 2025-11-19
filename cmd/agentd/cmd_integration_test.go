@@ -362,6 +362,10 @@ func TestCLI_InvalidCommands(t *testing.T) {
 	}{
 		{"logs without agent ID", []string{"logs"}, true},
 		{"stop without agent ID", []string{"stop"}, true},
+		{"send without agent ID", []string{"send"}, true},
+		{"send without command", []string{"send", "alice"}, true},
+		{"attach without agent ID", []string{"attach"}, true},
+		{"repl without agent ID", []string{"repl"}, true},
 		// Note: list --format invalid doesn't fail, it just defaults to table
 	}
 
@@ -376,5 +380,89 @@ func TestCLI_InvalidCommands(t *testing.T) {
 				t.Errorf("Expected command to succeed but it failed: %v", err)
 			}
 		})
+	}
+}
+
+func TestCLI_SendCommand(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping CLI integration test in short mode")
+	}
+
+	if os.Getenv("DOCKER_HOST") == "" {
+		t.Skip("DOCKER_HOST not set, skipping integration test")
+	}
+
+	ctx := context.Background()
+	agentID := "test-cli-send"
+
+	// Cleanup
+	defer stopAgent(ctx, nil, agentID)
+
+	// Build binary
+	buildCmd := exec.Command("go", "build", "-o", "agentd-test", ".")
+	if err := buildCmd.Run(); err != nil {
+		t.Fatalf("Failed to build binary: %v", err)
+	}
+	defer os.Remove("agentd-test")
+
+	// Spawn agent
+	launcher, err := createLauncher()
+	if err != nil {
+		t.Fatalf("Failed to create launcher: %v", err)
+	}
+
+	config, _ := buildSpawnConfig(agentID)
+	_, err = launcher.Spawn(ctx, config)
+	if err != nil {
+		t.Fatalf("Failed to spawn agent: %v", err)
+	}
+
+	time.Sleep(2 * time.Second)
+
+	// Test send command
+	cmd := exec.Command("./agentd-test", "send", agentID, "echo 'test output'")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Logf("Send output:\n%s", output)
+		t.Fatalf("Send command failed: %v", err)
+	}
+
+	outputStr := string(output)
+	if !strings.Contains(outputStr, "test output") {
+		t.Errorf("Send output missing expected text: %s", outputStr)
+	}
+	if !strings.Contains(outputStr, "Command completed successfully") {
+		t.Errorf("Send output missing success message: %s", outputStr)
+	}
+}
+
+func TestCLI_ReplCommand(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping CLI integration test in short mode")
+	}
+
+	// Build binary
+	buildCmd := exec.Command("go", "build", "-o", "agentd-test", ".")
+	if err := buildCmd.Run(); err != nil {
+		t.Fatalf("Failed to build binary: %v", err)
+	}
+	defer os.Remove("agentd-test")
+
+	// Test repl command (should fail with helpful message)
+	cmd := exec.Command("./agentd-test", "repl", "alice")
+	output, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Error("repl command should fail (not yet implemented)")
+	}
+
+	outputStr := string(output)
+	if !strings.Contains(outputStr, "relay") {
+		t.Errorf("repl output should mention relay: %s", outputStr)
+	}
+	if !strings.Contains(outputStr, "Not Yet Implemented") {
+		t.Errorf("repl output should indicate not implemented: %s", outputStr)
+	}
+	if !strings.Contains(outputStr, "http://localhost:8080") {
+		t.Errorf("repl output should mention PWA URL: %s", outputStr)
 	}
 }
