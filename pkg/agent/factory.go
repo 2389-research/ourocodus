@@ -133,11 +133,9 @@ func (a *containerLauncherAdapter) Spawn(ctx context.Context, config *SpawnConfi
 	// Build environment from SpawnConfig
 	env := convertMapToSlice(config.Environment)
 
-	// Add ANTHROPIC_API_KEY from LauncherConfig if provided
-	// This is critical for containerized ACP mode where the container runs ACP as main process
-	if a.launcherConfig.AnthropicKey != "" {
-		env = append(env, fmt.Sprintf("ANTHROPIC_API_KEY=%s", a.launcherConfig.AnthropicKey))
-	}
+	// NOTE: ANTHROPIC_API_KEY is no longer injected via container environment
+	// The API key is written to .creds/.env and sourced by ACP at startup
+	// This prevents the key from being visible in `docker inspect`
 
 	spawnConfig := container.SpawnConfig{
 		AgentID:     a.agentID,                   // Use the unique agentID provided in CreateLauncher
