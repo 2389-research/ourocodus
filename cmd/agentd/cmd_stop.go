@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
@@ -145,8 +146,82 @@ func stopContainer(ctx context.Context, containerID string) error {
 	})
 }
 
+// removeWorktree removes a git worktree and its associated branch
 func removeWorktree(ctx context.Context, workspacePath string) error {
-	// Use git worktree remove command
+	branchName, _ := tryGetWorktreeBranch(ctx, workspacePath)
+
+	if err := removeWorktreeOnly(ctx, workspacePath); err != nil {
+		return err
+	}
+
+	if branchName != "" {
+		_ = tryDeleteBranch(ctx, branchName)
+	}
+
+	return nil
+}
+
+// tryGetWorktreeBranch attempts to get the branch name, logging warnings on failure
+func tryGetWorktreeBranch(ctx context.Context, workspacePath string) (string, error) {
+	branchName, err := getWorktreeBranch(ctx, workspacePath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to get worktree branch: %v\n", err)
+		return "", err
+	}
+	return branchName, nil
+}
+
+// tryDeleteBranch attempts to delete a branch, logging warnings on failure
+func tryDeleteBranch(ctx context.Context, branchName string) error {
+	if err := deleteBranch(ctx, branchName); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to delete branch '%s': %v\n", branchName, err)
+		return err
+	}
+	return nil
+}
+
+// removeWorktreeOnly removes the worktree without touching the branch
+func removeWorktreeOnly(ctx context.Context, workspacePath string) error {
 	cmd := exec.CommandContext(ctx, "git", "worktree", "remove", workspacePath, "--force")
+	return cmd.Run()
+}
+
+// getWorktreeBranch returns the branch name for a given worktree path
+func getWorktreeBranch(ctx context.Context, workspacePath string) (string, error) {
+	output, err := listWorktreesPorcelain(ctx)
+	if err != nil {
+		return "", err
+	}
+
+	return parseBranchFromWorktreeList(output, workspacePath)
+}
+
+// listWorktreesPorcelain returns the output of 'git worktree list --porcelain'
+func listWorktreesPorcelain(ctx context.Context) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", "worktree", "list", "--porcelain")
+	output, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return string(output), nil
+}
+
+// parseBranchFromWorktreeList extracts the branch name for a worktree path from porcelain output
+func parseBranchFromWorktreeList(output, workspacePath string) (string, error) {
+	currentWorktree := ""
+	for _, line := range strings.Split(output, "\n") {
+		if strings.HasPrefix(line, "worktree ") {
+			currentWorktree = strings.TrimPrefix(line, "worktree ")
+		}
+		if currentWorktree == workspacePath && strings.HasPrefix(line, "branch ") {
+			return strings.TrimPrefix(line, "branch refs/heads/"), nil
+		}
+	}
+	return "", fmt.Errorf("branch not found for worktree %s", workspacePath)
+}
+
+// deleteBranch deletes a git branch forcefully
+func deleteBranch(ctx context.Context, branchName string) error {
+	cmd := exec.CommandContext(ctx, "git", "branch", "-D", branchName)
 	return cmd.Run()
 }
