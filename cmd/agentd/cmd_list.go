@@ -96,8 +96,8 @@ func listAgentsFromDocker(ctx context.Context) ([]agentInfo, error) {
 		// Extract workspace from mounts (since it's not in labels)
 		workspace := ""
 		if len(c.Mounts) > 0 {
-			// The first mount is typically the workspace
-			workspace = c.Mounts[0].Destination
+			// The first mount is typically the workspace - use Source (host path)
+			workspace = c.Mounts[0].Source
 		}
 
 		agents = append(agents, agentInfo{
