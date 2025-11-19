@@ -1,164 +1,118 @@
 # Task Completion Checklist
 
-When you complete a coding task in Ourocodus, follow this checklist to ensure quality and consistency.
+This checklist should be followed when completing any coding task in this project.
 
-## Before Committing Changes
+## Before Starting
+- [ ] Read relevant documentation (architecture docs, session lifecycle, error handling)
+- [ ] Understand the existing code structure and patterns
+- [ ] Identify which subsystems are affected (relay, containersession, worktree, acp, nats, webapp)
+- [ ] Check for related issues on GitHub
 
-### 1. Format Code
+## During Development
+- [ ] Follow Go code style (gofumpt formatting)
+- [ ] Use structured error codes (see docs/development/ERROR_HANDLING.md)
+- [ ] Keep cyclomatic complexity under 15
+- [ ] Add tests for new functionality
+- [ ] Update existing tests if behavior changes
+- [ ] Add doc comments for exported symbols
+- [ ] Consider concurrency and race conditions
+- [ ] Validate input (especially paths and user input)
+- [ ] Check for security issues (directory traversal, injection, etc.)
+
+## Before Committing
+
+### Code Quality
+- [ ] Run `make fmt` to format code with gofumpt
+- [ ] Run `go vet ./...` for basic static analysis
+- [ ] Run `make lint` to check with golangci-lint
+- [ ] Fix all linting errors and warnings
+- [ ] Run `make check` for staticcheck analysis
+- [ ] Run `go mod tidy` to clean dependencies
+
+### Testing
+- [ ] Run `make test` to ensure all unit tests pass
+- [ ] Add new tests for new functionality
+- [ ] Update tests if behavior changed
+- [ ] Run `make test-e2e` if changing core functionality (requires ANTHROPIC_API_KEY)
+- [ ] Consider running smoke tests: `mise run smoke`
+
+### Build Verification
+- [ ] Run `make build` to ensure compilation succeeds
+- [ ] Test the binary if you modified cmd/ packages
+- [ ] Run demos if you changed core features: `mise run demo` or `mise run interactive`
+
+### Documentation
+- [ ] Update relevant documentation in docs/
+- [ ] Update README.md if adding new features or commands
+- [ ] Update CHANGELOG.md if appropriate
+- [ ] Add or update code comments for complex logic
+- [ ] Check that doc comments are accurate
+
+### Git
+- [ ] Review your changes: `git diff`
+- [ ] Stage files: `git add <files>`
+- [ ] Write clear commit message describing what and why
+- [ ] Use conventional commit format if possible (feat:, fix:, docs:, refactor:, test:)
+
+### Full Pre-commit Check
+- [ ] Run `make pre-commit` (runs: fmt, vet, lint, tidy, build, test)
+- [ ] Or run `pre-commit run --all-files` if hooks are installed
+
+## After Committing
+
+### Pull Requests
+- [ ] Push branch: `git push origin <branch-name>`
+- [ ] Create PR on GitHub with clear description
+- [ ] Link related issues in PR description
+- [ ] Check that CI passes (ci.yml and smoke.yml workflows)
+- [ ] Address any CI failures
+- [ ] Respond to code review feedback
+- [ ] Ensure all conversations are resolved
+
+### Merging
+- [ ] Ensure all tests pass
+- [ ] Ensure CI is green
+- [ ] Get approval from maintainers
+- [ ] Squash and merge (or follow project merge policy)
+- [ ] Delete feature branch after merge
+
+## Common Pitfalls to Avoid
+- [ ] Don't ignore errors (errcheck linter will catch this)
+- [ ] Don't create functions with cyclomatic complexity > 15
+- [ ] Don't skip formatting (always run `make fmt`)
+- [ ] Don't commit without running tests
+- [ ] Don't leave debug print statements in production code
+- [ ] Don't hard-code paths or configuration
+- [ ] Don't forget to handle context cancellation
+- [ ] Don't create race conditions (use sync primitives properly)
+- [ ] Don't expose internal errors to users (use structured error codes)
+- [ ] Don't commit binary files or build artifacts
+
+## Quick Command Reference
 ```bash
-make fmt
-# or
-mise run fmt
-```
-This runs `gofumpt -l -w .` to format all Go files with stricter rules than gofmt.
-
-### 2. Run Static Analysis
-```bash
-go vet ./...
-```
-Catches suspicious constructs and common mistakes.
-
-### 3. Run Linter
-```bash
-make lint
-# or
-mise run lint
-```
-This runs `golangci-lint run --timeout=5m` to check for code quality issues.
-
-**Note**: Some issues can be auto-fixed:
-```bash
-golangci-lint run --fix
-```
-
-### 4. Run Static Checker
-```bash
-make check
-# or
-mise run check
-```
-This runs `staticcheck ./...` for advanced static analysis.
-
-### 5. Clean Dependencies
-```bash
-go mod tidy
-```
-Ensures `go.mod` and `go.sum` are clean and up-to-date.
-
-### 6. Build the Project
-```bash
-make build
-# or
-mise run build
-```
-Verifies that all binaries compile successfully.
-
-### 7. Run Tests
-```bash
-make test
-# or
-mise run test
-```
-Runs the full test suite with `go test ./...`.
-
-**For integration tests** (if applicable):
-```bash
-go test -tags=integration ./pkg/agent/packnplay/... -v
-```
-
-**For end-to-end tests** (if applicable and you have ANTHROPIC_API_KEY):
-```bash
-make test-e2e
-```
-
-### 8. Run All Pre-commit Checks (Recommended)
-```bash
-make pre-commit
-# or
-mise run pre-commit
-```
-This runs all the above checks in sequence: fmt, vet, lint, tidy, build, test.
-
-## Quick Pre-commit Command
-
-Instead of running steps 1-7 individually, you can run:
-```bash
-mise run pre-commit
-```
-This is the **recommended** approach before committing.
-
-## Integration Test Cleanup
-
-If you ran integration tests and they failed or were interrupted:
-
-```bash
-# Check for orphaned containers
-docker ps -a --filter "label=managed-by=packnplay"
-
-# Clean up if needed
-docker ps -a --filter "label=managed-by=packnplay" -q | xargs docker rm -f
-
-# Remove associated worktrees (if needed)
-rm -rf ~/.local/share/packnplay/worktrees
-```
-
-## Git Workflow
-
-After all checks pass:
-
-1. **Stage changes**:
-   ```bash
-   git add .
-   ```
-
-2. **Commit with descriptive message**:
-   ```bash
-   git commit -m "feat: add feature description"
-   ```
-   Follow conventional commit format when possible.
-
-3. **Push to remote**:
-   ```bash
-   git push
-   ```
-
-## CI/CD Checks
-
-The following checks run automatically on GitHub Actions for all PRs and pushes to main:
-
-**ci.yml workflow:**
-- Build all binaries
-- Run unit tests
-- golangci-lint verification
-- gofmt formatting check
-- shellcheck on scripts
-- Binary smoke test
-
-**smoke.yml workflow:**
-- Session management smoke tests
-- WebSocket relay integration tests
-- Error handling tests
-
-Make sure your changes pass locally before pushing to avoid CI failures.
-
-## Optional: Pre-commit Hooks
-
-If you have pre-commit hooks installed:
-```bash
-pre-commit install
-```
-
-The hooks will automatically run the pre-commit checks before each commit.
-
-## Summary
-
-The simplest approach:
-```bash
-# Run all checks at once
+# Full pre-commit workflow
 make pre-commit
 
-# If all pass, commit your changes
-git add .
-git commit -m "your message"
-git push
+# Or run individually:
+make fmt                    # Format code
+go vet ./...                # Static analysis
+make lint                   # Comprehensive linting
+go mod tidy                 # Clean dependencies
+make build                  # Build binaries
+make test                   # Run tests
+
+# Optional but recommended:
+make test-e2e               # E2E tests (requires API key)
+mise run smoke              # Smoke tests
+mise run demo               # Test demo functionality
 ```
+
+## Emergency Fixes
+If you need to quickly fix a critical bug:
+1. Create hotfix branch from main
+2. Make minimal changes to fix the bug
+3. Add test that would have caught the bug
+4. Run full pre-commit checks
+5. Create PR with "hotfix:" prefix
+6. Get fast-track review
+7. Merge and tag release if needed

@@ -1,127 +1,83 @@
 # Suggested Commands for Development
 
-This file contains the most important commands for developing code in Ourocodus.
+## Essential Commands
 
-## Tool Installation
-
+### Build
 ```bash
-# Install all development tools (first time setup)
-mise install
-
-# Verify tool versions
-mise list
-```
-
-## Building
-
-```bash
-# Build all binaries (relay, cli, echo-agent)
+# Build all binaries (relay, cli, echo-agent, event-logger)
 make build
-# or
+
+# Or via mise
 mise run build
 
-# Clean build artifacts
-make clean
+# Output: bin/relay, bin/cli, bin/echo-agent, bin/event-logger
 ```
 
-## Testing
-
-```bash
-# Run all unit tests
-make test
-# or
-mise run test
-
-# Run with verbose output
-go test -v ./...
-
-# Run tests for specific package
-go test ./pkg/relay/...
-
-# Run integration tests (requires build tags)
-go test -tags=integration ./pkg/agent/packnplay/... -v
-
-# Run end-to-end tests (requires ANTHROPIC_API_KEY)
-make test-e2e
-# or
-./scripts/run-e2e.sh
-
-# Run smoke tests
-mise run smoke
-# or
-./scripts/smoke-test.sh all
-
-# Run smoke tests with fuzzing
-./scripts/smoke-test.sh all --fuzz 100
-```
-
-## Code Quality
-
-```bash
-# Format code with gofumpt (stricter than gofmt)
-make fmt
-# or
-mise run fmt
-# or
-gofumpt -l -w .
-
-# Run linter
-make lint
-# or
-mise run lint
-# or
-golangci-lint run --timeout=5m
-
-# Auto-fix linting issues
-golangci-lint run --fix
-
-# Run static analysis
-make check
-# or
-mise run check
-# or
-staticcheck ./...
-
-# Run basic static analysis
-go vet ./...
-
-# Clean up dependencies
-go mod tidy
-```
-
-## Pre-commit Checks
-
-```bash
-# Run all pre-commit checks (recommended before committing)
-make pre-commit
-# or
-mise run pre-commit
-
-# This runs: fmt, vet, lint, tidy, build, test
-```
-
-## Running the System
-
+### Run System
 ```bash
 # Start relay server
 make run
 
-# Stop system
-make stop
+# Build agent Docker image (required before spawning agents)
+make agent-image
 
-# Interactive REPL demo (no API key needed)
-make interactive
-# or
-mise run interactive
-
-# Automated demo (no API key needed)
-make demo
-# or
-mise run demo
+# Set required API key
+export ANTHROPIC_API_KEY=sk-...
 ```
 
-## NATS Message Bus
+### Testing
+```bash
+# Run all Go unit tests
+make test
+# Or: go test ./...
 
+# Run E2E integration tests (requires ANTHROPIC_API_KEY)
+make test-e2e
+# Or: ./scripts/run-e2e.sh
+
+# Run smoke tests (session management, WebSocket integration)
+mise run smoke
+# Or: ./scripts/smoke-test.sh all
+
+# Smoke tests with fuzzing (100 iterations)
+./scripts/smoke-test.sh all --fuzz 100
+```
+
+### Code Quality
+```bash
+# Format code with gofumpt
+make fmt
+# Or: mise run fmt
+# Or: gofumpt -l -w .
+
+# Run linter
+make lint
+# Or: mise run lint
+# Or: golangci-lint run --timeout=5m
+
+# Run static analysis
+make check
+# Or: mise run check
+# Or: staticcheck ./...
+
+# Run all quality checks (format, vet, lint, tidy, build, test)
+make pre-commit
+# Or: mise run pre-commit
+```
+
+### Demos
+```bash
+# Interactive REPL (manual testing, exploration)
+mise run interactive
+# Or: make interactive
+# Commands: create, spawn <role>, msg <role> <message>, agents, help, quit
+
+# Automated demo (quick overview of features)
+mise run demo
+# Or: make demo
+```
+
+### NATS (Optional)
 ```bash
 # Start NATS server with JetStream
 make nats-start
@@ -137,72 +93,185 @@ make nats-stop
 
 # NATS endpoints:
 # - Client: nats://localhost:4222
-# - HTTP Monitoring: http://localhost:8222
-# - Prometheus Metrics: http://localhost:7777/metrics
+# - Monitoring: http://localhost:8222
+# - Metrics: http://localhost:7777/metrics
 ```
 
-## Git and Version Control
-
+### Tool Management (mise)
 ```bash
-# Standard Darwin/macOS commands
-git status
-git add .
-git commit -m "message"
-git push
-git pull
-git log --oneline -10
+# Install all development tools
+mise install
 
-# Setup git worktrees
+# Verify installed tools and versions
+mise list
+
+# View available mise tasks
+mise tasks
+```
+
+### Cleanup
+```bash
+# Remove build artifacts
+make clean
+# Removes: bin/ directory
+
+# Clean up all (including worktrees, credentials, containers)
+# NOTE: No automated command yet, manual cleanup required
+```
+
+## Workflow Commands
+
+### Before Starting Work
+```bash
+mise install          # Ensure tools are installed
+mise list            # Verify versions
+```
+
+### During Development
+```bash
+make build           # Check for compilation errors
+make test            # Run tests frequently
+```
+
+### Before Committing
+```bash
+make pre-commit      # Run all checks (format, vet, lint, build, test)
+# Or run individually:
+make fmt
+go vet ./...
+make lint
+make test
+make build
+```
+
+### After Changes
+```bash
+git add .
+git commit -m "your message"
+# Pre-commit hooks will run automatically if installed
+```
+
+## Git Commands
+
+### Setup
+```bash
+# Setup git worktrees for agents (if needed manually)
 ./scripts/setup-worktrees.sh
 ```
 
-## Pre-commit Hooks (Optional)
-
+### Branches
 ```bash
-# Install pre-commit (if not already installed)
-pip install pre-commit
-# or
-brew install pre-commit
+# Current branch
+git branch --show-current
 
-# Install hooks
-pre-commit install
+# View all branches (including agent branches)
+git branch -a
 
-# Run manually on all files
-pre-commit run --all-files
+# Clean up stale worktrees
+git worktree prune
 ```
 
-## Integration Test Cleanup
+## Docker Commands
 
+### Containers
 ```bash
-# List Packnplay-managed containers
-docker ps -a --filter "label=managed-by=packnplay"
+# List running containers (agents)
+docker ps
 
-# Remove all Packnplay containers
-docker ps -a --filter "label=managed-by=packnplay" -q | xargs docker rm -f
+# View all containers (including stopped)
+docker ps -a
 
-# Remove associated worktrees (if needed)
-rm -rf ~/.local/share/packnplay/worktrees
+# View container logs
+docker logs <container-id>
+
+# Stop a container
+docker stop <container-id>
+
+# Remove a container
+docker rm <container-id>
+
+# Clean up all stopped containers
+docker container prune
 ```
 
-## Useful Development Commands
-
+### Images
 ```bash
-# List files/directories
-ls -la
+# List images
+docker images
 
-# Find files
-find . -name "*.go" -type f
+# Remove unused images
+docker image prune
+```
 
-# Search in files
-grep -r "pattern" .
+## Environment Setup
 
-# View file contents
-cat filename
-less filename
+### Configure Environment Variables
+```bash
+# Copy example configuration
+cp .envrc.example .envrc
 
-# Change directory
-cd path/to/directory
+# Edit with your settings
+vim .envrc
 
-# Current directory
-pwd
+# mise will automatically load it when you cd into the project
+```
+
+### Required Variables
+```bash
+export ANTHROPIC_API_KEY=sk-...   # Required for Claude Code agents
+```
+
+### Optional Variables
+```bash
+export OUROCODUS_ACP_BINARY=./bin/echo-agent  # Use custom ACP binary
+export OUROCODUS_ACP_RUNTIME=container        # Run ACP in containers
+export NATS_URL=nats://localhost:4222         # Enable NATS event logging
+```
+
+## CI/CD
+
+### GitHub Actions Workflows
+- **ci.yml**: Build, test, lint (runs on all PRs and main pushes)
+- **smoke.yml**: Integration smoke tests (runs on all PRs and main pushes)
+
+### Local CI Simulation
+```bash
+# Run same checks as CI
+make pre-commit
+mise run smoke
+```
+
+## Troubleshooting
+
+### Tool not found
+```bash
+mise install         # Reinstall all tools
+```
+
+### Build failures
+```bash
+go mod tidy          # Clean dependencies
+make clean           # Remove build artifacts
+make build           # Rebuild
+```
+
+### Linting errors
+```bash
+golangci-lint run --fix  # Auto-fix some issues
+make fmt                 # Format code
+```
+
+### Container issues
+```bash
+docker ps -a         # Check container status
+docker logs <id>     # View container logs
+docker restart <id>  # Restart container
+```
+
+### NATS connection issues
+```bash
+make nats-health     # Check NATS status
+make nats-logs       # View NATS logs
+make nats-stop       # Stop and restart
+make nats-start
 ```

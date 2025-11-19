@@ -1,159 +1,115 @@
 # Code Style and Conventions
 
-This document describes the code style and conventions used in the Ourocodus project.
+## Go Code Style
 
-## Go Version
+### Formatting
+- **Primary formatter**: `gofumpt` (stricter than gofmt)
+  - Run via: `make fmt` or `mise run fmt`
+  - Auto-formats all Go files
+  - Required before committing
 
-The project uses **Go 1.24.0**. Always ensure compatibility with this version.
+### Linting
+- **Primary linter**: `golangci-lint`
+  - Configuration: `.golangci.yml`
+  - Run via: `make lint` or `mise run lint`
+  - Timeout: 5 minutes
+  - Enabled linters: gofmt, govet, errcheck, staticcheck, unused, gosimple, ineffassign, typecheck, revive, gocyclo, misspell, unparam, unconvert, gosec
 
-## Formatting
-
-- **Tool**: `gofumpt` (stricter than standard `gofmt`)
-- **Command**: `make fmt` or `gofumpt -l -w .`
-- **Rule**: All Go code must be formatted with gofumpt before committing
-- **Note**: CI checks use gofmt, but local development uses gofumpt which is stricter
-
-## Linting
-
-The project uses `golangci-lint` with configuration in `.golangci.yml`.
-
-**Enabled linters include:**
-- gofmt - Code formatting
-- govet - Static analysis
-- errcheck - Error checking
-- unused - Unused code detection
-- gocyclo - Code complexity
-- gosec - Security issues
-- And many more (see `.golangci.yml`)
-
-**Command**: `make lint` or `golangci-lint run --timeout=5m`
-
-## Static Analysis
-
+### Static Analysis
 - **Tool**: `staticcheck`
-- **Command**: `make check` or `staticcheck ./...`
-- **Purpose**: Find bugs, performance issues, and code simplification opportunities
+  - Run via: `make check` or `mise run check`
+  - Advanced static analysis for bug detection
 
-## Naming Conventions
+### Complexity
+- **Max cyclomatic complexity**: 15 (enforced by gocyclo)
+- Complex functions should be broken down
+- Test files exempt from complexity checks
 
-Follow standard Go naming conventions:
-- **Packages**: Short, lowercase, single-word names (e.g., `relay`, `session`, `acp`)
-- **Files**: Lowercase with underscores (e.g., `session_manager.go`, `client_factory.go`)
-- **Types**: PascalCase (e.g., `SessionManager`, `AgentLauncher`)
-- **Functions/Methods**: PascalCase for exported, camelCase for unexported
-- **Variables**: camelCase (e.g., `userSessionID`, `agentID`)
-- **Constants**: PascalCase or SCREAMING_SNAKE_CASE depending on context
-- **Interfaces**: Typically end with `-er` suffix (e.g., `Launcher`, `Manager`, `Factory`)
+### Error Handling
+- All errors must be checked (errcheck linter)
+- Use structured error codes (see docs/development/ERROR_HANDLING.md)
+- Test files have relaxed error checking rules
 
-## Documentation
+### Naming Conventions
+- **Package names**: Lowercase, single word (e.g., relay, acp, worktree)
+- **Interfaces**: Descriptive names ending in -er when appropriate (e.g., Manager, Launcher)
+- **Structs**: PascalCase for exported, camelCase for unexported
+- **Methods**: Follow Go conventions (e.g., New*, Get*, Create*, List*)
+- **Constants**: PascalCase or SCREAMING_SNAKE_CASE for error codes
 
-- **Package docs**: Every package should have a `doc.go` file or package comment
-- **Exported symbols**: All exported functions, types, and methods must have doc comments
-- **Doc format**: Follow standard Go documentation conventions (complete sentences starting with the symbol name)
+### Testing
+- Test files: `*_test.go`
+- Test functions: `func TestXxx(t *testing.T)`
+- Use testify for assertions: `github.com/stretchr/testify`
+- Table-driven tests preferred for multiple cases
+- Test coverage encouraged but not enforced
 
-Example:
-```go
-// SessionManager manages the lifecycle of UserSessions.
-// It coordinates UserSession creation, AgentSession spawning, and cleanup.
-type SessionManager struct {
-    // ...
-}
-```
+### Documentation
+- Exported symbols must have doc comments
+- Doc comments start with the symbol name
+- Example: `// Manager coordinates session lifecycle.`
 
-## Error Handling
+## TypeScript/JavaScript Style (PWA)
 
-- Always check and handle errors
-- Use structured error codes (see `pkg/relay/session/errors.go`)
-- Provide context with error wrapping: `fmt.Errorf("context: %w", err)`
-- Return errors rather than panicking in production code
-- Define custom error types when needed for specific error handling
+### Files
+- TypeScript source: `internal/webapp/src/*.ts`
+- Configuration: `internal/webapp/src/tsconfig.json`
+- Testing: Vitest (`internal/webapp/src/vitest.config.js`)
 
-## Testing
-
-- **Framework**: `github.com/stretchr/testify`
-- **Test files**: Name with `_test.go` suffix
-- **Integration tests**: Use build tags: `//go:build integration`
-- **Test naming**: `Test<FunctionName>_<Scenario>` (e.g., `TestCreateSession_Success`)
-- **Table-driven tests**: Use for multiple scenarios
-- **Mocks**: Generate mocks for interfaces (e.g., `mock_launcher.go`)
-
-**Example integration test:**
-```go
-//go:build integration
-
-package packnplay_test
-
-func TestIntegration_SpawnAndStop(t *testing.T) {
-    // ...
-}
-```
+### Build
+- Bundler: esbuild
+- Minifier: minify
+- Output: `internal/webapp/web/` (with content-hashed filenames)
 
 ## Project-Specific Patterns
 
-### Agent Launcher Abstraction
+### Session IDs
+- UUIDs generated via `github.com/google/uuid`
+- Format: `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`
+- Used for UserSession and AgentSession tracking
 
-The project uses an `AgentLauncher` interface to abstract agent lifecycle management:
-```go
-type AgentLauncher interface {
-    Spawn(ctx context.Context, agentID, workspace string) (AgentHandle, error)
-}
+### Agent Identifiers
+- User-chosen strings (e.g., "coder-1", "analyzer", "db-specialist")
+- No predefined types or limits
+- Validated for path safety (no directory traversal)
+
+### Branch Naming
+- Pattern: `agent-{agentID}-{timestamp}`
+- Example: `agent-coder-1-20250117-153045`
+- Ensures unique branches per agent
+
+### Workspace Paths
+- Base directory: `./workspaces` (configurable)
+- Per-agent: `./workspaces/agent-{agentID}/`
+- Validated for security (no ../ traversal)
+
+### Error Codes
+- Structured error codes (e.g., SESSION_NOT_FOUND, AGENT_NOT_FOUND)
+- Includes recoverability flag (recoverable: true/false)
+- See docs/development/ERROR_HANDLING.md
+
+## Pre-commit Workflow
+
+Before committing, run:
+```bash
+make pre-commit
 ```
 
-### Session Management
+This runs:
+1. `gofumpt -l -w .` - Format code
+2. `go vet ./...` - Basic static analysis
+3. `golangci-lint run --timeout=5m` - Comprehensive linting
+4. `go mod tidy` - Clean dependencies
+5. `make build` - Verify build succeeds
 
-Sessions are identified by UUIDs and track multiple agents by agentID:
-- UserSession lifecycle: Create → Spawn AgentSessions → Communicate → Cleanup
-- AgentSession state transitions: PENDING → SPAWNING → ACTIVE → STOPPED → ERROR
+Or use pre-commit hooks:
+```bash
+pre-commit install
+pre-commit run --all-files
+```
 
-### Session Terminology
-
-The project uses explicit session terminology to avoid confusion:
-
-- **UserSession**: WebSocket connection from PWA to relay (contains 0-N AgentSessions)
-  - Identifier: `userSessionID` (UUID)
-  - Managed by: `SessionManager`
-  
-- **AgentSession**: Individual ACP agent process with workspace and state
-  - Identifier: `agentID` (string, typically a role like "coder" or "reviewer")
-  - Managed by: `AgentLauncher` implementations
-  
-- **ContainerSession**: Docker container runtime environment (managed by `pkg/containersession`)
-  - Identifier: `containerID` (Docker container ID)
-  - One ContainerSession may host one AgentSession
-
-Always use explicit terminology in code, comments, and documentation.
-
-### Docker Labels
-
-Containers managed by Packnplay use labels:
-- `managed-by=packnplay` - Identifies Packnplay-managed containers
-- UserSession and agentID information stored in labels for discovery
-
-### NATS Topic Naming
-
-- Session events: `sessions.<user-session-id>.events`
-- Work distribution: `sessions.<user-session-id>.work.<agent-id>`
-- Work results: `sessions.<user-session-id>.results.<agent-id>`
-- Agent heartbeats: `agents.<user-session-id>.<agent-id>.heartbeat`
-
-## Dependencies
-
-- **Pinning**: Core dependencies like Packnplay are explicitly pinned to stable releases
-- **Updating**: Use `go get package@version && go mod tidy`
-- **Licenses**: Document third-party licenses in `NOTICE` file
-
-## Git Commit Messages
-
-Follow conventional commit format when possible:
-- `feat:` - New features
-- `fix:` - Bug fixes
-- `docs:` - Documentation changes
-- `test:` - Test additions or modifications
-- `refactor:` - Code refactoring
-- `chore:` - Build process or auxiliary tool changes
-
-## Build Tags
-
-Use build tags for conditional compilation:
-- `//go:build integration` - Integration tests requiring Docker
-- Tag-specific tests don't run by default with `go test ./...`
+## Darwin-Specific Notes
+- System: macOS (Darwin 24.6.0 in current env)
+- Docker: Colima or Docker Desktop
+- Shell: Bash or Zsh
+- Tool management: mise (instead of manual installs)
