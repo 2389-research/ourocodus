@@ -183,6 +183,30 @@ agentd attach alice
 - Running multiple commands interactively
 - Troubleshooting issues
 
+### 🔄 repl - ACP REPL (Coming Soon)
+
+Interactive REPL for communicating with agents via the Agent Communication Protocol (ACP).
+
+```bash
+# Requires relay server to be running
+agentd repl alice
+```
+
+**Current Status:** Not yet implemented. ACP communication requires the relay server.
+
+**To interact with agents via ACP:**
+1. Start the relay server: `make relay`
+2. Open the PWA: `http://localhost:8080`
+3. Connect to your agent from the UI
+
+**Why the relay?**
+- Agents run ACP servers inside containers
+- The relay provides WebSocket endpoints for clients
+- Handles agent session management and message routing
+- Enables multiple clients to connect to the same agent
+
+**Alternative:** Use `agentd attach <agent-id>` for shell access
+
 ### 🩺 doctor - Validate Environment
 
 Runs comprehensive environment checks before spawning agents.

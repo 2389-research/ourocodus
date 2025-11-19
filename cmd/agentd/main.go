@@ -40,4 +40,5 @@ func init() {
 	rootCmd.AddCommand(logsCmd)
 	rootCmd.AddCommand(attachCmd)
 	rootCmd.AddCommand(sendCmd)
+	rootCmd.AddCommand(replCmd)
 }
