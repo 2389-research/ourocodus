@@ -308,46 +308,5 @@ func TestBuildSpawnConfig_MissingAPIKey(t *testing.T) {
 	}
 }
 
-func TestWriteCredentialFile(t *testing.T) {
-	// Create temp workspace
-	workspace := t.TempDir()
-	apiKey := "sk-test-key-12345"
-
-	err := writeCredentialFile(workspace, apiKey)
-	if err != nil {
-		t.Fatalf("writeCredentialFile failed: %v", err)
-	}
-
-	// Verify .creds directory exists with 0700
-	credsDir := filepath.Join(workspace, ".creds")
-	info, err := os.Stat(credsDir)
-	if err != nil {
-		t.Fatalf("Failed to stat .creds directory: %v", err)
-	}
-	if !info.IsDir() {
-		t.Error(".creds is not a directory")
-	}
-	if info.Mode().Perm() != 0o700 {
-		t.Errorf("Expected .creds permissions 0700, got %o", info.Mode().Perm())
-	}
-
-	// Verify .env file exists with 0600
-	envFile := filepath.Join(credsDir, ".env")
-	info, err = os.Stat(envFile)
-	if err != nil {
-		t.Fatalf("Failed to stat .env file: %v", err)
-	}
-	if info.Mode().Perm() != 0o600 {
-		t.Errorf("Expected .env permissions 0600, got %o", info.Mode().Perm())
-	}
-
-	// Verify .env file content
-	content, err := os.ReadFile(envFile)
-	if err != nil {
-		t.Fatalf("Failed to read .env file: %v", err)
-	}
-	expected := "ANTHROPIC_API_KEY=sk-test-key-12345\n"
-	if string(content) != expected {
-		t.Errorf("Expected .env content %q, got %q", expected, string(content))
-	}
-}
+// TestWriteCredentialFile moved to integration test TestCLI_SpawnWithAPIKeyAndREPL
+// Credential writing is now handled by the launcher after worktree creation

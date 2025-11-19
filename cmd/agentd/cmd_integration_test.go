@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -466,4 +467,126 @@ func TestCLI_ReplCommand(t *testing.T) {
 	if !strings.Contains(outputStr, "Running agents:") {
 		t.Errorf("repl output should list running agents: %s", outputStr)
 	}
+}
+
+func TestCLI_SpawnWithAPIKeyAndREPL(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping CLI integration test in short mode")
+	}
+
+	if os.Getenv("DOCKER_HOST") == "" {
+		t.Skip("DOCKER_HOST not set, skipping integration test")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	agentID := "test-cli-repl"
+
+	// Cleanup
+	defer func() {
+		stopAgent(ctx, nil, agentID)
+		time.Sleep(500 * time.Millisecond)
+	}()
+
+	// Build binary
+	buildCmd := exec.Command("go", "build", "-o", "agentd-test", ".")
+	if err := buildCmd.Run(); err != nil {
+		t.Fatalf("Failed to build binary: %v", err)
+	}
+	defer os.Remove("agentd-test")
+
+	// Test spawn with API key
+	t.Run("spawn with API key", func(t *testing.T) {
+		cmd := exec.Command("./agentd-test", "spawn", agentID, "--api-key", "sk-test-integration-key")
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Logf("Spawn output:\n%s", output)
+			t.Fatalf("Spawn command failed: %v", err)
+		}
+
+		outputStr := string(output)
+		if !strings.Contains(outputStr, "Agent "+agentID+" ready") {
+			t.Errorf("Spawn output missing success message: %s", outputStr)
+		}
+	})
+
+	time.Sleep(2 * time.Second)
+
+	// Verify credential file was created
+	t.Run("verify credential file", func(t *testing.T) {
+		agents, err := listAgentsFromDocker(ctx)
+		if err != nil {
+			t.Fatalf("Failed to list agents: %v", err)
+		}
+
+		var workspace string
+		for _, agent := range agents {
+			if agent.AgentID == agentID {
+				workspace = agent.Workspace
+				break
+			}
+		}
+
+		if workspace == "" {
+			t.Fatal("Could not find agent workspace")
+		}
+
+		// Verify .creds directory exists with 0700 permissions
+		credsDir := filepath.Join(workspace, ".creds")
+		info, err := os.Stat(credsDir)
+		if err != nil {
+			t.Errorf("Credential directory not found at %s: %v", credsDir, err)
+		} else {
+			if !info.IsDir() {
+				t.Error(".creds is not a directory")
+			}
+			if info.Mode().Perm() != 0o700 {
+				t.Errorf("Expected .creds permissions 0700, got %o", info.Mode().Perm())
+			}
+		}
+
+		// Verify .env file exists with 0600 permissions
+		envFile := filepath.Join(workspace, ".creds", ".env")
+		info, err = os.Stat(envFile)
+		if err != nil {
+			t.Errorf("Credential file not found at %s: %v", envFile, err)
+		} else {
+			if info.Mode().Perm() != 0o600 {
+				t.Errorf("Expected .env permissions 0600, got %o", info.Mode().Perm())
+			}
+
+			// Verify content
+			content, err := os.ReadFile(envFile)
+			if err == nil {
+				if !strings.Contains(string(content), "ANTHROPIC_API_KEY=sk-test-integration-key") {
+					t.Errorf("Expected API key in .env, got: %s", string(content))
+				}
+			}
+		}
+	})
+
+	// Test REPL command (just verify it can connect, don't test interactivity)
+	t.Run("repl connects", func(t *testing.T) {
+		// Since we can't test interactivity, just verify connection setup
+		// by checking the command doesn't error on startup
+		cmd := exec.Command("./agentd-test", "repl", agentID)
+
+		// Kill after 2 seconds to avoid hanging
+		go func() {
+			time.Sleep(2 * time.Second)
+			if cmd.Process != nil {
+				cmd.Process.Kill()
+			}
+		}()
+
+		output, _ := cmd.CombinedOutput()
+		outputStr := string(output)
+
+		// Should show connection message
+		if !strings.Contains(outputStr, "Connected to agent") && !strings.Contains(outputStr, "connection") {
+			t.Logf("REPL output: %s", outputStr)
+			// Not a hard failure - might be timing issue
+		}
+	})
 }

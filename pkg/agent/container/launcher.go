@@ -124,6 +124,13 @@ func (l *AgentContainerLauncher) Spawn(ctx context.Context, config SpawnConfig) 
 		}
 	}()
 
+	// Step 1.5: Write API key credentials to worktree if provided
+	if config.APIKey != "" {
+		if err := l.writeAPIKeyCredentials(wt.Path(), config.APIKey); err != nil {
+			return nil, fmt.Errorf("failed to write API key credentials: %w", err)
+		}
+	}
+
 	// Step 2: Setup credentials
 	credFiles, err := l.credMounter.Setup(ctx, config.AgentID, config.GitSSHKey, config.GitHubToken)
 	if err != nil {
@@ -325,4 +332,22 @@ func (l *AgentContainerLauncher) Attach(ctx context.Context, agentID string) (*A
 	// 4. Reconstruct credentials path
 	// 5. Create handle
 	return nil, fmt.Errorf("Attach not yet implemented")
+}
+
+// writeAPIKeyCredentials creates .creds/.env file with API key in the worktree
+func (l *AgentContainerLauncher) writeAPIKeyCredentials(worktreePath, apiKey string) error {
+	// Create .creds directory with 0700 permissions
+	credsDir := filepath.Join(worktreePath, ".creds")
+	if err := os.MkdirAll(credsDir, 0o700); err != nil {
+		return fmt.Errorf("failed to create .creds directory: %w", err)
+	}
+
+	// Write .env file with 0600 permissions
+	envFile := filepath.Join(credsDir, ".env")
+	content := fmt.Sprintf("ANTHROPIC_API_KEY=%s\n", apiKey)
+	if err := os.WriteFile(envFile, []byte(content), 0o600); err != nil {
+		return fmt.Errorf("failed to write .env file: %w", err)
+	}
+
+	return nil
 }

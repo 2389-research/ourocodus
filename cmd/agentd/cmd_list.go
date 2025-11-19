@@ -94,9 +94,16 @@ func listAgentsFromDocker(ctx context.Context) ([]agentInfo, error) {
 		}
 
 		// Extract workspace from mounts (since it's not in labels)
+		// Find the mount that targets /workspace (the worktree mount)
 		workspace := ""
-		if len(c.Mounts) > 0 {
-			// The first mount is typically the workspace - use Source (host path)
+		for _, mnt := range c.Mounts {
+			if mnt.Destination == "/workspace" {
+				workspace = mnt.Source
+				break
+			}
+		}
+		// Fallback to first mount if no /workspace mount found
+		if workspace == "" && len(c.Mounts) > 0 {
 			workspace = c.Mounts[0].Source
 		}
 
