@@ -17,6 +17,7 @@ var (
 	spawnWorkspace string
 	spawnImage     string
 	spawnEnv       []string
+	spawnAPIKey    string
 )
 
 var spawnCmd = &cobra.Command{
@@ -47,6 +48,7 @@ func init() {
 	spawnCmd.Flags().StringVar(&spawnWorkspace, "workspace", "", "Custom worktree path (default: .agentd/worktrees/<id>)")
 	spawnCmd.Flags().StringVar(&spawnImage, "image", "ourocodus/agent:latest", "Docker image")
 	spawnCmd.Flags().StringArrayVar(&spawnEnv, "env", nil, "Environment variables (KEY=VALUE)")
+	spawnCmd.Flags().StringVar(&spawnAPIKey, "api-key", "", "Anthropic API key (or set ANTHROPIC_API_KEY env var)")
 }
 
 func runSpawn(cmd *cobra.Command, args []string) error {
@@ -110,6 +112,15 @@ func generateShortID() string {
 
 // buildSpawnConfig creates the SpawnConfig from flags and defaults
 func buildSpawnConfig(agentID string) (container.SpawnConfig, error) {
+	// Get API key from flag or environment
+	apiKey := spawnAPIKey
+	if apiKey == "" {
+		apiKey = os.Getenv("ANTHROPIC_API_KEY")
+	}
+	if apiKey == "" {
+		return container.SpawnConfig{}, fmt.Errorf("ANTHROPIC_API_KEY required (via --api-key flag or ANTHROPIC_API_KEY environment variable)")
+	}
+
 	// Parse environment variables
 	env, err := parseEnvFlags(spawnEnv)
 	if err != nil {
@@ -122,6 +133,7 @@ func buildSpawnConfig(agentID string) (container.SpawnConfig, error) {
 		Command:    []string{"--workspace", "/workspace"},
 		Entrypoint: []string{"/usr/local/bin/acp"},
 		Env:        env,
+		APIKey:     apiKey,
 		// GitSSHKey and GitHubToken handled by credential mounter
 	}
 

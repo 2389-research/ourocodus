@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -125,14 +126,14 @@ func TestHasCredentialFiles(t *testing.T) {
 		{
 			name: "with credential file",
 			setupFunc: func(dir string) {
-				os.WriteFile(filepath.Join(dir, "api-key"), []byte("secret"), 0600)
+				os.WriteFile(filepath.Join(dir, "api-key"), []byte("secret"), 0o600)
 			},
 			want: true,
 		},
 		{
 			name: "with hidden file only",
 			setupFunc: func(dir string) {
-				os.WriteFile(filepath.Join(dir, ".hidden"), []byte("data"), 0600)
+				os.WriteFile(filepath.Join(dir, ".hidden"), []byte("data"), 0o600)
 			},
 			want: false,
 		},
@@ -146,7 +147,7 @@ func TestHasCredentialFiles(t *testing.T) {
 		{
 			name: "with subdirectory",
 			setupFunc: func(dir string) {
-				os.Mkdir(filepath.Join(dir, "subdir"), 0755)
+				os.Mkdir(filepath.Join(dir, "subdir"), 0o755)
 			},
 			want: false,
 		},
@@ -207,12 +208,17 @@ func TestBuildSpawnConfig(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Save and restore the global variable
+			// Save and restore the global variables
 			oldSpawnEnv := spawnEnv
-			defer func() { spawnEnv = oldSpawnEnv }()
+			oldSpawnAPIKey := spawnAPIKey
+			defer func() {
+				spawnEnv = oldSpawnEnv
+				spawnAPIKey = oldSpawnAPIKey
+			}()
 
-			// Set the global variable
+			// Set the global variables
 			spawnEnv = tt.envFlags
+			spawnAPIKey = "sk-test-key" // Provide API key for all tests
 
 			config, err := buildSpawnConfig(tt.agentID)
 			if (err != nil) != tt.wantErr {
@@ -234,7 +240,70 @@ func TestBuildSpawnConfig(t *testing.T) {
 				if len(config.Entrypoint) == 0 {
 					t.Error("buildSpawnConfig() Entrypoint is empty")
 				}
+				if config.APIKey != "sk-test-key" {
+					t.Errorf("buildSpawnConfig() APIKey = %v, want sk-test-key", config.APIKey)
+				}
 			}
 		})
+	}
+}
+
+func TestBuildSpawnConfig_APIKeyFromFlag(t *testing.T) {
+	// Save and restore
+	oldSpawnAPIKey := spawnAPIKey
+	defer func() { spawnAPIKey = oldSpawnAPIKey }()
+
+	spawnAPIKey = "sk-test-key-from-flag"
+
+	config, err := buildSpawnConfig("test-agent")
+	if err != nil {
+		t.Fatalf("buildSpawnConfig failed: %v", err)
+	}
+
+	if config.APIKey != "sk-test-key-from-flag" {
+		t.Errorf("Expected APIKey='sk-test-key-from-flag', got '%s'", config.APIKey)
+	}
+}
+
+func TestBuildSpawnConfig_APIKeyFromEnv(t *testing.T) {
+	// Save and restore
+	oldSpawnAPIKey := spawnAPIKey
+	oldEnv := os.Getenv("ANTHROPIC_API_KEY")
+	defer func() {
+		spawnAPIKey = oldSpawnAPIKey
+		os.Setenv("ANTHROPIC_API_KEY", oldEnv)
+	}()
+
+	spawnAPIKey = "" // No flag
+	os.Setenv("ANTHROPIC_API_KEY", "sk-test-key-from-env")
+
+	config, err := buildSpawnConfig("test-agent")
+	if err != nil {
+		t.Fatalf("buildSpawnConfig failed: %v", err)
+	}
+
+	if config.APIKey != "sk-test-key-from-env" {
+		t.Errorf("Expected APIKey='sk-test-key-from-env', got '%s'", config.APIKey)
+	}
+}
+
+func TestBuildSpawnConfig_MissingAPIKey(t *testing.T) {
+	// Save and restore
+	oldSpawnAPIKey := spawnAPIKey
+	oldEnv := os.Getenv("ANTHROPIC_API_KEY")
+	defer func() {
+		spawnAPIKey = oldSpawnAPIKey
+		os.Setenv("ANTHROPIC_API_KEY", oldEnv)
+	}()
+
+	spawnAPIKey = "" // No flag
+	os.Setenv("ANTHROPIC_API_KEY", "")
+
+	_, err := buildSpawnConfig("test-agent")
+	if err == nil {
+		t.Error("Expected error when API key missing, got nil")
+	}
+	if err != nil && !strings.Contains(err.Error(), "ANTHROPIC_API_KEY") {
+		t.Errorf("Expected error to mention ANTHROPIC_API_KEY, got: %v", err)
 	}
 }
