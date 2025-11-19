@@ -138,6 +138,21 @@ func parseEnvFlags(envFlags []string) ([]string, error) {
 	return envFlags, nil
 }
 
+// hasCredentialFiles checks if a credentials directory contains any files
+func hasCredentialFiles(credPath string) bool {
+	entries, err := os.ReadDir(credPath)
+	if err != nil {
+		return false
+	}
+	// Check if there are any non-hidden files
+	for _, entry := range entries {
+		if !entry.IsDir() && !strings.HasPrefix(entry.Name(), ".") {
+			return true
+		}
+	}
+	return false
+}
+
 // printSpawnSuccess prints the successful spawn output with visual hierarchy
 func printSpawnSuccess(handle *container.AgentContainerHandle) {
 	// Worktree
@@ -155,7 +170,8 @@ func printSpawnSuccess(handle *container.AgentContainerHandle) {
 	// Credentials
 	fmt.Print("🔑 ")
 	infoColor.Printf("Credentials: ")
-	if handle.CredentialsPath() != "" {
+	credPath := handle.CredentialsPath()
+	if credPath != "" && hasCredentialFiles(credPath) {
 		fmt.Printf("mounted at /root/.creds ")
 		color.New(color.FgHiBlack).Printf("(read-only)\n")
 	} else {
