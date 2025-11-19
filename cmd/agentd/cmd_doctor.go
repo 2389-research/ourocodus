@@ -50,12 +50,12 @@ var (
 )
 
 func printSuccess(msg string) {
-	successColor.Print("✓ ")
+	_, _ = successColor.Print("✓ ")
 	fmt.Println(msg)
 }
 
 func printError(msg string) {
-	errorColor.Print("× ")
+	_, _ = errorColor.Print("× ")
 	fmt.Println(msg)
 }
 
@@ -83,8 +83,8 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	fmt.Println()
 	if allPassed {
 		fmt.Println()
-		color.New(color.FgGreen, color.Bold).Print("✨ Environment ready!")
-		color.New(color.FgHiBlack).Println(" All systems go for spawning agents.")
+		_, _ = color.New(color.FgGreen, color.Bold).Print("✨ Environment ready!")
+		_, _ = color.New(color.FgHiBlack).Println(" All systems go for spawning agents.")
 		fmt.Println()
 		return nil
 	}
@@ -97,7 +97,7 @@ func checkDockerDaemon(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("Docker client creation failed: %w", err)
 	}
-	defer cli.Close()
+	defer func() { _ = cli.Close() }()
 
 	if _, err := cli.Ping(ctx); err != nil {
 		return fmt.Errorf("Docker daemon not running. Start Docker Desktop and retry")
@@ -119,7 +119,7 @@ func checkDockerVersion(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	defer cli.Close()
+	defer func() { _ = cli.Close() }()
 
 	version, err := cli.ServerVersion(ctx)
 	if err != nil {
@@ -138,7 +138,7 @@ func checkDockerVersion(ctx context.Context) error {
 		return fmt.Errorf("Docker version %s is too old (need >= 20.10)", version.Version)
 	}
 
-	printSuccess(fmt.Sprintf("Docker version supported (>= 20.10)"))
+	printSuccess("Docker version supported (>= 20.10)")
 	return nil
 }
 
@@ -179,15 +179,15 @@ func checkImagePresence(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	defer cli.Close()
+	defer func() { _ = cli.Close() }()
 
 	imageName := "ourocodus/agent:latest"
 
 	// Try to inspect the image
-	_, _, err = cli.ImageInspectWithRaw(ctx, imageName)
+	_, err = cli.ImageInspect(ctx, imageName)
 	if err != nil {
 		// Image not present - offer guidance
-		infoColor.Printf("Image %s not found locally\n", imageName)
+		_, _ = infoColor.Printf("Image %s not found locally\n", imageName)
 		fmt.Println("  Run: docker pull ourocodus/agent:latest")
 		return fmt.Errorf("image not present (pull required)")
 	}
@@ -243,7 +243,7 @@ func checkSpawnSmokeTest(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	defer cli.Close()
+	defer func() { _ = cli.Close() }()
 
 	// Create a simple test container
 	// Use alpine since it's tiny and likely to be cached
@@ -251,10 +251,10 @@ func checkSpawnSmokeTest(ctx context.Context) error {
 	testName := "agentd-smoke-test"
 
 	// Pull image if needed
-	_, _, err = cli.ImageInspectWithRaw(ctx, testImage)
+	_, err = cli.ImageInspect(ctx, testImage)
 	if err != nil {
 		// Image not present, skip smoke test
-		infoColor.Println("  Smoke test skipped (alpine:latest not available)")
+		_, _ = infoColor.Println("  Smoke test skipped (alpine:latest not available)")
 		printSuccess("Spawn smoke test (skipped)")
 		return nil
 	}

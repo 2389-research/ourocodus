@@ -62,7 +62,7 @@ func runStop(cmd *cobra.Command, args []string) error {
 }
 
 func stopAgent(ctx context.Context, _ interface{}, agentID string) error {
-	color.New(color.FgYellow, color.Bold).Printf("🛑 Stopping agent '%s'...\n", agentID)
+	_, _ = color.New(color.FgYellow, color.Bold).Printf("🛑 Stopping agent '%s'...\n", agentID)
 
 	// First, try to find the container in Docker by agent-id label
 	containerID, workspacePath, err := findAgentContainer(ctx, agentID)
@@ -105,7 +105,7 @@ func findAgentContainer(ctx context.Context, agentID string) (string, string, er
 	if err != nil {
 		return "", "", err
 	}
-	defer cli.Close()
+	defer func() { _ = cli.Close() }()
 
 	// Find container with matching agent-id label
 	filterArgs := filters.NewArgs()
@@ -138,7 +138,7 @@ func stopContainer(ctx context.Context, containerID string) error {
 	if err != nil {
 		return err
 	}
-	defer cli.Close()
+	defer func() { _ = cli.Close() }()
 
 	// Stop the container with grace period
 	timeout := 30

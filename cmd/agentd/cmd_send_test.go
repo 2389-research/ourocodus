@@ -46,6 +46,7 @@ func TestSendCommand_Flags(t *testing.T) {
 	timeoutFlag := sendCmd.Flags().Lookup("timeout")
 	if timeoutFlag == nil {
 		t.Error("send command missing --timeout flag")
+		return
 	}
 	if timeoutFlag.DefValue != "30" {
 		t.Errorf("send timeout default = %s, want 30", timeoutFlag.DefValue)
@@ -55,6 +56,7 @@ func TestSendCommand_Flags(t *testing.T) {
 	shellFlag := sendCmd.Flags().Lookup("shell")
 	if shellFlag == nil {
 		t.Error("send command missing --shell flag")
+		return
 	}
 	if shellFlag.DefValue != "/bin/bash" {
 		t.Errorf("send shell default = %s, want /bin/bash", shellFlag.DefValue)

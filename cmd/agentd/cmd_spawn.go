@@ -57,7 +57,7 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 	// Get or generate agent ID
 	agentID := generateAgentID(args)
 
-	color.New(color.FgCyan, color.Bold).Printf("✨ Creating isolated agent '%s'...\n\n", agentID)
+	_, _ = color.New(color.FgCyan, color.Bold).Printf("✨ Creating isolated agent '%s'...\n\n", agentID)
 
 	// Create launcher (wiring pkg/ components)
 	launcher, err := createLauncher()
@@ -169,25 +169,25 @@ func hasCredentialFiles(credPath string) bool {
 func printSpawnSuccess(handle *container.AgentContainerHandle) {
 	// Worktree
 	fmt.Print("🌳 ")
-	infoColor.Printf("Worktree: ")
+	_, _ = infoColor.Printf("Worktree: ")
 	fmt.Printf("%s ", handle.WorkspacePath())
-	color.New(color.FgHiBlack).Printf("(branch: %s)\n", handle.BranchName())
+	_, _ = color.New(color.FgHiBlack).Printf("(branch: %s)\n", handle.BranchName())
 
 	// Container
 	fmt.Print("📦 ")
-	infoColor.Printf("Container: ")
+	_, _ = infoColor.Printf("Container: ")
 	fmt.Printf("%s ", handle.ContainerID())
-	successColor.Printf("(running)\n")
+	_, _ = successColor.Printf("(running)\n")
 
 	// Credentials
 	fmt.Print("🔑 ")
-	infoColor.Printf("Credentials: ")
+	_, _ = infoColor.Printf("Credentials: ")
 	credPath := handle.CredentialsPath()
 	if credPath != "" && hasCredentialFiles(credPath) {
 		fmt.Printf("mounted at /root/.creds ")
-		color.New(color.FgHiBlack).Printf("(read-only)\n")
+		_, _ = color.New(color.FgHiBlack).Printf("(read-only)\n")
 	} else {
-		color.New(color.FgHiBlack).Printf("(none)\n")
+		_, _ = color.New(color.FgHiBlack).Printf("(none)\n")
 	}
 
 	fmt.Println()

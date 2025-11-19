@@ -57,7 +57,7 @@ func runAttach(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	defer cli.Close()
+	defer func() { _ = cli.Close() }()
 
 	inspect, err := cli.ContainerInspect(ctx, containerID)
 	if err != nil {
@@ -70,10 +70,10 @@ func runAttach(cmd *cobra.Command, args []string) error {
 
 	// Print attach message
 	headerColor := color.New(color.FgCyan, color.Bold)
-	headerColor.Printf("\n📎 Attaching to agent '%s'\n", agentID)
-	color.New(color.FgHiBlack).Printf("   Container: %s\n", formatContainerID(containerID))
-	color.New(color.FgHiBlack).Printf("   Workspace: /workspace\n\n")
-	color.New(color.FgYellow).Println("   Press Ctrl-D or type 'exit' to detach")
+	_, _ = headerColor.Printf("\n📎 Attaching to agent '%s'\n", agentID)
+	_, _ = color.New(color.FgHiBlack).Printf("   Container: %s\n", formatContainerID(containerID))
+	_, _ = color.New(color.FgHiBlack).Printf("   Workspace: /workspace\n\n")
+	_, _ = color.New(color.FgYellow).Println("   Press Ctrl-D or type 'exit' to detach")
 	fmt.Println()
 
 	// Create exec instance with interactive TTY
@@ -104,7 +104,7 @@ func runAttach(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to set raw terminal: %w", err)
 	}
-	defer restoreTerminal(oldState)
+	defer func() { _ = restoreTerminal(oldState) }()
 
 	// Handle signals to cleanup on interrupt
 	sigCh := make(chan os.Signal, 1)

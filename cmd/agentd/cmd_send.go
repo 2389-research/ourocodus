@@ -73,7 +73,7 @@ func runSend(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	defer cli.Close()
+	defer func() { _ = cli.Close() }()
 
 	inspect, err := cli.ContainerInspect(ctx, containerID)
 	if err != nil {
@@ -86,9 +86,9 @@ func runSend(cmd *cobra.Command, args []string) error {
 
 	// Print command info
 	headerColor := color.New(color.FgCyan, color.Bold)
-	headerColor.Printf("💬 Sending command to agent '%s'\n", agentID)
-	color.New(color.FgHiBlack).Printf("   Container: %s\n", formatContainerID(containerID))
-	color.New(color.FgHiBlack).Printf("   Command: %s\n\n", command)
+	_, _ = headerColor.Printf("💬 Sending command to agent '%s'\n", agentID)
+	_, _ = color.New(color.FgHiBlack).Printf("   Container: %s\n", formatContainerID(containerID))
+	_, _ = color.New(color.FgHiBlack).Printf("   Command: %s\n\n", command)
 
 	// Create exec instance
 	execConfig := container.ExecOptions{
@@ -110,7 +110,7 @@ func runSend(cmd *cobra.Command, args []string) error {
 	defer resp.Close()
 
 	// Read and display output
-	color.New(color.FgGreen).Println("─── Output ───")
+	_, _ = color.New(color.FgGreen).Println("─── Output ───")
 
 	// Read all output using StdCopy to demultiplex stdout/stderr
 	var stdout, stderr strings.Builder
@@ -130,7 +130,7 @@ func runSend(cmd *cobra.Command, args []string) error {
 
 	// Print stderr in red
 	if errOut := stderr.String(); errOut != "" {
-		color.New(color.FgRed).Print(strings.TrimSuffix(errOut, "\n"))
+		_, _ = color.New(color.FgRed).Print(strings.TrimSuffix(errOut, "\n"))
 		fmt.Println()
 	}
 
@@ -140,13 +140,13 @@ func runSend(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to inspect exec: %w", err)
 	}
 
-	color.New(color.FgGreen).Println("─────────────")
+	_, _ = color.New(color.FgGreen).Println("─────────────")
 
 	if inspectResp.ExitCode != 0 {
-		color.New(color.FgRed).Printf("✗ Command failed with exit code %d\n", inspectResp.ExitCode)
+		_, _ = color.New(color.FgRed).Printf("✗ Command failed with exit code %d\n", inspectResp.ExitCode)
 		return fmt.Errorf("command failed")
 	}
 
-	color.New(color.FgGreen).Println("✓ Command completed successfully")
+	_, _ = color.New(color.FgGreen).Println("✓ Command completed successfully")
 	return nil
 }

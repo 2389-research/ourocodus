@@ -64,7 +64,7 @@ func findAgentContainerID(ctx context.Context, agentID string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer cli.Close()
+	defer func() { _ = cli.Close() }()
 
 	// Find container with matching agent-id label
 	filterArgs := filters.NewArgs()
@@ -91,7 +91,7 @@ func streamContainerLogs(ctx context.Context, agentID, containerID string) error
 	if err != nil {
 		return err
 	}
-	defer cli.Close()
+	defer func() { _ = cli.Close() }()
 
 	// Build log options
 	options := container.LogsOptions{
@@ -111,10 +111,10 @@ func streamContainerLogs(ctx context.Context, agentID, containerID string) error
 	if err != nil {
 		return fmt.Errorf("failed to get logs: %w", err)
 	}
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 
 	// Print header
-	infoColor.Printf("=== Logs for agent '%s' (container: %s) ===\n\n", agentID, formatContainerID(containerID))
+	_, _ = infoColor.Printf("=== Logs for agent '%s' (container: %s) ===\n\n", agentID, formatContainerID(containerID))
 
 	// Stream logs to stdout/stderr
 	// Docker multiplexes stdout/stderr, so we use stdcopy to demultiplex

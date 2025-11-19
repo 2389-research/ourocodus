@@ -43,7 +43,7 @@ func runList(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(agents) == 0 {
-		color.New(color.FgHiBlack).Println("✨ No agents running.")
+		_, _ = color.New(color.FgHiBlack).Println("✨ No agents running.")
 		return nil
 	}
 
@@ -70,7 +70,7 @@ func listAgentsFromDocker(ctx context.Context) ([]agentInfo, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Docker client: %w", err)
 	}
-	defer cli.Close()
+	defer func() { _ = cli.Close() }()
 
 	// Filter for containers with ourocodus.agent label (from pkg/)
 	// Note: We use the pkg-provided labels since SpawnConfig doesn't support custom labels
@@ -125,14 +125,14 @@ func printListTableFromAgentInfo(agents []agentInfo) error {
 
 	// Print header with color
 	headerColor := color.New(color.FgCyan, color.Bold)
-	fmt.Fprintln(w)
-	headerColor.Fprintln(w, "AGENT\tSTATUS\tWORKSPACE\tCONTAINER\tCREATED")
+	_, _ = fmt.Fprintln(w)
+	_, _ = headerColor.Fprintln(w, "AGENT\tSTATUS\tWORKSPACE\tCONTAINER\tCREATED")
 
 	for _, agent := range agents {
 		// Color the agent ID
 		agentName := color.New(color.FgWhite, color.Bold).Sprint(agent.AgentID)
 
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
 			agentName,
 			formatStateString(agent.Status),
 			formatWorkspace(agent.Workspace),
@@ -141,7 +141,7 @@ func printListTableFromAgentInfo(agents []agentInfo) error {
 		)
 	}
 
-	fmt.Fprintln(w)
+	_, _ = fmt.Fprintln(w)
 	return w.Flush()
 }
 
