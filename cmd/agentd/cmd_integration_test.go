@@ -356,9 +356,9 @@ func TestCLI_InvalidCommands(t *testing.T) {
 	defer os.Remove("agentd-test")
 
 	tests := []struct {
-		name        string
-		args        []string
-		shouldFail  bool
+		name       string
+		args       []string
+		shouldFail bool
 	}{
 		{"logs without agent ID", []string{"logs"}, true},
 		{"stop without agent ID", []string{"stop"}, true},
@@ -441,6 +441,10 @@ func TestCLI_ReplCommand(t *testing.T) {
 		t.Skip("skipping CLI integration test in short mode")
 	}
 
+	if os.Getenv("DOCKER_HOST") == "" {
+		t.Skip("DOCKER_HOST not set, skipping integration test")
+	}
+
 	// Build binary
 	buildCmd := exec.Command("go", "build", "-o", "agentd-test", ".")
 	if err := buildCmd.Run(); err != nil {
@@ -448,21 +452,18 @@ func TestCLI_ReplCommand(t *testing.T) {
 	}
 	defer os.Remove("agentd-test")
 
-	// Test repl command (should fail with helpful message)
-	cmd := exec.Command("./agentd-test", "repl", "alice")
+	// Test repl command with non-existent agent (should fail with helpful message)
+	cmd := exec.Command("./agentd-test", "repl", "nonexistent-agent")
 	output, err := cmd.CombinedOutput()
 	if err == nil {
-		t.Error("repl command should fail (not yet implemented)")
+		t.Error("repl command should fail for non-existent agent")
 	}
 
 	outputStr := string(output)
-	if !strings.Contains(outputStr, "relay") {
-		t.Errorf("repl output should mention relay: %s", outputStr)
+	if !strings.Contains(outputStr, "not found") {
+		t.Errorf("repl output should indicate agent not found: %s", outputStr)
 	}
-	if !strings.Contains(outputStr, "Not Yet Implemented") {
-		t.Errorf("repl output should indicate not implemented: %s", outputStr)
-	}
-	if !strings.Contains(outputStr, "http://localhost:8080") {
-		t.Errorf("repl output should mention PWA URL: %s", outputStr)
+	if !strings.Contains(outputStr, "Running agents:") {
+		t.Errorf("repl output should list running agents: %s", outputStr)
 	}
 }

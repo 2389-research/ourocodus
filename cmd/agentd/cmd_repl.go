@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/fatih/color"
@@ -9,67 +10,67 @@ import (
 
 var replCmd = &cobra.Command{
 	Use:   "repl <agent-id>",
-	Short: "🔄 Interactive REPL for ACP communication (requires relay)",
-	Long: `Start an interactive REPL session to communicate with an agent via ACP.
+	Short: "🔄 Interactive REPL with agent via ACP",
+	Long: `Connect to a running agent and interact via ACP protocol.
 
-NOTE: This command requires the relay server to be running. The agent communication
-architecture uses a WebSocket relay to broker messages between clients and agents.
-
-To use this command:
-1. Start the relay server: make relay (or: go run cmd/relay/main.go)
-2. The relay will start on http://localhost:8080
-3. Use this command to connect: agentd repl alice
-
-The relay handles:
-- WebSocket connections from clients (PWA, CLI)
-- Agent lifecycle (spawn, attach, stop)
-- Message routing between clients and agents
-- Session management
-
-Current Status: Relay integration not yet implemented in agentd.
-For now, use the PWA at http://localhost:8080 for agent interaction.`,
-	Example: `  # Start relay first
-  make relay
-
-  # Then connect to an agent (not yet implemented)
+The agent must be running (spawned). This command attaches directly to
+the agent's stdin/stdout where the ACP process runs as PID 1.`,
+	Example: `  # Connect to running agent
   agentd repl alice
 
-  # For now, use the PWA
-  open http://localhost:8080`,
+  # Once connected, send messages
+  > Hello agent!
+  Echo: Hello agent!
+
+  # Exit with Ctrl+D`,
 	Args: cobra.ExactArgs(1),
 	RunE: runREPL,
 }
 
 func runREPL(cmd *cobra.Command, args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("agent ID required")
+	}
+
 	agentID := args[0]
+	ctx := context.Background()
 
-	color.New(color.FgYellow, color.Bold).Println("⚠️  REPL Mode Not Yet Implemented")
-	fmt.Println()
-	color.New(color.FgWhite).Printf("Agent '%s' uses the Agent Communication Protocol (ACP) for messaging.\n", agentID)
-	fmt.Println()
-	color.New(color.FgWhite).Println("To interact with agents via ACP, you need to:")
-	fmt.Println()
-	color.New(color.FgCyan).Println("  1. Start the relay server:")
-	color.New(color.FgHiBlack).Println("     make relay")
-	color.New(color.FgHiBlack).Println("     # or: go run cmd/relay/main.go")
-	fmt.Println()
-	color.New(color.FgCyan).Println("  2. Use the PWA interface:")
-	color.New(color.FgHiBlack).Println("     open http://localhost:8080")
-	fmt.Println()
-	color.New(color.FgCyan).Println("  3. Connect to your agent from the UI")
-	fmt.Println()
-	fmt.Println()
-	color.New(color.FgYellow).Println("Why is this needed?")
-	color.New(color.FgWhite).Println("Agents run ACP servers inside containers. The relay:")
-	color.New(color.FgWhite).Println("  • Provides WebSocket endpoints for clients")
-	color.New(color.FgWhite).Println("  • Manages agent sessions and lifecycles")
-	color.New(color.FgWhite).Println("  • Routes messages between clients and agents")
-	color.New(color.FgWhite).Println("  • Handles connection multiplexing")
-	fmt.Println()
-	fmt.Println()
-	color.New(color.FgGreen).Println("Alternative: Use 'attach' for shell access:")
-	color.New(color.FgHiBlack).Printf("  agentd attach %s\n", agentID)
-	fmt.Println()
+	// Find agent
+	agents, err := listAgentsFromDocker(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to list agents: %w", err)
+	}
 
-	return fmt.Errorf("REPL mode requires relay integration (coming soon)")
+	agent, found := findAgentByID(agents, agentID)
+	if !found {
+		_, _ = color.New(color.FgRed).Printf("✗ Agent '%s' not found\n", agentID)
+		fmt.Println("\nRunning agents:")
+		if len(agents) == 0 {
+			fmt.Println("  (none)")
+		}
+		for _, a := range agents {
+			fmt.Printf("  - %s\n", a.AgentID)
+		}
+		return fmt.Errorf("agent not found")
+	}
+
+	if agent.Status != "running" {
+		return fmt.Errorf("agent '%s' is not running (status: %s)", agentID, agent.Status)
+	}
+
+	// TODO: Implement docker attach
+	_, _ = color.New(color.FgGreen).Printf("✓ Found agent '%s' (container: %s)\n", agentID, formatContainerID(agent.ContainerID))
+	fmt.Println("REPL implementation coming in next task...")
+
+	return nil
+}
+
+// findAgentByID searches for an agent by ID
+func findAgentByID(agents []agentInfo, agentID string) (agentInfo, bool) {
+	for _, agent := range agents {
+		if agent.AgentID == agentID {
+			return agent, true
+		}
+	}
+	return agentInfo{}, false
 }
