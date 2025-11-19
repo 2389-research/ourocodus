@@ -28,5 +28,6 @@ func main() {
 
 func init() {
 	rootCmd.AddCommand(doctorCmd)
+	rootCmd.AddCommand(spawnCmd)
 	// Future commands will be added here
 }
