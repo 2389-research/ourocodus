@@ -74,7 +74,7 @@ func runREPL(cmd *cobra.Command, args []string) error {
 	_, _ = color.New(color.FgGreen).Printf("✓ Connected to agent '%s'\n", agentID)
 	_, _ = color.New(color.FgHiBlack).Println("  Press Ctrl+D to exit")
 
-	// Attach to container
+	// Attach to container with TTY
 	attachResp, err := dockerClient.ContainerAttach(ctx, agent.ContainerID, container.AttachOptions{
 		Stream: true,
 		Stdin:  true,
@@ -86,15 +86,9 @@ func runREPL(cmd *cobra.Command, args []string) error {
 	}
 	defer attachResp.Close()
 
-	// Set up terminal
-	oldState, err := setRawTerminal()
-	if err != nil {
-		_, _ = color.New(color.FgYellow).Printf("Warning: Failed to set raw mode: %v\n", err)
-		// Continue without raw mode
-	}
-	if oldState != nil {
-		defer func() { _ = restoreTerminal(oldState) }()
-	}
+	// Note: We do NOT set raw terminal mode here because ACP communicates
+	// via line-buffered stdin/stdout, not character-by-character TTY I/O.
+	// The container was spawned without a TTY, so raw mode would break input.
 
 	// Handle Ctrl+C gracefully
 	sigChan := make(chan os.Signal, 1)
