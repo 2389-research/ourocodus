@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -205,6 +206,20 @@ func (m *Manager) SpawnAgent(ctx context.Context, userSessionID, agentID, worksp
 	err = os.MkdirAll(absPath, 0o700)
 	if err != nil {
 		return fmt.Errorf("failed to create workspace directory: %w", err)
+	}
+
+	// Write credential file if API key available (container mode only)
+	if m.isContainerModeEnabled() {
+		var anthropicKey string
+		if acpFactory, ok := m.clientFactory.(*ACPClientFactory); ok {
+			anthropicKey = acpFactory.GetAPIKey()
+		}
+		if anthropicKey != "" {
+			if err := writeCredentialFile(absPath, anthropicKey); err != nil {
+				return fmt.Errorf("failed to write credentials: %w", err)
+			}
+			m.logger.Printf("[SESSION] ├─ Wrote credentials to %s/.creds/", absPath)
+		}
 	}
 
 	// Create agent session in SPAWNING state
@@ -569,4 +584,26 @@ func (m *Manager) RecordHeartbeat(ctx context.Context, userSessionID string) err
 // Count returns total number of user sessions
 func (m *Manager) Count() int {
 	return m.store.Count()
+}
+
+// writeCredentialFile creates .creds/.env file with API key in workspace
+func writeCredentialFile(workspace, apiKey string) error {
+	if apiKey == "" {
+		return nil // No API key to write
+	}
+
+	// Create .creds directory with 0700 permissions
+	credsDir := filepath.Join(workspace, ".creds")
+	if err := os.MkdirAll(credsDir, 0o700); err != nil {
+		return fmt.Errorf("failed to create .creds directory: %w", err)
+	}
+
+	// Write .env file with 0600 permissions
+	envFile := filepath.Join(credsDir, ".env")
+	content := fmt.Sprintf("ANTHROPIC_API_KEY=%s\n", apiKey)
+	if err := os.WriteFile(envFile, []byte(content), 0o600); err != nil {
+		return fmt.Errorf("failed to write .env file: %w", err)
+	}
+
+	return nil
 }

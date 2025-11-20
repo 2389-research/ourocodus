@@ -30,6 +30,9 @@ type SpawnConfig struct {
 
 	// Env is additional environment variables to set in the container (optional)
 	Env []string
+
+	// APIKey is the Anthropic API key for agent communication
+	APIKey string
 }
 
 // AgentContainerHandle represents a running agent container with workspace and credentials.

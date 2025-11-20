@@ -3,11 +3,14 @@ package container
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
 
 	"github.com/2389-research/ourocodus/pkg/containersession"
 	"github.com/2389-research/ourocodus/pkg/runtime"
 	"github.com/2389-research/ourocodus/pkg/worktree"
+	"github.com/docker/docker/api/types/mount"
 )
 
 // AgentContainerLauncher orchestrates Docker containers for AgentSessions.
@@ -79,6 +82,7 @@ func NewAgentContainerLauncher(
 //   - Workspace mounted at /workspace (read-write)
 //   - SSH key at /root/.ssh/id_ed25519 (read-only, if provided)
 //   - GitHub token at /root/.github-token (read-only, if provided)
+//   - .creds directory at /root/.creds (read-only, if exists in workspace)
 //
 // Returns:
 //   - AgentContainerHandle: Handle to the running container
@@ -119,6 +123,13 @@ func (l *AgentContainerLauncher) Spawn(ctx context.Context, config SpawnConfig) 
 			_ = l.worktreeMgr.Remove(context.Background(), wt.Path())
 		}
 	}()
+
+	// Step 1.5: Write API key credentials to worktree if provided
+	if config.APIKey != "" {
+		if err := l.writeAPIKeyCredentials(wt.Path(), config.APIKey); err != nil {
+			return nil, fmt.Errorf("failed to write API key credentials: %w", err)
+		}
+	}
 
 	// Step 2: Setup credentials
 	credFiles, err := l.credMounter.Setup(ctx, config.AgentID, config.GitSSHKey, config.GitHubToken)
@@ -182,14 +193,27 @@ func (l *AgentContainerLauncher) Spawn(ctx context.Context, config SpawnConfig) 
 //
 // The worktree path is mounted at /workspace (read-write) and credentials are mounted
 // read-only via the paths returned by the credential mounter.
+// If a .creds directory exists in the workspace, it is mounted read-only at /root/.creds.
 func (l *AgentContainerLauncher) createContainerWithMounts(
 	ctx context.Context,
 	config SpawnConfig,
 	wt *worktree.AgentWorktree,
 	credFiles *CredentialFiles,
 ) (*containersession.ContainerSession, error) {
-	// Get credential mounts
+	// Get credential mounts (SSH key, GitHub token)
 	credMounts := l.credMounter.GetMounts(credFiles)
+
+	// Check if .creds directory exists in workspace and add mount if present
+	credsPath := filepath.Join(wt.Path(), ".creds")
+	if _, err := os.Stat(credsPath); err == nil {
+		// .creds directory exists, mount it read-only
+		credMounts = append(credMounts, mount.Mount{
+			Type:     mount.TypeBind,
+			Source:   credsPath,
+			Target:   "/root/.creds",
+			ReadOnly: true,
+		})
+	}
 
 	// Build labels for container
 	labels := map[string]string{
@@ -208,7 +232,7 @@ func (l *AgentContainerLauncher) createContainerWithMounts(
 		Command:           config.Command,
 		Entrypoint:        config.Entrypoint,
 		WorkspaceDir:      wt.Path(),  // Use the AgentWorktree path
-		CustomMounts:      credMounts, // Add credential mounts
+		CustomMounts:      credMounts, // Add credential mounts (includes .creds if present)
 		Env:               config.Env,
 		Labels:            labels,
 		SkipOutputLogging: skipOutputLogging, // Skip if using container attach mode
@@ -308,4 +332,22 @@ func (l *AgentContainerLauncher) Attach(ctx context.Context, agentID string) (*A
 	// 4. Reconstruct credentials path
 	// 5. Create handle
 	return nil, fmt.Errorf("Attach not yet implemented")
+}
+
+// writeAPIKeyCredentials creates .creds/.env file with API key in the worktree
+func (l *AgentContainerLauncher) writeAPIKeyCredentials(worktreePath, apiKey string) error {
+	// Create .creds directory with 0700 permissions
+	credsDir := filepath.Join(worktreePath, ".creds")
+	if err := os.MkdirAll(credsDir, 0o700); err != nil {
+		return fmt.Errorf("failed to create .creds directory: %w", err)
+	}
+
+	// Write .env file with 0600 permissions
+	envFile := filepath.Join(credsDir, ".env")
+	content := fmt.Sprintf("ANTHROPIC_API_KEY=%s\n", apiKey)
+	if err := os.WriteFile(envFile, []byte(content), 0o600); err != nil {
+		return fmt.Errorf("failed to write .env file: %w", err)
+	}
+
+	return nil
 }

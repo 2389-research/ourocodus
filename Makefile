@@ -108,6 +108,7 @@ build: assets
 	go build -o bin/cli ./cmd/cli
 	go build -o bin/echo-agent ./cmd/echo-agent
 	go build -o bin/event-logger ./cmd/event-logger
+	go build -o bin/agentd ./cmd/agentd
 	@echo "Build complete. Binaries in bin/"
 
 # Build ACP binary for inclusion in agent Docker image
