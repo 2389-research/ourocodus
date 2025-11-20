@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"strings"
 
+	cerrdefs "github.com/containerd/errdefs"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/client"
@@ -142,9 +143,27 @@ func stopContainer(ctx context.Context, containerID string) error {
 
 	// Stop the container with grace period
 	timeout := 30
-	return cli.ContainerStop(ctx, containerID, container.StopOptions{
+	if err := cli.ContainerStop(ctx, containerID, container.StopOptions{
 		Timeout: &timeout,
-	})
+	}); err != nil {
+		// If it's already stopped or gone, treat as non-fatal for idempotence
+		if !strings.Contains(err.Error(), "is not running") && !cerrdefs.IsNotFound(err) {
+			return err
+		}
+	}
+
+	// Remove the container to clean up artifacts (idempotent)
+	if err := cli.ContainerRemove(ctx, containerID, container.RemoveOptions{
+		Force:         true,
+		RemoveVolumes: true,
+	}); err != nil {
+		// Ignore NotFound errors for idempotence
+		if !cerrdefs.IsNotFound(err) {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // removeWorktree removes a git worktree and its associated branch

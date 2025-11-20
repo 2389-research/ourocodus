@@ -385,12 +385,12 @@ The interactive demo includes:
 ### Path Mapping
 
 The `list` command shows **host paths** (where files actually live):
-```
+```text
 .agentd/worktrees/agent-alice  ← on your machine
 ```
 
 This directory is mounted into the container at `/workspace`:
-```
+```text
 /workspace  ← inside the container
 ```
 

@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -126,15 +127,16 @@ func checkDockerVersion(ctx context.Context) error {
 		return fmt.Errorf("failed to get Docker version: %w", err)
 	}
 
-	// Check if version >= 20.10 (simple string comparison works for most cases)
+	// Check if version >= 20.10 (numeric comparison for correct ordering)
 	versionParts := strings.Split(version.Version, ".")
 	if len(versionParts) < 2 {
 		return fmt.Errorf("unexpected version format: %s", version.Version)
 	}
 
-	// For simplicity, just check major version >= 20
+	// Parse major version number
 	major := versionParts[0]
-	if major < "20" {
+	majorInt, err := strconv.Atoi(major)
+	if err != nil || majorInt < 20 {
 		return fmt.Errorf("Docker version %s is too old (need >= 20.10)", version.Version)
 	}
 
@@ -230,8 +232,13 @@ func checkDiskSpace(ctx context.Context) error {
 		return fmt.Errorf("failed to check disk space: %w", err)
 	}
 
+	// Validate block size before conversion (gosec G115)
+	// On some platforms stat.Bsize may be signed
+	if stat.Bsize <= 0 {
+		return fmt.Errorf("invalid block size reported by filesystem: %d", stat.Bsize)
+	}
+
 	// Available space in bytes
-	// stat.Bsize is uint32, so safe to convert to uint64 (gosec G115)
 	availableBytes := stat.Bavail * uint64(stat.Bsize)
 	availableGB := float64(availableBytes) / (1024 * 1024 * 1024)
 
