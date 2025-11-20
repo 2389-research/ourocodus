@@ -109,8 +109,8 @@ func findAgentContainer(ctx context.Context, agentID string) (string, string, er
 
 	// Find container with matching agent-id label
 	filterArgs := filters.NewArgs()
-	filterArgs.Add("label", "ourocodus.agent=true")
-	filterArgs.Add("label", fmt.Sprintf("agent-id=%s", agentID))
+	filterArgs.Add("label", fmt.Sprintf("%s=true", LabelNamespace))
+	filterArgs.Add("label", fmt.Sprintf("%s=%s", LabelAgentID, agentID))
 
 	containers, err := cli.ContainerList(ctx, container.ListOptions{
 		All:     true,

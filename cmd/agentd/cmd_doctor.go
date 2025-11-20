@@ -213,6 +213,12 @@ func checkGitWorktreeSupport(ctx context.Context) error {
 }
 
 func checkDiskSpace(ctx context.Context) error {
+	// Skip on Windows - syscall.Statfs doesn't exist there
+	if runtime.GOOS == "windows" {
+		printSuccess("Disk space check (skipped on Windows)")
+		return nil
+	}
+
 	// Get disk space for current directory
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -225,6 +231,7 @@ func checkDiskSpace(ctx context.Context) error {
 	}
 
 	// Available space in bytes
+	// stat.Bsize is uint32, so safe to convert to uint64 (gosec G115)
 	availableBytes := stat.Bavail * uint64(stat.Bsize)
 	availableGB := float64(availableBytes) / (1024 * 1024 * 1024)
 
@@ -248,7 +255,6 @@ func checkSpawnSmokeTest(ctx context.Context) error {
 	// Create a simple test container
 	// Use alpine since it's tiny and likely to be cached
 	testImage := "alpine:latest"
-	testName := "agentd-smoke-test"
 
 	// Pull image if needed
 	_, err = cli.ImageInspect(ctx, testImage)
@@ -259,14 +265,15 @@ func checkSpawnSmokeTest(ctx context.Context) error {
 		return nil
 	}
 
-	// Create container
+	// Create container with auto-generated name (empty string) to prevent name collision
+	// from crashed prior runs. Cleanup uses container ID, not name.
 	resp, err := cli.ContainerCreate(ctx, &container.Config{
 		Image: testImage,
 		Cmd:   []string{"echo", "test"},
 		Labels: map[string]string{
 			"agentd.smoke-test": "true",
 		},
-	}, nil, nil, nil, testName)
+	}, nil, nil, nil, "")
 	if err != nil {
 		return fmt.Errorf("failed to create test container: %w", err)
 	}

@@ -253,6 +253,13 @@ func TestClient_WithLogger(t *testing.T) {
 		t.Fatalf("Failed to write mock script: %v", err)
 	}
 
+	// Sync file to disk to prevent "text file busy" error on fast systems
+	if f, err := os.Open(scriptPath); err == nil {
+		_ = f.Sync()
+		_ = f.Close()
+	}
+	time.Sleep(10 * time.Millisecond)
+
 	logger := &capturingLogger{}
 
 	client, err := acp.NewClient(workspace, "test-api-key",

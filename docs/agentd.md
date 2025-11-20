@@ -84,7 +84,7 @@ The API key is written to `.creds/.env` in the agent's workspace with 0600 permi
 5. Mounts `.creds` directory read-only at `/root/.creds` in the container
 
 **Output:**
-```
+```text
 ✨ Creating isolated agent 'alice'...
 
 🌳 Worktree: /path/to/.agentd/worktrees/agent-alice (branch: agent-alice-20251119-120000)
@@ -107,7 +107,7 @@ agentd list --format json
 ```
 
 **Output:**
-```
+```text
 AGENT  STATUS   WORKSPACE                              CONTAINER     CREATED
 alice  running  .../.agentd/worktrees/agent-alice     abc123def456  2m ago
 bob    running  .../.agentd/worktrees/agent-bob       def456ghi789  5m ago
@@ -268,7 +268,7 @@ agentd doctor
 - ✓ Container spawn smoke test
 
 **Output:**
-```
+```text
 ✓ Docker daemon running (v27.4.0)
 ✓ Docker version supported (>= 20.10)
 ✓ File sharing enabled: /path/to/repo

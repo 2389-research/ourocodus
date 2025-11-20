@@ -75,7 +75,7 @@ func listAgentsFromDocker(ctx context.Context) ([]agentInfo, error) {
 	// Filter for containers with ourocodus.agent label (from pkg/)
 	// Note: We use the pkg-provided labels since SpawnConfig doesn't support custom labels
 	filterArgs := filters.NewArgs()
-	filterArgs.Add("label", "ourocodus.agent=true")
+	filterArgs.Add("label", fmt.Sprintf("%s=true", LabelNamespace))
 
 	containers, err := cli.ContainerList(ctx, container.ListOptions{
 		All:     false, // Only running containers
@@ -88,7 +88,7 @@ func listAgentsFromDocker(ctx context.Context) ([]agentInfo, error) {
 	agents := make([]agentInfo, 0, len(containers))
 	for _, c := range containers {
 		// Get agent ID from pkg-provided label
-		agentID := c.Labels["agent-id"]
+		agentID := c.Labels[LabelAgentID]
 		if agentID == "" {
 			continue // Skip containers without agent-id
 		}
