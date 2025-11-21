@@ -39,20 +39,41 @@ const (
 func GetLogo(size LogoSize) string {
 	switch size {
 	case LogoSmall:
-		return ` ___  _   _ ___   ___   ___ ___  ___  _   _ ___
-/ _ \| | | | _ \ / _ \ / __/ _ \|   \| | | / __|
-\___/|___|_|_| \_\___/|___|___/|____||___|\___|`
+		return `┌────────────────────────────────┐
+│                                │
+│ ▄▄ ▗  ▖▗▄▄  ▄▄  ▗▄  ▄▄ ▗▄▖ ▗  ▖ ▄▄ │
+│▗▘▝▖▐  ▌▐ ▝▌▗▘▝▖▗▘ ▘▗▘▝▖▐ ▝▖▐  ▌▐▘ ▘│
+│▐  ▌▐  ▌▐▄▄▘▐  ▌▐   ▐  ▌▐  ▌▐  ▌▝▙▄ │
+│▐  ▌▐  ▌▐ ▝▖▐  ▌▐   ▐  ▌▐  ▌▐  ▌  ▝▌│
+│ ▙▟ ▝▄▄▘▐  ▘ ▙▟  ▚▄▘ ▙▟ ▐▄▞ ▝▄▄▘▝▄▟▘│
+│                                │
+│                                │
+└────────────────────────────────┘`
 
 	case LogoMedium:
-		return ` ___  _   _ ___   ___   ___ ___  ___  _   _ ___
-/ _ \| | | | _ \ / _ \ / __/ _ \|   \| | | / __|
-\___/|___|_|_| \_\___/|___|___/|____||___|\___|
+		return `┌────────────────────────────────┐
+│                                │
+│ ▄▄ ▗  ▖▗▄▄  ▄▄  ▗▄  ▄▄ ▗▄▖ ▗  ▖ ▄▄ │
+│▗▘▝▖▐  ▌▐ ▝▌▗▘▝▖▗▘ ▘▗▘▝▖▐ ▝▖▐  ▌▐▘ ▘│
+│▐  ▌▐  ▌▐▄▄▘▐  ▌▐   ▐  ▌▐  ▌▐  ▌▝▙▄ │
+│▐  ▌▐  ▌▐ ▝▖▐  ▌▐   ▐  ▌▐  ▌▐  ▌  ▝▌│
+│ ▙▟ ▝▄▄▘▐  ▘ ▙▟  ▚▄▘ ▙▟ ▐▄▞ ▝▄▄▘▝▄▟▘│
+│                                │
+│                                │
+└────────────────────────────────┘
    Multi-Agent Coordination Platform`
 
 	case LogoLarge:
-		return ` ___  _   _ ___   ___   ___ ___  ___  _   _ ___
-/ _ \| | | | _ \ / _ \ / __/ _ \|   \| | | / __|
-\___/|___|_|_| \_\___/|___|___/|____||___|\___|
+		return `┌────────────────────────────────┐
+│                                │
+│ ▄▄ ▗  ▖▗▄▄  ▄▄  ▗▄  ▄▄ ▗▄▖ ▗  ▖ ▄▄ │
+│▗▘▝▖▐  ▌▐ ▝▌▗▘▝▖▗▘ ▘▗▘▝▖▐ ▝▖▐  ▌▐▘ ▘│
+│▐  ▌▐  ▌▐▄▄▘▐  ▌▐   ▐  ▌▐  ▌▐  ▌▝▙▄ │
+│▐  ▌▐  ▌▐ ▝▖▐  ▌▐   ▐  ▌▐  ▌▐  ▌  ▝▌│
+│ ▙▟ ▝▄▄▘▐  ▘ ▙▟  ▚▄▘ ▙▟ ▐▄▞ ▝▄▄▘▝▄▟▘│
+│                                │
+│                                │
+└────────────────────────────────┘
 
        🐉 Multi-Agent Coordination Platform 🐉
     Git Worktrees • Docker Isolation • NATS Messaging`
@@ -63,7 +84,25 @@ func GetLogo(size LogoSize) string {
 }
 
 // GetAgentStatusIcon returns an emoji/symbol for the agent status
-func GetAgentStatusIcon(status AgentStatus) string {
+// When unicode is false, returns ASCII-safe fallback characters
+func GetAgentStatusIcon(status AgentStatus, unicode bool) string {
+	if !unicode {
+		// ASCII fallbacks for terminals without unicode support
+		switch status {
+		case StatusRunning:
+			return ">"
+		case StatusPaused:
+			return "||"
+		case StatusStopped:
+			return "X"
+		case StatusIdle:
+			return "~"
+		default:
+			return "?"
+		}
+	}
+
+	// Unicode emoji for modern terminals
 	switch status {
 	case StatusRunning:
 		return "⚡"

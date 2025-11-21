@@ -49,8 +49,12 @@ func TestFoundationIntegration(t *testing.T) {
 	logo := theme.GetLogo(theme.LogoSmall)
 	assert.NotEmpty(t, logo)
 
-	icon := theme.GetAgentStatusIcon(theme.StatusRunning)
-	assert.Equal(t, "⚡", icon)
+	// Test unicode and ASCII icon rendering
+	iconUnicode := theme.GetAgentStatusIcon(theme.StatusRunning, true)
+	assert.Equal(t, "⚡", iconUnicode)
+
+	iconASCII := theme.GetAgentStatusIcon(theme.StatusRunning, false)
+	assert.Equal(t, ">", iconASCII)
 
 	box := theme.DrawBox("Title", "Content", 30)
 	assert.Contains(t, box, "Title")

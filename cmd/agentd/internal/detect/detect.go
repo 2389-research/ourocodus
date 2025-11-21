@@ -70,3 +70,29 @@ func GetTerminalSize() (width int, height int) {
 func IsTerminalTooSmall(width, height int) bool {
 	return width < minTerminalWidth || height < minTerminalHeight
 }
+
+// SupportsUnicode checks if the terminal supports Unicode/UTF-8 rendering.
+// Returns true if unicode emoji and box-drawing characters should work.
+func SupportsUnicode() bool {
+	// Check TERM for known non-unicode terminals first
+	term := os.Getenv("TERM")
+	switch term {
+	case "dumb", "linux", "cons25", "emacs":
+		return false
+	}
+
+	// Check locale settings in priority order: LC_ALL > LC_CTYPE > LANG
+	// LC_ALL overrides everything
+	if lcAll := os.Getenv("LC_ALL"); lcAll != "" {
+		return strings.Contains(strings.ToUpper(lcAll), "UTF-8") || strings.Contains(strings.ToUpper(lcAll), "UTF8")
+	}
+
+	// LC_CTYPE overrides LANG for character type
+	if lcCtype := os.Getenv("LC_CTYPE"); lcCtype != "" {
+		return strings.Contains(strings.ToUpper(lcCtype), "UTF-8") || strings.Contains(strings.ToUpper(lcCtype), "UTF8")
+	}
+
+	// Finally check LANG
+	lang := os.Getenv("LANG")
+	return strings.Contains(strings.ToUpper(lang), "UTF-8") || strings.Contains(strings.ToUpper(lang), "UTF8")
+}

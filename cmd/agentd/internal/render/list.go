@@ -7,6 +7,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/2389-research/ourocodus/cmd/agentd/internal/detect"
 	"github.com/2389-research/ourocodus/cmd/agentd/internal/output"
 	"github.com/2389-research/ourocodus/cmd/agentd/internal/theme"
 	"github.com/charmbracelet/bubbles/table"
@@ -95,6 +96,9 @@ func renderPlainTable(w io.Writer, agents []AgentInfo) error {
 }
 
 func renderRichTable(w io.Writer, agents []AgentInfo, th *theme.RetroTheme) error {
+	// Detect unicode support
+	supportsUnicode := detect.SupportsUnicode()
+
 	// Header with theme styling
 	header := th.Header.Render(theme.GetLogo(theme.LogoSmall))
 	_, _ = fmt.Fprintln(w, header)
@@ -112,7 +116,7 @@ func renderRichTable(w io.Writer, agents []AgentInfo, th *theme.RetroTheme) erro
 	// Build table rows
 	rows := make([]table.Row, 0, len(agents))
 	for _, agent := range agents {
-		statusIcon := getStatusIcon(agent.Status)
+		statusIcon := getStatusIcon(agent.Status, supportsUnicode)
 		statusColor := getStatusColor(agent.Status, th)
 
 		// Format attached session
@@ -169,16 +173,16 @@ func renderRichTable(w io.Writer, agents []AgentInfo, th *theme.RetroTheme) erro
 	return nil
 }
 
-func getStatusIcon(status string) string {
+func getStatusIcon(status string, unicode bool) string {
 	switch status {
 	case "running":
-		return theme.GetAgentStatusIcon(theme.StatusRunning)
+		return theme.GetAgentStatusIcon(theme.StatusRunning, unicode)
 	case "paused":
-		return theme.GetAgentStatusIcon(theme.StatusPaused)
+		return theme.GetAgentStatusIcon(theme.StatusPaused, unicode)
 	case "exited", "stopped":
-		return theme.GetAgentStatusIcon(theme.StatusStopped)
+		return theme.GetAgentStatusIcon(theme.StatusStopped, unicode)
 	default:
-		return theme.GetAgentStatusIcon(theme.StatusIdle)
+		return theme.GetAgentStatusIcon(theme.StatusIdle, unicode)
 	}
 }
 
