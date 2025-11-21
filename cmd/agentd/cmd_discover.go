@@ -184,12 +184,20 @@ func displayAgentsTable(agents []discoveredAgent) error {
 		return nil
 	}
 
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	// Use StripEscape flag to handle ANSI color codes properly
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', tabwriter.StripEscape)
 
 	// Print header with color
 	headerColor := color.New(color.FgCyan, color.Bold)
 	_, _ = fmt.Fprintln(w)
-	_, _ = headerColor.Fprintln(w, "AGENT\tSTATUS\tSOURCE\tATTACHED TO\tLEASE EXPIRES\tCREATED")
+	_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
+		headerColor.Sprint("AGENT"),
+		headerColor.Sprint("STATUS"),
+		headerColor.Sprint("SOURCE"),
+		headerColor.Sprint("ATTACHED TO"),
+		headerColor.Sprint("LEASE EXPIRES"),
+		headerColor.Sprint("CREATED"),
+	)
 
 	for _, agent := range agents {
 		// Color the agent ID

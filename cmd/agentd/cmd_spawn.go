@@ -136,6 +136,12 @@ func buildSpawnConfig(agentID string) (container.SpawnConfig, error) {
 		return container.SpawnConfig{}, fmt.Errorf("invalid --env flag: %w", err)
 	}
 
+	// Add agent ID and NATS URL to environment for heartbeat publishing
+	env = append(env,
+		fmt.Sprintf("AGENT_ID=%s", agentID),
+		"NATS_URL=nats://host.docker.internal:4222", // Docker host network access
+	)
+
 	config := container.SpawnConfig{
 		AgentID:    agentID,
 		ImageName:  spawnImage,

@@ -142,12 +142,20 @@ func listAgentsFromDocker(ctx context.Context) ([]agentInfo, error) {
 
 // printListTableFromAgentInfo prints agents in a formatted table
 func printListTableFromAgentInfo(agents []agentInfo) error {
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	// Use StripEscape flag to handle ANSI color codes properly
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', tabwriter.StripEscape)
 
 	// Print header with color
 	headerColor := color.New(color.FgCyan, color.Bold)
 	_, _ = fmt.Fprintln(w)
-	_, _ = headerColor.Fprintln(w, "AGENT\tSTATUS\tSOURCE\tATTACHED TO\tWORKSPACE\tCREATED")
+	_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
+		headerColor.Sprint("AGENT"),
+		headerColor.Sprint("STATUS"),
+		headerColor.Sprint("SOURCE"),
+		headerColor.Sprint("ATTACHED TO"),
+		headerColor.Sprint("WORKSPACE"),
+		headerColor.Sprint("CREATED"),
+	)
 
 	for _, agent := range agents {
 		// Color the agent ID
