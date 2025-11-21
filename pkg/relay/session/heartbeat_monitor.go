@@ -121,20 +121,15 @@ func (h *HeartbeatMonitor) GetLastSeen(agentID string) time.Time {
 // If the agent is not attached (no lease exists), this is a no-op.
 // IO errors or malformed lease files are logged.
 func (h *HeartbeatMonitor) renewLeaseIfAttached(agentID string) {
-	// Check if lease exists (agent is attached)
-	_, err := ReadLease(agentID)
+	// Attempt to renew lease (which internally reads, updates, and writes)
+	// This reduces I/O from 2 reads + 1 write to 1 read + 1 write
+	err := RenewLease(agentID)
 	if err != nil {
 		if errors.Is(err, ErrLeaseNotFound) {
 			// No lease = agent is detached, nothing to renew
 			return
 		}
 		// Log unexpected errors (IO issues, malformed JSON, etc.)
-		h.getLogger().Printf("Failed to read lease for agent %s: %v", agentID, err)
-		return
-	}
-
-	// Renew lease to extend expiration
-	if err := RenewLease(agentID); err != nil {
 		h.getLogger().Printf("Failed to renew lease for agent %s: %v", agentID, err)
 	}
 }
