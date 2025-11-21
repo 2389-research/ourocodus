@@ -103,19 +103,19 @@ func renderRichTable(w io.Writer, agents []AgentInfo, th *theme.RetroTheme) erro
 	// Header with theme styling - rainbow gradient logo
 	logoText := theme.GetLogo(theme.LogoSmall)
 
-	// Apply rainbow gradient to logo (line by line for color variation)
+	// Apply pastel rainbow gradient to logo (line by line for color variation)
 	lines := strings.Split(logoText, "\n")
-	rainbowColors := []lipgloss.Color{
-		lipgloss.Color("#FF0000"), // Red
-		lipgloss.Color("#FF7F00"), // Orange
-		lipgloss.Color("#FFFF00"), // Yellow
-		lipgloss.Color("#00FF00"), // Green
-		lipgloss.Color("#0000FF"), // Blue
+	pastelColors := []lipgloss.Color{
+		lipgloss.Color("#FFB3BA"), // Pastel Pink
+		lipgloss.Color("#FFDFBA"), // Pastel Peach
+		lipgloss.Color("#FFFFBA"), // Pastel Yellow
+		lipgloss.Color("#BAFFC9"), // Pastel Mint
+		lipgloss.Color("#BAE1FF"), // Pastel Blue
 	}
 
 	var coloredLines []string
 	for i, line := range lines {
-		color := rainbowColors[i%len(rainbowColors)]
+		color := pastelColors[i%len(pastelColors)]
 		coloredLine := lipgloss.NewStyle().Foreground(color).Render(line)
 		coloredLines = append(coloredLines, coloredLine)
 	}
