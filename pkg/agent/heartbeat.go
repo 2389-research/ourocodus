@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -29,10 +31,10 @@ type Heartbeat struct {
 
 // HeartbeatPublisher publishes periodic heartbeats to NATS for liveness detection
 type HeartbeatPublisher struct {
-	agentID string
-	nats    *nats.Conn
-	cancel  context.CancelFunc
-	logger  *log.Logger
+	agentID  string
+	nats     *nats.Conn
+	logger   atomic.Value // *log.Logger
+	stopOnce sync.Once
 }
 
 // NewHeartbeatPublisher creates a new heartbeat publisher for the given agent.
@@ -52,8 +54,8 @@ func NewHeartbeatPublisher(agentID, natsURL string) (*HeartbeatPublisher, error)
 	// Create publisher instance first to use logger in reconnect handler
 	pub := &HeartbeatPublisher{
 		agentID: agentID,
-		logger:  log.Default(),
 	}
+	pub.logger.Store(log.Default())
 
 	// Connect with automatic reconnection support
 	// Note: We don't use RetryOnFailedConnect to fail fast on initial connection errors
@@ -61,11 +63,11 @@ func NewHeartbeatPublisher(agentID, natsURL string) (*HeartbeatPublisher, error)
 		nats.MaxReconnects(-1), // Unlimited reconnection attempts after initial connection
 		nats.ReconnectWait(2*time.Second),
 		nats.ReconnectHandler(func(_ *nats.Conn) {
-			pub.logger.Printf("Reconnected to NATS server")
+			pub.getLogger().Printf("Reconnected to NATS server")
 		}),
 		nats.DisconnectErrHandler(func(_ *nats.Conn, err error) {
 			if err != nil {
-				pub.logger.Printf("Disconnected from NATS: %v", err)
+				pub.getLogger().Printf("Disconnected from NATS: %v", err)
 			}
 		}),
 	)
@@ -78,16 +80,15 @@ func NewHeartbeatPublisher(agentID, natsURL string) (*HeartbeatPublisher, error)
 }
 
 // Start begins publishing heartbeats at regular intervals.
-// This method blocks until the context is cancelled or an error occurs.
+// This method blocks until the context is cancelled.
 // It publishes an immediate heartbeat on start, then subsequent heartbeats
 // every HeartbeatInterval (30 seconds).
 //
 // The heartbeat publisher is designed to be resilient - publish failures
 // are logged but do not stop the publisher or crash the agent.
+//
+// Start should only be called once per HeartbeatPublisher instance.
 func (h *HeartbeatPublisher) Start(ctx context.Context) {
-	ctx, cancel := context.WithCancel(ctx)
-	h.cancel = cancel
-
 	subject := fmt.Sprintf(HeartbeatSubject, h.agentID)
 	ticker := time.NewTicker(HeartbeatInterval)
 	defer ticker.Stop()
@@ -116,29 +117,42 @@ func (h *HeartbeatPublisher) publish(subject string) {
 
 	data, err := json.Marshal(hb)
 	if err != nil {
-		h.logger.Printf("Failed to marshal heartbeat: %v", err)
+		h.getLogger().Printf("Failed to marshal heartbeat: %v", err)
 		return
 	}
 
 	if err := h.nats.Publish(subject, data); err != nil {
-		h.logger.Printf("Failed to publish heartbeat: %v", err)
+		h.getLogger().Printf("Failed to publish heartbeat: %v", err)
 		return
 	}
 }
 
+// getLogger returns the current logger in a thread-safe manner
+func (h *HeartbeatPublisher) getLogger() *log.Logger {
+	return h.logger.Load().(*log.Logger)
+}
+
 // Stop gracefully shuts down the heartbeat publisher.
-// It cancels the publishing loop and closes the NATS connection.
+// It closes the NATS connection. This method is safe to call multiple times.
+//
+// The caller should cancel the context passed to Start() to stop the
+// publishing loop.
 func (h *HeartbeatPublisher) Stop() {
-	if h.cancel != nil {
-		h.cancel()
-	}
-	if h.nats != nil {
-		h.nats.Close()
-	}
+	h.stopOnce.Do(func() {
+		if h.nats != nil {
+			h.nats.Close()
+		}
+	})
 }
 
 // SetLogger sets a custom logger for the heartbeat publisher.
 // This is useful for testing or custom logging configurations.
+// This method is safe to call concurrently with Start().
+//
+// If logger is nil, this method panics.
 func (h *HeartbeatPublisher) SetLogger(logger *log.Logger) {
-	h.logger = logger
+	if logger == nil {
+		panic("logger cannot be nil")
+	}
+	h.logger.Store(logger)
 }

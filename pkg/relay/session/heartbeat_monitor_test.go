@@ -127,7 +127,10 @@ func TestHeartbeatMonitor_ReceivesHeartbeat(t *testing.T) {
 		Status:    "active",
 	}
 
-	data, _ := json.Marshal(hb)
+	data, err := json.Marshal(hb)
+	if err != nil {
+		t.Fatalf("failed to marshal heartbeat: %v", err)
+	}
 	subject := "agent.heartbeat." + agentID
 
 	if err := nc.Publish(subject, data); err != nil {
@@ -200,7 +203,10 @@ func TestHeartbeatMonitor_RenewLeaseOnHeartbeat(t *testing.T) {
 		Status:    "active",
 	}
 
-	data, _ := json.Marshal(hb)
+	data, err := json.Marshal(hb)
+	if err != nil {
+		t.Fatalf("failed to marshal heartbeat: %v", err)
+	}
 	subject := "agent.heartbeat." + agentID
 
 	if err := nc.Publish(subject, data); err != nil {
@@ -273,7 +279,10 @@ func TestHeartbeatMonitor_NoRenewalForDetachedAgent(t *testing.T) {
 		Status:    "active",
 	}
 
-	data, _ := json.Marshal(hb)
+	data, err := json.Marshal(hb)
+	if err != nil {
+		t.Fatalf("failed to marshal heartbeat: %v", err)
+	}
 	subject := "agent.heartbeat." + agentID
 
 	if err := nc.Publish(subject, data); err != nil {
@@ -323,7 +332,10 @@ func TestHeartbeatMonitor_ReapExpiredLeases(t *testing.T) {
 	// Manually expire the lease
 	lease.ExpiresAt = time.Now().Add(-1 * time.Minute)
 	leasePath := filepath.Join(LeaseDir, agentID+".lease")
-	data, _ := json.Marshal(lease)
+	data, err := json.Marshal(lease)
+	if err != nil {
+		t.Fatalf("failed to marshal lease: %v", err)
+	}
 	if err := os.WriteFile(leasePath, data, 0o600); err != nil {
 		t.Fatalf("failed to write expired lease: %v", err)
 	}
