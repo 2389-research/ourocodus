@@ -132,6 +132,25 @@ func TestSpawnConfig_EmptyOptionalFields(t *testing.T) {
 	assert.Nil(t, config.GitSSHKey)
 	assert.Nil(t, config.GitHubToken)
 	assert.Nil(t, config.Env)
+	assert.Nil(t, config.Labels)
+}
+
+func TestSpawnConfig_WithCustomLabels(t *testing.T) {
+	// Test config with custom labels
+	config := SpawnConfig{
+		AgentID:   "coder-abc123",
+		ImageName: "ourocodus/agent:latest",
+		Labels: map[string]string{
+			"ourocodus.agent/spawn-source": "cli",
+			"custom-label":                 "custom-value",
+		},
+	}
+
+	assert.Equal(t, "coder-abc123", config.AgentID)
+	assert.Equal(t, "ourocodus/agent:latest", config.ImageName)
+	assert.NotNil(t, config.Labels)
+	assert.Equal(t, "cli", config.Labels["ourocodus.agent/spawn-source"])
+	assert.Equal(t, "custom-value", config.Labels["custom-label"])
 }
 
 func TestCredentialFiles_EmptyFields(t *testing.T) {

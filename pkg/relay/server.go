@@ -174,6 +174,15 @@ func (s *Server) routeMessage(ctx context.Context, conn WebSocketConn, adapter *
 	case "agent:terminate":
 		s.logger.Printf("[RELAY] Handling agent:terminate")
 		return "", s.handleAgentTerminate(ctx, conn, rawMessage)
+	case "agent:discover":
+		s.logger.Printf("[RELAY] Handling agent:discover")
+		return "", s.handleAgentDiscover(ctx, conn, rawMessage)
+	case "agent:attach":
+		s.logger.Printf("[RELAY] Handling agent:attach")
+		return "", s.handleAgentAttach(ctx, conn, rawMessage)
+	case "agent:detach":
+		s.logger.Printf("[RELAY] Handling agent:detach")
+		return "", s.handleAgentDetach(ctx, conn, rawMessage)
 	case "test:echo":
 		// Keep echo for testing during Phase 1
 		s.logger.Printf("[RELAY] Handling test:echo")

@@ -33,6 +33,10 @@ type SpawnConfig struct {
 
 	// APIKey is the Anthropic API key for agent communication
 	APIKey string
+
+	// Labels are custom Docker labels to add to the container (optional)
+	// These are merged with default labels (ourocodus.agent=true, agent-id=<id>)
+	Labels map[string]string
 }
 
 // AgentContainerHandle represents a running agent container with workspace and credentials.

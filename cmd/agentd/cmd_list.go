@@ -61,6 +61,7 @@ type agentInfo struct {
 	ContainerID string
 	Status      string
 	Workspace   string
+	SpawnSource string
 	CreatedAt   time.Time
 }
 
@@ -107,11 +108,18 @@ func listAgentsFromDocker(ctx context.Context) ([]agentInfo, error) {
 			workspace = c.Mounts[0].Source
 		}
 
+		// Get spawn source from label (defaults to "unknown")
+		spawnSource := c.Labels[LabelSpawnSource]
+		if spawnSource == "" {
+			spawnSource = "unknown"
+		}
+
 		agents = append(agents, agentInfo{
 			AgentID:     agentID,
 			ContainerID: c.ID,
 			Status:      c.State,
 			Workspace:   workspace,
+			SpawnSource: spawnSource,
 			CreatedAt:   time.Unix(c.Created, 0),
 		})
 	}
@@ -126,15 +134,16 @@ func printListTableFromAgentInfo(agents []agentInfo) error {
 	// Print header with color
 	headerColor := color.New(color.FgCyan, color.Bold)
 	_, _ = fmt.Fprintln(w)
-	_, _ = headerColor.Fprintln(w, "AGENT\tSTATUS\tWORKSPACE\tCONTAINER\tCREATED")
+	_, _ = headerColor.Fprintln(w, "AGENT\tSTATUS\tSOURCE\tWORKSPACE\tCONTAINER\tCREATED")
 
 	for _, agent := range agents {
 		// Color the agent ID
 		agentName := color.New(color.FgWhite, color.Bold).Sprint(agent.AgentID)
 
-		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
 			agentName,
 			formatStateString(agent.Status),
+			formatSpawnSource(agent.SpawnSource),
 			formatWorkspace(agent.Workspace),
 			formatContainerID(agent.ContainerID),
 			formatDuration(time.Since(agent.CreatedAt)),
@@ -167,6 +176,20 @@ func formatStateString(state string) string {
 		return color.New(color.FgYellow).Sprint("paused")
 	default:
 		return color.New(color.FgHiBlack).Sprint(state)
+	}
+}
+
+// formatSpawnSource formats the spawn source label
+func formatSpawnSource(source string) string {
+	switch source {
+	case "cli":
+		return color.New(color.FgCyan).Sprint("cli")
+	case "relay":
+		return color.New(color.FgMagenta).Sprint("relay")
+	case "unknown":
+		return color.New(color.FgHiBlack).Sprint("unknown")
+	default:
+		return color.New(color.FgWhite).Sprint(source)
 	}
 }
 

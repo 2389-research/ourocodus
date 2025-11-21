@@ -11,6 +11,7 @@ bin/
 /echo-agent
 /demo
 /interactive
+/agentd
 
 # Example binaries (top-level demos)
 examples/demo-container-reuse
@@ -67,6 +68,10 @@ logs/
 
 # Development worktrees
 .worktrees/
+
+# Agent daemon state and worktrees
+.agentd/
+cmd/agentd/.agentd/
 
 # Node modules (for PWA tooling)
 node_modules/
