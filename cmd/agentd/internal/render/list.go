@@ -1,0 +1,216 @@
+package render
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"strings"
+	"text/tabwriter"
+	"time"
+
+	"github.com/2389-research/ourocodus/cmd/agentd/internal/output"
+	"github.com/2389-research/ourocodus/cmd/agentd/internal/theme"
+	"github.com/charmbracelet/lipgloss"
+)
+
+// AgentInfo represents an agent for rendering
+type AgentInfo struct {
+	AgentID     string
+	ContainerID string
+	Status      string
+	Workspace   string
+	SpawnSource string
+	AttachedTo  string
+	CreatedAt   time.Time
+}
+
+// RenderAgentList renders a list of agents in the specified output mode
+func RenderAgentList(w io.Writer, agents []AgentInfo, mode output.Mode, th *theme.RetroTheme) error {
+	if len(agents) == 0 {
+		return renderEmptyList(w, mode, th)
+	}
+
+	switch {
+	case mode.IsJSON():
+		return renderJSON(w, agents)
+	case mode.IsPlain():
+		return renderPlainTable(w, agents)
+	case mode.IsRich():
+		if th == nil {
+			th = theme.NewRetroTheme(theme.PaletteCGA)
+		}
+		return renderRichTable(w, agents, th)
+	default:
+		return renderPlainTable(w, agents)
+	}
+}
+
+func renderEmptyList(w io.Writer, mode output.Mode, th *theme.RetroTheme) error {
+	if mode.IsJSON() {
+		return json.NewEncoder(w).Encode([]AgentInfo{})
+	}
+
+	msg := "✨ No agents running."
+	if mode.IsRich() && th != nil {
+		mutedStyle := lipgloss.NewStyle().Foreground(th.Muted)
+		msg = mutedStyle.Render(msg)
+	}
+
+	_, err := fmt.Fprintln(w, msg)
+	return err
+}
+
+func renderJSON(w io.Writer, agents []AgentInfo) error {
+	encoder := json.NewEncoder(w)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(agents)
+}
+
+func renderPlainTable(w io.Writer, agents []AgentInfo) error {
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+
+	// Header
+	fmt.Fprintln(tw)
+	fmt.Fprintf(tw, "AGENT\tSTATUS\tSOURCE\tATTACHED TO\tWORKSPACE\tCREATED\n")
+
+	// Rows
+	for _, agent := range agents {
+		attachedTo := "-"
+		if agent.AttachedTo != "" {
+			attachedTo = formatShortID(agent.AttachedTo, 9)
+		}
+
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n",
+			agent.AgentID,
+			agent.Status,
+			agent.SpawnSource,
+			attachedTo,
+			formatWorkspace(agent.Workspace),
+			formatDuration(time.Since(agent.CreatedAt)),
+		)
+	}
+
+	fmt.Fprintln(tw)
+	return tw.Flush()
+}
+
+func renderRichTable(w io.Writer, agents []AgentInfo, th *theme.RetroTheme) error {
+	// Header with theme styling
+	header := th.Header.Render(theme.GetLogo(theme.LogoSmall))
+	fmt.Fprintln(w, header)
+	fmt.Fprintln(w)
+
+	// Table header
+	headerStyle := lipgloss.NewStyle().
+		Foreground(th.Primary).
+		Bold(true)
+
+	fmt.Fprintf(w, "%s  %s  %s  %s  %s\n",
+		headerStyle.Render("AGENT"),
+		headerStyle.Render("STATUS"),
+		headerStyle.Render("SOURCE"),
+		headerStyle.Render("ATTACHED TO"),
+		headerStyle.Render("CREATED"),
+	)
+
+	// Separator line
+	separatorStyle := lipgloss.NewStyle().Foreground(th.Muted)
+	fmt.Fprintln(w, separatorStyle.Render(strings.Repeat("─", 80)))
+
+	// Table rows
+	for _, agent := range agents {
+		statusIcon := getStatusIcon(agent.Status)
+		statusColor := getStatusColor(agent.Status, th)
+
+		attachedTo := "─"
+		if agent.AttachedTo != "" {
+			accentStyle := lipgloss.NewStyle().Foreground(th.Accent)
+			attachedTo = accentStyle.Render(formatShortID(agent.AttachedTo, 9))
+		}
+
+		sourceStyle := getSourceStyle(agent.SpawnSource, th)
+		mutedStyle := lipgloss.NewStyle().Foreground(th.Muted)
+
+		fmt.Fprintf(w, "%s  %s %s  %s  %s  %s\n",
+			th.Highlight.Render(agent.AgentID),
+			statusIcon,
+			statusColor.Render(agent.Status),
+			sourceStyle.Render(agent.SpawnSource),
+			attachedTo,
+			mutedStyle.Render(formatDuration(time.Since(agent.CreatedAt))),
+		)
+	}
+
+	fmt.Fprintln(w)
+
+	// Footer with summary
+	summaryStyle := lipgloss.NewStyle().Foreground(th.Secondary)
+	summary := fmt.Sprintf("Total: %d agents", len(agents))
+	fmt.Fprintln(w, summaryStyle.Render(summary))
+
+	return nil
+}
+
+func getStatusIcon(status string) string {
+	switch status {
+	case "running":
+		return theme.GetAgentStatusIcon(theme.StatusRunning)
+	case "paused":
+		return theme.GetAgentStatusIcon(theme.StatusPaused)
+	case "exited", "stopped":
+		return theme.GetAgentStatusIcon(theme.StatusStopped)
+	default:
+		return theme.GetAgentStatusIcon(theme.StatusIdle)
+	}
+}
+
+func getStatusColor(status string, th *theme.RetroTheme) lipgloss.Style {
+	switch status {
+	case "running":
+		return lipgloss.NewStyle().Foreground(th.Success)
+	case "paused":
+		return lipgloss.NewStyle().Foreground(th.Warning)
+	case "exited", "stopped":
+		return lipgloss.NewStyle().Foreground(th.Error)
+	default:
+		return lipgloss.NewStyle().Foreground(th.Muted)
+	}
+}
+
+func getSourceStyle(source string, th *theme.RetroTheme) lipgloss.Style {
+	switch source {
+	case "cli":
+		return lipgloss.NewStyle().Foreground(th.Primary)
+	case "relay":
+		return lipgloss.NewStyle().Foreground(th.Secondary)
+	default:
+		return lipgloss.NewStyle().Foreground(th.Muted)
+	}
+}
+
+func formatShortID(id string, maxLen int) string {
+	if len(id) <= maxLen {
+		return id
+	}
+	return id[:maxLen] + "..."
+}
+
+func formatWorkspace(path string) string {
+	if len(path) > 60 {
+		return "..." + path[len(path)-57:]
+	}
+	return path
+}
+
+func formatDuration(d time.Duration) string {
+	if d < time.Minute {
+		return "just now"
+	}
+	if d < time.Hour {
+		return fmt.Sprintf("%dm ago", int(d.Minutes()))
+	}
+	if d < 24*time.Hour {
+		return fmt.Sprintf("%dh ago", int(d.Hours()))
+	}
+	return fmt.Sprintf("%dd ago", int(d.Hours()/24))
+}
