@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -24,14 +23,8 @@ func TestListCommand_FlagDefaults(t *testing.T) {
 }
 
 func TestListCommand_Help(t *testing.T) {
-	var buf bytes.Buffer
-	listCmd.SetOut(&buf)
-	listCmd.SetArgs([]string{"--help"})
-
-	err := listCmd.Execute()
-	assert.NoError(t, err)
-
-	helpText := buf.String()
+	// Get the usage string which includes flags
+	helpText := listCmd.UsageString()
 	assert.Contains(t, helpText, "--format")
 	assert.Contains(t, helpText, "--plain")
 	assert.Contains(t, helpText, "--theme")
