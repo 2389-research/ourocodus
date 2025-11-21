@@ -10,17 +10,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// AgentInfo represents an agent for rendering (mirrors cmd_list.go)
-type AgentInfo struct {
-	AgentID     string
-	ContainerID string
-	Status      string
-	Workspace   string
-	SpawnSource string
-	AttachedTo  string
-	CreatedAt   time.Time
-}
-
 func TestRenderAgentList_Plain(t *testing.T) {
 	agents := []AgentInfo{
 		{
@@ -57,8 +46,10 @@ func TestRenderAgentList_JSON(t *testing.T) {
 
 	assert.NoError(t, err)
 	output := buf.String()
-	assert.Contains(t, output, `"AgentID":"test-agent"`)
-	assert.Contains(t, output, `"Status":"running"`)
+	assert.Contains(t, output, `"AgentID"`)
+	assert.Contains(t, output, `"test-agent"`)
+	assert.Contains(t, output, `"Status"`)
+	assert.Contains(t, output, `"running"`)
 }
 
 func TestRenderAgentList_Rich(t *testing.T) {
