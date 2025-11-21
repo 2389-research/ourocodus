@@ -86,3 +86,109 @@ func TestIsTerminalTooSmall(t *testing.T) {
 		})
 	}
 }
+
+func TestSupportsUnicode(t *testing.T) {
+	tests := []struct {
+		name     string
+		lang     string
+		term     string
+		lcAll    string
+		lcCtype  string
+		expected bool
+	}{
+		{
+			name:     "UTF-8 lang",
+			lang:     "en_US.UTF-8",
+			term:     "xterm-256color",
+			expected: true,
+		},
+		{
+			name:     "UTF8 without dash",
+			lang:     "en_US.UTF8",
+			term:     "xterm",
+			expected: true,
+		},
+		{
+			name:     "non-UTF-8 lang",
+			lang:     "C",
+			term:     "xterm",
+			expected: false,
+		},
+		{
+			name:     "dumb terminal",
+			lang:     "en_US.UTF-8",
+			term:     "dumb",
+			expected: false,
+		},
+		{
+			name:     "linux terminal",
+			lang:     "en_US.UTF-8",
+			term:     "linux",
+			expected: false,
+		},
+		{
+			name:     "cons25 terminal",
+			lang:     "en_US.UTF-8",
+			term:     "cons25",
+			expected: false,
+		},
+		{
+			name:     "emacs terminal",
+			lang:     "en_US.UTF-8",
+			term:     "emacs",
+			expected: false,
+		},
+		{
+			name:     "LC_ALL overrides to non-UTF-8",
+			lang:     "en_US.UTF-8",
+			term:     "xterm",
+			lcAll:    "C",
+			expected: false,
+		},
+		{
+			name:     "LC_ALL UTF-8",
+			lang:     "C",
+			term:     "xterm",
+			lcAll:    "en_US.UTF-8",
+			expected: true,
+		},
+		{
+			name:     "LC_CTYPE overrides to non-UTF-8",
+			lang:     "en_US.UTF-8",
+			term:     "xterm",
+			lcCtype:  "C",
+			expected: false,
+		},
+		{
+			name:     "LC_CTYPE UTF-8",
+			lang:     "C",
+			term:     "xterm",
+			lcCtype:  "en_US.UTF-8",
+			expected: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Clear environment
+			os.Clearenv()
+
+			// Set test environment variables
+			if tt.lang != "" {
+				t.Setenv("LANG", tt.lang)
+			}
+			if tt.term != "" {
+				t.Setenv("TERM", tt.term)
+			}
+			if tt.lcAll != "" {
+				t.Setenv("LC_ALL", tt.lcAll)
+			}
+			if tt.lcCtype != "" {
+				t.Setenv("LC_CTYPE", tt.lcCtype)
+			}
+
+			result := SupportsUnicode()
+			assert.Equal(t, tt.expected, result, "unicode support detection mismatch")
+		})
+	}
+}

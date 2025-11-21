@@ -27,7 +27,7 @@ func TestGetLogo(t *testing.T) {
 	}
 }
 
-func TestGetAgentStatusIcon(t *testing.T) {
+func TestGetAgentStatusIcon_Unicode(t *testing.T) {
 	tests := []struct {
 		status   AgentStatus
 		expected string
@@ -40,10 +40,37 @@ func TestGetAgentStatusIcon(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(string(tt.status), func(t *testing.T) {
-			icon := GetAgentStatusIcon(tt.status)
+			icon := GetAgentStatusIcon(tt.status, true)
 			assert.Equal(t, tt.expected, icon)
 		})
 	}
+}
+
+func TestGetAgentStatusIcon_ASCII(t *testing.T) {
+	tests := []struct {
+		status   AgentStatus
+		expected string
+	}{
+		{StatusRunning, ">"},
+		{StatusPaused, "||"},
+		{StatusStopped, "X"},
+		{StatusIdle, "~"},
+	}
+
+	for _, tt := range tests {
+		t.Run(string(tt.status), func(t *testing.T) {
+			icon := GetAgentStatusIcon(tt.status, false)
+			assert.Equal(t, tt.expected, icon)
+		})
+	}
+}
+
+func TestGetAgentStatusIcon_UnknownStatus(t *testing.T) {
+	unknown := AgentStatus("unknown")
+
+	// Both modes should return "?" for unknown status
+	assert.Equal(t, "?", GetAgentStatusIcon(unknown, true))
+	assert.Equal(t, "?", GetAgentStatusIcon(unknown, false))
 }
 
 func TestDrawBox(t *testing.T) {
