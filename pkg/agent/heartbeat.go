@@ -38,22 +38,43 @@ type HeartbeatPublisher struct {
 // NewHeartbeatPublisher creates a new heartbeat publisher for the given agent.
 // It establishes a connection to NATS and prepares to publish heartbeats.
 //
+// The connection is configured with automatic reconnection to handle network partitions:
+//   - Unlimited reconnection attempts
+//   - 2-second wait between reconnect attempts
+//   - Logging on successful reconnection
+//
 // Parameters:
 //   - agentID: The unique identifier for this agent
 //   - natsURL: The NATS server URL (e.g., "nats://localhost:4222")
 //
-// Returns an error if the NATS connection fails.
+// Returns an error if the initial NATS connection fails.
 func NewHeartbeatPublisher(agentID, natsURL string) (*HeartbeatPublisher, error) {
-	nc, err := nats.Connect(natsURL)
+	// Create publisher instance first to use logger in reconnect handler
+	pub := &HeartbeatPublisher{
+		agentID: agentID,
+		logger:  log.Default(),
+	}
+
+	// Connect with automatic reconnection support
+	// Note: We don't use RetryOnFailedConnect to fail fast on initial connection errors
+	nc, err := nats.Connect(natsURL,
+		nats.MaxReconnects(-1), // Unlimited reconnection attempts after initial connection
+		nats.ReconnectWait(2*time.Second),
+		nats.ReconnectHandler(func(_ *nats.Conn) {
+			pub.logger.Printf("Reconnected to NATS server")
+		}),
+		nats.DisconnectErrHandler(func(_ *nats.Conn, err error) {
+			if err != nil {
+				pub.logger.Printf("Disconnected from NATS: %v", err)
+			}
+		}),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to NATS: %w", err)
 	}
 
-	return &HeartbeatPublisher{
-		agentID: agentID,
-		nats:    nc,
-		logger:  log.Default(),
-	}, nil
+	pub.nats = nc
+	return pub, nil
 }
 
 // Start begins publishing heartbeats at regular intervals.

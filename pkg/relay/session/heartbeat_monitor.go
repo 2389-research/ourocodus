@@ -38,21 +38,42 @@ type heartbeatMessage struct {
 
 // NewHeartbeatMonitor creates a new heartbeat monitor.
 //
+// The connection is configured with automatic reconnection to handle network partitions:
+//   - Unlimited reconnection attempts
+//   - 2-second wait between reconnect attempts
+//   - Logging on successful reconnection
+//
 // Parameters:
 //   - natsURL: The NATS server URL (e.g., "nats://localhost:4222")
 //
-// Returns an error if the NATS connection fails.
+// Returns an error if the initial NATS connection fails.
 func NewHeartbeatMonitor(natsURL string) (*HeartbeatMonitor, error) {
-	nc, err := nats.Connect(natsURL)
+	// Create monitor instance first to use logger in reconnect handler
+	monitor := &HeartbeatMonitor{
+		lastSeen: make(map[string]time.Time),
+		logger:   log.Default(),
+	}
+
+	// Connect with automatic reconnection support
+	// Note: We don't use RetryOnFailedConnect to fail fast on initial connection errors
+	nc, err := nats.Connect(natsURL,
+		nats.MaxReconnects(-1), // Unlimited reconnection attempts after initial connection
+		nats.ReconnectWait(2*time.Second),
+		nats.ReconnectHandler(func(_ *nats.Conn) {
+			monitor.logger.Printf("Reconnected to NATS server")
+		}),
+		nats.DisconnectErrHandler(func(_ *nats.Conn, err error) {
+			if err != nil {
+				monitor.logger.Printf("Disconnected from NATS: %v", err)
+			}
+		}),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to NATS: %w", err)
 	}
 
-	return &HeartbeatMonitor{
-		nats:     nc,
-		lastSeen: make(map[string]time.Time),
-		logger:   log.Default(),
-	}, nil
+	monitor.nats = nc
+	return monitor, nil
 }
 
 // Start begins monitoring heartbeats and automatically renewing leases.
@@ -140,6 +161,9 @@ func (h *HeartbeatMonitor) reapExpiredLeases(ctx context.Context) {
 
 // removeExpiredLeases scans all leases and removes any that have expired.
 // This is called periodically by the reaper goroutine.
+//
+// In addition to removing expired lease files, this also prunes the lastSeen map to prevent
+// memory leaks from agents that no longer exist or have been detached.
 func (h *HeartbeatMonitor) removeExpiredLeases() {
 	leases, err := ListLeases()
 	if err != nil {
@@ -147,7 +171,12 @@ func (h *HeartbeatMonitor) removeExpiredLeases() {
 		return
 	}
 
+	// Build set of active agent IDs from current leases
+	activeAgents := make(map[string]bool)
 	for _, lease := range leases {
+		activeAgents[lease.AgentID] = true
+
+		// Remove expired leases
 		if IsLeaseExpired(lease) {
 			h.logger.Printf("Reaping expired lease for agent %s (attached to session %s)",
 				lease.AgentID, lease.UserSessionID)
@@ -155,7 +184,23 @@ func (h *HeartbeatMonitor) removeExpiredLeases() {
 			if err := ReleaseLease(lease.AgentID); err != nil {
 				h.logger.Printf("Failed to release expired lease for agent %s: %v",
 					lease.AgentID, err)
+			} else {
+				// Successfully released, remove from active set
+				delete(activeAgents, lease.AgentID)
 			}
+		}
+	}
+
+	// Prune lastSeen entries for agents that no longer have leases
+	// Also prune entries that haven't been seen in 2x the lease TTL (10 minutes)
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	staleThreshold := time.Now().Add(-2 * LeaseTTL) // 10 minutes ago
+	for agentID, lastSeen := range h.lastSeen {
+		// Remove if agent has no lease or hasn't been seen in 10 minutes
+		if !activeAgents[agentID] || lastSeen.Before(staleThreshold) {
+			delete(h.lastSeen, agentID)
 		}
 	}
 }
