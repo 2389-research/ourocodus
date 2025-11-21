@@ -20,6 +20,7 @@ import (
 	"github.com/2389-research/ourocodus/pkg/containersession"
 	"github.com/2389-research/ourocodus/pkg/nats"
 	"github.com/2389-research/ourocodus/pkg/relay"
+	"github.com/2389-research/ourocodus/pkg/relay/session"
 	"github.com/2389-research/ourocodus/pkg/worktree"
 	dockercontainer "github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
@@ -79,6 +80,12 @@ func main() {
 	sessionManager, err := relay.NewSessionManager(logger, clock, idGen, natsClient, launcherFactory, containerManager)
 	if err != nil {
 		log.Fatalf("Failed to create session manager: %v", err)
+	}
+
+	// Cleanup expired leases from previous runs (issue #247)
+	// This prevents orphaned lease files from blocking agent attachments
+	if err := cleanupExpiredLeases(logger); err != nil {
+		log.Printf("[CLEANUP] WARN: Failed to cleanup expired leases: %v", err)
 	}
 
 	// Create relay server with dependency injection
@@ -429,6 +436,26 @@ func cleanupOrphanedContainers(ctx context.Context, cli *client.Client) error {
 			log.Printf("[CLEANUP] Cleaned up orphaned container: %s", shortID)
 		}
 		removeCancel()
+	}
+
+	return nil
+}
+
+// cleanupExpiredLeases removes expired lease files on startup
+// Sets up logging and calls session.CleanupExpiredLeases
+func cleanupExpiredLeases(logger *relay.StdLogger) error {
+	// Set up lease logging using the relay logger
+	session.DefaultLogger = logger
+
+	cleaned, err := session.CleanupExpiredLeases()
+	if err != nil {
+		return fmt.Errorf("failed to cleanup expired leases: %w", err)
+	}
+
+	if cleaned > 0 {
+		log.Printf("[CLEANUP] Cleaned up %d expired lease(s)", cleaned)
+	} else {
+		log.Println("[CLEANUP] No expired leases found")
 	}
 
 	return nil
