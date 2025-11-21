@@ -9,6 +9,10 @@ const (
 	// This matches the label set by pkg/agent/container/launcher.go
 	LabelAgentID = "agent-id"
 
+	// LabelSpawnSource indicates how the agent was spawned (cli, relay, etc.)
+	// This matches the label set by pkg/agent/container/launcher.go
+	LabelSpawnSource = "ourocodus.agent/spawn-source"
+
 	// Version is the current agentd version
 	Version = "0.1.0"
 )

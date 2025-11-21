@@ -102,6 +102,8 @@ import (
 )
 
 const (
+    // LeaseDir default path - can be overridden with OUROCODUS_LEASE_DIR env variable
+    // Defaults to $HOME/.agentd/session or .agentd/session if HOME is not set
     LeaseDir         = ".agentd/session"
     LeaseTTL         = 5 * time.Minute
     HeartbeatInterval = 30 * time.Second

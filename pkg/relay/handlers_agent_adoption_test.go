@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -23,6 +24,10 @@ func TestAgentAttachDetach_HappyPath(t *testing.T) {
 
 	// Setup: Create a mock agent container
 	ctx := context.Background()
+
+	// Set Docker socket for Colima if available
+	setupDockerSocket(t)
+
 	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
 		t.Skipf("Docker not available: %v", err)
@@ -54,7 +59,12 @@ func TestAgentAttachDetach_HappyPath(t *testing.T) {
 		messages: make([]interface{}, 0),
 	}
 
-	userSessionID := "test-session-123"
+	// Create a real user session to test against
+	userSession, err := sessionManager.CreateUserSession(ctx, conn)
+	if err != nil {
+		t.Fatalf("Failed to create user session: %v", err)
+	}
+	userSessionID := userSession.GetID()
 
 	// Test 1: Attach to agent
 	attachReq := AgentAttachRequest{
@@ -81,7 +91,17 @@ func TestAgentAttachDetach_HappyPath(t *testing.T) {
 	}
 
 	if attachResp.Type != "agent:attached" {
-		t.Errorf("Expected type 'agent:attached', got '%s'", attachResp.Type)
+		// Print the error message if it's an error response
+		if attachResp.Type == "error" {
+			// The mock stores ErrorMessage directly, not as []byte
+			if errMsg, ok := conn.messages[0].(ErrorMessage); ok {
+				t.Errorf("Expected type 'agent:attached', got error: %s - %s", errMsg.Error.Code, errMsg.Error.Message)
+			} else {
+				t.Errorf("Expected type 'agent:attached', got error (couldn't parse)")
+			}
+		} else {
+			t.Errorf("Expected type 'agent:attached', got '%s'", attachResp.Type)
+		}
 	}
 	if attachResp.AgentID != agentID {
 		t.Errorf("Expected agentId '%s', got '%s'", agentID, attachResp.AgentID)
@@ -215,6 +235,10 @@ func TestAgentAttach_AlreadyAttached(t *testing.T) {
 	}
 
 	ctx := context.Background()
+
+	// Set Docker socket for Colima if available
+	setupDockerSocket(t)
+
 	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
 		t.Skipf("Docker not available: %v", err)
@@ -245,8 +269,23 @@ func TestAgentAttach_AlreadyAttached(t *testing.T) {
 		messages: make([]interface{}, 0),
 	}
 
+	// Create two user sessions
+	firstSession, err := sessionManager.CreateUserSession(ctx, conn)
+	if err != nil {
+		t.Fatalf("Failed to create first user session: %v", err)
+	}
+	firstSessionID := firstSession.GetID()
+
+	conn2 := &testWebSocketConn{
+		messages: make([]interface{}, 0),
+	}
+	secondSession, err := sessionManager.CreateUserSession(ctx, conn2)
+	if err != nil {
+		t.Fatalf("Failed to create second user session: %v", err)
+	}
+	secondSessionID := secondSession.GetID()
+
 	// First session attaches
-	firstSessionID := "session-1"
 	attachReq1 := AgentAttachRequest{
 		Type:          "agent:attach",
 		AgentID:       agentID,
@@ -266,7 +305,6 @@ func TestAgentAttach_AlreadyAttached(t *testing.T) {
 
 	// Second session tries to attach
 	conn.messages = make([]interface{}, 0) // Clear messages
-	secondSessionID := "session-2"
 	attachReq2 := AgentAttachRequest{
 		Type:          "agent:attach",
 		AgentID:       agentID,
@@ -305,6 +343,10 @@ func TestAgentDetach_NotAttachedToYou(t *testing.T) {
 	}
 
 	ctx := context.Background()
+
+	// Set Docker socket for Colima if available
+	setupDockerSocket(t)
+
 	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
 		t.Skipf("Docker not available: %v", err)
@@ -335,8 +377,23 @@ func TestAgentDetach_NotAttachedToYou(t *testing.T) {
 		messages: make([]interface{}, 0),
 	}
 
+	// Create two user sessions
+	session1, err := sessionManager.CreateUserSession(ctx, conn)
+	if err != nil {
+		t.Fatalf("Failed to create first user session: %v", err)
+	}
+	session1ID := session1.GetID()
+
+	conn2 := &testWebSocketConn{
+		messages: make([]interface{}, 0),
+	}
+	session2, err := sessionManager.CreateUserSession(ctx, conn2)
+	if err != nil {
+		t.Fatalf("Failed to create second user session: %v", err)
+	}
+	session2ID := session2.GetID()
+
 	// Session 1 attaches
-	session1ID := "session-1"
 	attachReq := AgentAttachRequest{
 		Type:          "agent:attach",
 		AgentID:       agentID,
@@ -351,7 +408,6 @@ func TestAgentDetach_NotAttachedToYou(t *testing.T) {
 
 	// Session 2 tries to detach
 	conn.messages = make([]interface{}, 0) // Clear messages
-	session2ID := "session-2"
 	detachReq := AgentDetachRequest{
 		Type:          "agent:detach",
 		AgentID:       agentID,
@@ -399,6 +455,10 @@ func TestAgentAttachDetach_Idempotent(t *testing.T) {
 	}
 
 	ctx := context.Background()
+
+	// Set Docker socket for Colima if available
+	setupDockerSocket(t)
+
 	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
 		t.Skipf("Docker not available: %v", err)
@@ -429,7 +489,12 @@ func TestAgentAttachDetach_Idempotent(t *testing.T) {
 		messages: make([]interface{}, 0),
 	}
 
-	userSessionID := "test-session-999"
+	// Create a user session
+	userSession, err := sessionManager.CreateUserSession(ctx, conn)
+	if err != nil {
+		t.Fatalf("Failed to create user session: %v", err)
+	}
+	userSessionID := userSession.GetID()
 
 	// Test 1: Attach twice (idempotent attach)
 	attachReq := AgentAttachRequest{
@@ -506,6 +571,24 @@ func TestAgentAttachDetach_Idempotent(t *testing.T) {
 
 // Helper functions
 
+// setupDockerSocket configures the Docker socket for Colima if available
+func setupDockerSocket(t *testing.T) {
+	t.Helper()
+
+	// Check if DOCKER_HOST is already set (don't override user configuration)
+	if existingHost := os.Getenv("DOCKER_HOST"); existingHost != "" {
+		return
+	}
+
+	// Check if Colima is running
+	colimaSocket := filepath.Join(os.Getenv("HOME"), ".colima", "default", "docker.sock")
+	if _, err := os.Stat(colimaSocket); err == nil {
+		// Colima socket exists, use it
+		os.Setenv("DOCKER_HOST", "unix://"+colimaSocket)
+		t.Logf("Using Colima Docker socket: %s", colimaSocket)
+	}
+}
+
 // createTestAgentContainer creates a mock agent container for testing
 func createTestAgentContainer(t *testing.T, cli *client.Client, agentID string) string {
 	t.Helper()
@@ -513,7 +596,13 @@ func createTestAgentContainer(t *testing.T, cli *client.Client, agentID string) 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	// Create a minimal container with agent labels
+	// Create temporary workspace directory
+	tmpDir, err := os.MkdirTemp("", "agent-workspace-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp workspace: %v", err)
+	}
+
+	// Create a minimal container with agent labels and workspace mount
 	resp, err := cli.ContainerCreate(ctx, &container.Config{
 		Image: "alpine:latest",
 		Cmd:   []string{"sleep", "3600"},
@@ -521,26 +610,44 @@ func createTestAgentContainer(t *testing.T, cli *client.Client, agentID string) 
 			LabelNamespace: "true",
 			LabelAgentID:   agentID,
 		},
-	}, nil, nil, nil, "")
+	}, &container.HostConfig{
+		Binds: []string{
+			tmpDir + ":/workspace:rw",
+		},
+	}, nil, nil, "")
 	if err != nil {
+		_ = os.RemoveAll(tmpDir)
 		t.Fatalf("Failed to create test container: %v", err)
 	}
 
 	// Start container
 	if err := cli.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
 		_ = cli.ContainerRemove(ctx, resp.ID, container.RemoveOptions{Force: true})
+		_ = os.RemoveAll(tmpDir)
 		t.Fatalf("Failed to start test container: %v", err)
 	}
 
 	return resp.ID
 }
 
-// cleanupTestContainer removes a test container
+// cleanupTestContainer removes a test container and its workspace directory
 func cleanupTestContainer(t *testing.T, cli *client.Client, containerID string) {
 	t.Helper()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+
+	// Get workspace path from container mounts before removing
+	inspectResp, err := cli.ContainerInspect(ctx, containerID)
+	if err == nil {
+		// Find and remove workspace directory
+		for _, mnt := range inspectResp.Mounts {
+			if mnt.Destination == "/workspace" {
+				_ = os.RemoveAll(mnt.Source)
+				break
+			}
+		}
+	}
 
 	_ = cli.ContainerStop(ctx, containerID, container.StopOptions{})
 	_ = cli.ContainerRemove(ctx, containerID, container.RemoveOptions{Force: true})
@@ -549,6 +656,17 @@ func cleanupTestContainer(t *testing.T, cli *client.Client, containerID string) 
 // createMockSessionManager creates a minimal session manager for testing
 func createMockSessionManager(t *testing.T) *session.Manager {
 	t.Helper()
+
+	// Set ANTHROPIC_API_KEY for session manager creation
+	oldKey := os.Getenv("ANTHROPIC_API_KEY")
+	os.Setenv("ANTHROPIC_API_KEY", "test-key-for-relay-tests")
+	defer func() {
+		if oldKey != "" {
+			os.Setenv("ANTHROPIC_API_KEY", oldKey)
+		} else {
+			os.Unsetenv("ANTHROPIC_API_KEY")
+		}
+	}()
 
 	sessionIDGen := &integrationMockIDGenerator{}
 	sessionClock := &integrationMockSessionClock{}

@@ -28,13 +28,13 @@ const (
 
 // AgentInfo contains information about a discovered agent
 type AgentInfo struct {
-	AgentID      string      `json:"agentId"`
-	ContainerID  string      `json:"containerId"`
-	Workspace    string      `json:"workspace"`
-	Status       AgentStatus `json:"status"`
-	SpawnSource  string      `json:"spawnSource"`
-	AttachedTo   string      `json:"attachedTo,omitempty"`
-	CreatedAt    time.Time   `json:"createdAt"`
+	AgentID     string      `json:"agentId"`
+	ContainerID string      `json:"containerId"`
+	Workspace   string      `json:"workspace"`
+	Status      AgentStatus `json:"status"`
+	SpawnSource string      `json:"spawnSource"`
+	AttachedTo  string      `json:"attachedTo,omitempty"`
+	CreatedAt   time.Time   `json:"createdAt"`
 }
 
 // AgentDiscoverRequest represents the agent:discover message
@@ -46,6 +46,34 @@ type AgentDiscoverRequest struct {
 type AgentDiscoverResponse struct {
 	Type   string      `json:"type"` // "agent:discovered"
 	Agents []AgentInfo `json:"agents"`
+}
+
+// AgentAttachRequest represents the agent:attach message
+type AgentAttachRequest struct {
+	Type          string `json:"type"` // "agent:attach"
+	AgentID       string `json:"agentId"`
+	UserSessionID string `json:"userSessionId"`
+}
+
+// AgentAttachResponse represents the agent:attached message
+type AgentAttachResponse struct {
+	Type      string    `json:"type"` // "agent:attached"
+	AgentID   string    `json:"agentId"`
+	SessionID string    `json:"sessionId"`
+	ExpiresAt time.Time `json:"expiresAt"`
+}
+
+// AgentDetachRequest represents the agent:detach message
+type AgentDetachRequest struct {
+	Type          string `json:"type"` // "agent:detach"
+	AgentID       string `json:"agentId"`
+	UserSessionID string `json:"userSessionId"`
+}
+
+// AgentDetachResponse represents the agent:detached message
+type AgentDetachResponse struct {
+	Type    string `json:"type"` // "agent:detached"
+	AgentID string `json:"agentId"`
 }
 
 // handleAgentDiscover handles agent:discover messages
@@ -157,4 +185,248 @@ func (s *Server) discoverAgents(ctx context.Context) ([]AgentInfo, error) {
 	}
 
 	return agents, nil
+}
+
+// handleAgentAttach handles agent:attach messages
+// Returns true if connection should be closed
+func (s *Server) handleAgentAttach(ctx context.Context, conn WebSocketConn, rawMessage []byte) bool {
+	var req AgentAttachRequest
+	if err := json.Unmarshal(rawMessage, &req); err != nil {
+		s.logger.Printf("Failed to parse agent:attach message: %v", err)
+		return s.handleValidationError(conn, ValidationError{
+			Code:        "INVALID_MESSAGE",
+			Message:     "Failed to parse agent:attach message",
+			Recoverable: true,
+		})
+	}
+
+	// Validate required fields
+	if req.AgentID == "" {
+		s.logger.Printf("agent:attach missing agentId")
+		errorMsg := NewErrorMessage("MISSING_AGENT_ID", "agentId is required", true)
+		if err := conn.WriteJSON(errorMsg); err != nil {
+			s.logger.Printf("Failed to send error response: %v", err)
+			return true
+		}
+		return false
+	}
+	if req.UserSessionID == "" {
+		s.logger.Printf("agent:attach missing userSessionId")
+		errorMsg := NewErrorMessage("MISSING_SESSION_ID", "userSessionId is required", true)
+		if err := conn.WriteJSON(errorMsg); err != nil {
+			s.logger.Printf("Failed to send error response: %v", err)
+			return true
+		}
+		return false
+	}
+
+	// Get workspace path from Docker
+	workspace, err := s.getAgentWorkspace(ctx, req.AgentID)
+	if err != nil {
+		s.logger.Printf("Failed to get workspace for agent %s: %v", req.AgentID, err)
+		errorMsg := NewErrorMessage("AGENT_NOT_FOUND", fmt.Sprintf("Agent %s not found or workspace unavailable", req.AgentID), true)
+		if err := conn.WriteJSON(errorMsg); err != nil {
+			s.logger.Printf("Failed to send error response: %v", err)
+			return true
+		}
+		return false
+	}
+
+	// Get UserSession from session manager
+	userSession := s.sessionManager.Get(req.UserSessionID)
+	if userSession == nil {
+		s.logger.Printf("User session not found: %s", req.UserSessionID)
+		errorMsg := NewErrorMessage("SESSION_NOT_FOUND", fmt.Sprintf("User session %s not found", req.UserSessionID), true)
+		if err := conn.WriteJSON(errorMsg); err != nil {
+			s.logger.Printf("Failed to send error response: %v", err)
+			return true
+		}
+		return false
+	}
+
+	// Attach agent to user session
+	agentSession, err := userSession.AttachAgent(req.AgentID, workspace)
+	if err != nil {
+		if err == session.ErrAlreadyAttached {
+			// Check if attached to current user
+			existingLease, readErr := session.ReadLease(req.AgentID)
+			if readErr == nil && existingLease.UserSessionID == req.UserSessionID {
+				// Already attached to this user - return success (idempotent)
+				resp := AgentAttachResponse{
+					Type:      "agent:attached",
+					AgentID:   req.AgentID,
+					SessionID: req.UserSessionID,
+					ExpiresAt: existingLease.ExpiresAt,
+				}
+				if err := conn.WriteJSON(resp); err != nil {
+					s.logger.Printf("Failed to send agent:attached response: %v", err)
+					return true
+				}
+				return false
+			}
+			// Attached to different user
+			s.logger.Printf("Agent %s already attached to session %s", req.AgentID, existingLease.UserSessionID)
+			errorMsg := NewErrorMessage("AGENT_ALREADY_ATTACHED", "Agent is already attached to another session", true)
+			if err := conn.WriteJSON(errorMsg); err != nil {
+				s.logger.Printf("Failed to send error response: %v", err)
+				return true
+			}
+			return false
+		}
+		s.logger.Printf("Failed to attach agent %s to session %s: %v", req.AgentID, req.UserSessionID, err)
+		errorMsg := NewErrorMessage("ATTACH_FAILED", fmt.Sprintf("Failed to attach agent: %v", err), true)
+		if err := conn.WriteJSON(errorMsg); err != nil {
+			s.logger.Printf("Failed to send error response: %v", err)
+			return true
+		}
+		return false
+	}
+
+	// Send success response
+	resp := AgentAttachResponse{
+		Type:      "agent:attached",
+		AgentID:   agentSession.GetAgentID(),
+		SessionID: req.UserSessionID,
+		ExpiresAt: agentSession.GetExpiresAt(),
+	}
+
+	if err := conn.WriteJSON(resp); err != nil {
+		s.logger.Printf("Failed to send agent:attached response: %v", err)
+		// Detach agent since we couldn't send the response
+		_ = userSession.DetachAgent(req.AgentID)
+		return true
+	}
+
+	return false
+}
+
+// handleAgentDetach handles agent:detach messages
+// Returns true if connection should be closed
+func (s *Server) handleAgentDetach(ctx context.Context, conn WebSocketConn, rawMessage []byte) bool {
+	var req AgentDetachRequest
+	if err := json.Unmarshal(rawMessage, &req); err != nil {
+		s.logger.Printf("Failed to parse agent:detach message: %v", err)
+		return s.handleValidationError(conn, ValidationError{
+			Code:        "INVALID_MESSAGE",
+			Message:     "Failed to parse agent:detach message",
+			Recoverable: true,
+		})
+	}
+
+	// Validate required fields
+	if req.AgentID == "" {
+		s.logger.Printf("agent:detach missing agentId")
+		errorMsg := NewErrorMessage("MISSING_AGENT_ID", "agentId is required", true)
+		if err := conn.WriteJSON(errorMsg); err != nil {
+			s.logger.Printf("Failed to send error response: %v", err)
+			return true
+		}
+		return false
+	}
+	if req.UserSessionID == "" {
+		s.logger.Printf("agent:detach missing userSessionId")
+		errorMsg := NewErrorMessage("MISSING_SESSION_ID", "userSessionId is required", true)
+		if err := conn.WriteJSON(errorMsg); err != nil {
+			s.logger.Printf("Failed to send error response: %v", err)
+			return true
+		}
+		return false
+	}
+
+	// Get UserSession from session manager
+	userSession := s.sessionManager.Get(req.UserSessionID)
+	if userSession == nil {
+		s.logger.Printf("User session not found: %s", req.UserSessionID)
+		errorMsg := NewErrorMessage("SESSION_NOT_FOUND", fmt.Sprintf("User session %s not found", req.UserSessionID), true)
+		if err := conn.WriteJSON(errorMsg); err != nil {
+			s.logger.Printf("Failed to send error response: %v", err)
+			return true
+		}
+		return false
+	}
+
+	// Check if agent is attached to this session before detaching
+	agent := userSession.GetAgent(req.AgentID)
+	if agent == nil {
+		// Check if it's attached to a different session
+		lease, err := session.ReadLease(req.AgentID)
+		if err == nil && lease.UserSessionID != req.UserSessionID {
+			s.logger.Printf("Agent %s is attached to session %s, not %s", req.AgentID, lease.UserSessionID, req.UserSessionID)
+			errorMsg := NewErrorMessage("NOT_ATTACHED_TO_YOU", "Agent is not attached to your session", true)
+			if err := conn.WriteJSON(errorMsg); err != nil {
+				s.logger.Printf("Failed to send error response: %v", err)
+				return true
+			}
+			return false
+		}
+		// Not attached to anyone - idempotent success
+		resp := AgentDetachResponse{
+			Type:    "agent:detached",
+			AgentID: req.AgentID,
+		}
+		if err := conn.WriteJSON(resp); err != nil {
+			s.logger.Printf("Failed to send agent:detached response: %v", err)
+			return true
+		}
+		return false
+	}
+
+	// Detach agent from user session
+	if err := userSession.DetachAgent(req.AgentID); err != nil {
+		s.logger.Printf("Failed to detach agent %s from session %s: %v", req.AgentID, req.UserSessionID, err)
+		errorMsg := NewErrorMessage("DETACH_FAILED", fmt.Sprintf("Failed to detach agent: %v", err), true)
+		if err := conn.WriteJSON(errorMsg); err != nil {
+			s.logger.Printf("Failed to send error response: %v", err)
+			return true
+		}
+		return false
+	}
+
+	// Send success response
+	resp := AgentDetachResponse{
+		Type:    "agent:detached",
+		AgentID: req.AgentID,
+	}
+
+	if err := conn.WriteJSON(resp); err != nil {
+		s.logger.Printf("Failed to send agent:detached response: %v", err)
+		return true
+	}
+
+	return false
+}
+
+// getAgentWorkspace retrieves the workspace path for an agent from Docker mounts
+func (s *Server) getAgentWorkspace(ctx context.Context, agentID string) (string, error) {
+	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	if err != nil {
+		return "", fmt.Errorf("failed to create Docker client: %w", err)
+	}
+	defer cli.Close()
+
+	// Filter for the specific agent
+	filterArgs := filters.NewArgs()
+	filterArgs.Add("label", fmt.Sprintf("%s=true", LabelNamespace))
+	filterArgs.Add("label", fmt.Sprintf("%s=%s", LabelAgentID, agentID))
+
+	containers, err := cli.ContainerList(ctx, container.ListOptions{
+		All:     false, // Only running containers
+		Filters: filterArgs,
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to list containers: %w", err)
+	}
+
+	if len(containers) == 0 {
+		return "", fmt.Errorf("agent container not found")
+	}
+
+	// Extract workspace from mounts
+	for _, mnt := range containers[0].Mounts {
+		if mnt.Destination == "/workspace" {
+			return mnt.Source, nil
+		}
+	}
+
+	return "", fmt.Errorf("workspace mount not found")
 }

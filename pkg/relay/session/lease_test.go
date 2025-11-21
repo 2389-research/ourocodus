@@ -1,6 +1,7 @@
 package session
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -185,7 +186,11 @@ func TestLease_ExpiredLease(t *testing.T) {
 	// Manually expire the lease by writing it back with expired time
 	lease.ExpiresAt = time.Now().Add(-1 * time.Hour)
 	leasePath := filepath.Join(LeaseDir, agentID+".lease")
-	if err := os.WriteFile(leasePath, []byte(`{"agentId":"`+agentID+`","userSessionId":"`+session1+`","attachedAt":"2020-01-01T00:00:00Z","expiresAt":"2020-01-01T00:00:00Z","heartbeatInterval":"30s"}`), 0600); err != nil {
+	expiredData, err := json.Marshal(lease)
+	if err != nil {
+		t.Fatalf("Failed to marshal expired lease: %v", err)
+	}
+	if err := os.WriteFile(leasePath, expiredData, 0o600); err != nil {
 		t.Fatalf("Failed to write expired lease: %v", err)
 	}
 
@@ -227,7 +232,7 @@ func TestLease_CleanupExpiredLeases(t *testing.T) {
 	// Create an expired lease
 	agentID := "test-expired"
 	leasePath := filepath.Join(LeaseDir, agentID+".lease")
-	if err := os.WriteFile(leasePath, []byte(`{"agentId":"`+agentID+`","userSessionId":"session-expired","attachedAt":"2020-01-01T00:00:00Z","expiresAt":"2020-01-01T00:00:00Z","heartbeatInterval":"30s"}`), 0600); err != nil {
+	if err := os.WriteFile(leasePath, []byte(`{"agentId":"`+agentID+`","userSessionId":"session-expired","attachedAt":"2020-01-01T00:00:00Z","expiresAt":"2020-01-01T00:00:00Z","heartbeatInterval":"30s"}`), 0o600); err != nil {
 		t.Fatalf("Failed to write expired lease: %v", err)
 	}
 
@@ -306,10 +311,10 @@ func TestLease_MaxRetries(t *testing.T) {
 
 	// Create an expired lease that will trigger retries
 	leasePath := filepath.Join(LeaseDir, agentID+".lease")
-	if err := os.MkdirAll(LeaseDir, 0700); err != nil {
+	if err := os.MkdirAll(LeaseDir, 0o700); err != nil {
 		t.Fatalf("Failed to create lease directory: %v", err)
 	}
-	if err := os.WriteFile(leasePath, []byte(`{"agentId":"`+agentID+`","userSessionId":"session-old","attachedAt":"2020-01-01T00:00:00Z","expiresAt":"2020-01-01T00:00:00Z","heartbeatInterval":"30s"}`), 0600); err != nil {
+	if err := os.WriteFile(leasePath, []byte(`{"agentId":"`+agentID+`","userSessionId":"session-old","attachedAt":"2020-01-01T00:00:00Z","expiresAt":"2020-01-01T00:00:00Z","heartbeatInterval":"30s"}`), 0o600); err != nil {
 		t.Fatalf("Failed to write expired lease: %v", err)
 	}
 	defer ReleaseLease(agentID)
@@ -349,14 +354,16 @@ func TestLease_PathTraversal(t *testing.T) {
 			// The lease system should reject these with ErrInvalidAgentID
 			_, err := AcquireLease(tt.agentID, "test-session")
 
-			// Should reject malicious agentIDs
+			// Must reject with ErrInvalidAgentID or OS error
+			// For null bytes, OS may reject before our validation (which is good!)
 			if err == nil {
 				defer ReleaseLease(tt.agentID)
-				t.Errorf("Expected rejection of path traversal attempt (%s), but succeeded", tt.desc)
-			} else if err != ErrInvalidAgentID {
-				// ErrInvalidAgentID is expected, other errors are acceptable too
-				t.Logf("Rejected %s with error: %v (acceptable)", tt.desc, err)
+				t.Errorf("Expected error for path traversal attempt (%s), but succeeded", tt.desc)
+			} else if err != ErrInvalidAgentID && tt.name != "null_byte" {
+				// For non-null-byte cases, we expect our validation error specifically
+				t.Errorf("Expected ErrInvalidAgentID for %s, got %v", tt.desc, err)
 			}
+			// For null_byte case, any error is acceptable (OS-level protection is valid)
 		})
 	}
 }
@@ -432,10 +439,10 @@ func TestLease_CorruptedLeaseFile(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create corrupted lease file
-			if err := os.MkdirAll(LeaseDir, 0700); err != nil {
+			if err := os.MkdirAll(LeaseDir, 0o700); err != nil {
 				t.Fatalf("Failed to create lease directory: %v", err)
 			}
-			if err := os.WriteFile(leasePath, []byte(tt.content), 0600); err != nil {
+			if err := os.WriteFile(leasePath, []byte(tt.content), 0o600); err != nil {
 				t.Fatalf("Failed to write corrupted lease: %v", err)
 			}
 			defer os.Remove(leasePath)
@@ -480,10 +487,10 @@ func TestLease_PermissionDenied(t *testing.T) {
 	defer func() { LeaseDir = oldLeaseDir }()
 
 	// Create lease directory with no write permissions
-	if err := os.MkdirAll(LeaseDir, 0500); err != nil {
+	if err := os.MkdirAll(LeaseDir, 0o500); err != nil {
 		t.Fatalf("Failed to create read-only lease directory: %v", err)
 	}
-	defer os.Chmod(LeaseDir, 0700) // Restore permissions for cleanup
+	defer os.Chmod(LeaseDir, 0o700) // Restore permissions for cleanup
 
 	// Try to acquire lease in read-only directory
 	_, err := AcquireLease("test-agent", "test-session")
@@ -491,7 +498,7 @@ func TestLease_PermissionDenied(t *testing.T) {
 		// macOS might allow this due to filesystem capabilities
 		t.Skip("Platform allows writing to read-only directory (likely macOS with APFS)")
 		// Try to cleanup (will likely fail due to permissions)
-		os.Chmod(LeaseDir, 0700)
+		os.Chmod(LeaseDir, 0o700)
 		ReleaseLease("test-agent")
 	}
 }

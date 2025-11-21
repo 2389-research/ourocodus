@@ -42,17 +42,13 @@ type LeaseLogger interface {
 	Printf(format string, v ...interface{})
 }
 
-var (
-	// DefaultLogger can be set to enable logging for lease operations
-	// If nil, logging is disabled
-	DefaultLogger LeaseLogger
-)
+// DefaultLogger can be set to enable logging for lease operations
+// If nil, logging is disabled
+var DefaultLogger LeaseLogger
 
-var (
-	// LeaseDir is the directory where lease files are stored
-	// Can be overridden via OUROCODUS_LEASE_DIR environment variable
-	LeaseDir = getLeaseDir()
-)
+// LeaseDir is the directory where lease files are stored
+// Can be overridden via OUROCODUS_LEASE_DIR environment variable
+var LeaseDir = getLeaseDir()
 
 // getLeaseDir returns the lease directory path, checking environment variable first
 func getLeaseDir() string {
@@ -142,14 +138,14 @@ func acquireLeaseWithRetry(agentID, userSessionID string, retryCount int) (*Leas
 	}
 
 	// Ensure lease directory exists
-	if err := os.MkdirAll(LeaseDir, 0700); err != nil {
+	if err := os.MkdirAll(LeaseDir, 0o700); err != nil {
 		return nil, fmt.Errorf("failed to create lease directory: %w", err)
 	}
 
 	leasePath := filepath.Join(LeaseDir, agentID+".lease")
 
 	// O_EXCL ensures atomic creation (fails if exists)
-	f, err := os.OpenFile(leasePath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	f, err := os.OpenFile(leasePath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
 		if os.IsExist(err) {
 			// Check if existing lease is expired
@@ -271,7 +267,7 @@ func RenewLease(agentID string) error {
 		return fmt.Errorf("failed to marshal lease: %w", err)
 	}
 
-	if err := os.WriteFile(leasePath, data, 0600); err != nil {
+	if err := os.WriteFile(leasePath, data, 0o600); err != nil {
 		return fmt.Errorf("failed to write lease: %w", err)
 	}
 

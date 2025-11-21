@@ -127,27 +127,40 @@ After multi-model analysis (GPT-5, GPT-5 Codex, O3), we adopt a **"Simple First,
 **Atomic Lease Creation**:
 ```go
 // pkg/relay/session/lease.go
-func AcquireLease(agentID, userSessionID string) error {
-    leasePath := filepath.Join(".agentd/session", agentID+".lease")
+// Returns (*Lease, error) - lease contains the actual expiry time
+// Lease directory can be configured with OUROCODUS_LEASE_DIR environment variable
+func AcquireLease(agentID, userSessionID string) (*Lease, error) {
+    leasePath := filepath.Join(LeaseDir, agentID+".lease")
 
     // O_EXCL ensures atomic creation (fails if exists)
     f, err := os.OpenFile(leasePath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
     if err != nil {
         if os.IsExist(err) {
-            return ErrAlreadyAttached
+            // Check if existing lease is expired and can be reclaimed
+            existing, readErr := ReadLease(agentID)
+            if readErr == nil && IsLeaseExpired(existing) {
+                // Retry with backoff
+                // ... (retry logic omitted for brevity)
+            }
+            return nil, ErrAlreadyAttached
         }
-        return err
+        return nil, err
     }
     defer f.Close()
 
-    lease := Lease{
-        AgentID:       agentID,
-        UserSessionID: userSessionID,
-        AttachedAt:    time.Now(),
-        ExpiresAt:     time.Now().Add(5 * time.Minute),
+    lease := &Lease{
+        AgentID:          agentID,
+        UserSessionID:    userSessionID,
+        AttachedAt:       time.Now(),
+        ExpiresAt:        time.Now().Add(LeaseTTL),
+        HeartbeatInterval: HeartbeatInterval,
     }
 
-    return json.NewEncoder(f).Encode(lease)
+    if err := json.NewEncoder(f).Encode(lease); err != nil {
+        return nil, err
+    }
+
+    return lease, nil
 }
 ```
 

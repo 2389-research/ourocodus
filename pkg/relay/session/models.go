@@ -78,6 +78,7 @@ type AgentSession struct {
 	AgentID   string    // User-chosen agent identifier (e.g., "coder-1", "analyzer")
 	Workspace string    // Path to agent workspace directory
 	createdAt time.Time // Agent creation timestamp
+	expiresAt time.Time // Lease expiration timestamp
 
 	// Mutable fields (protected by mu)
 	state      AgentState
@@ -256,6 +257,11 @@ func (a *AgentSession) GetCreatedAt() time.Time {
 	return a.createdAt
 }
 
+// GetExpiresAt returns the lease expiration timestamp
+func (a *AgentSession) GetExpiresAt() time.Time {
+	return a.expiresAt
+}
+
 // GetLastActive returns the last activity timestamp
 func (a *AgentSession) GetLastActive() time.Time {
 	a.mu.RLock()
@@ -282,6 +288,74 @@ func (a *AgentSession) GetHistory() []Message {
 	history := make([]Message, len(a.history))
 	copy(history, a.history)
 	return history
+}
+
+// --- CLI Agent Adoption methods (Phase 1) ---
+
+// AttachAgent attaches a CLI-spawned agent to this UserSession.
+// Returns the agent session if successful, or error if agent is already attached elsewhere.
+// This operation is idempotent - calling it multiple times for the same agent has no effect.
+func (u *UserSession) AttachAgent(agentID string, workspace string) (*AgentSession, error) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+
+	// Check if already attached to this session (idempotent)
+	if existing, ok := u.agents[agentID]; ok {
+		return existing, nil
+	}
+
+	// Try to acquire lease (this is atomic via O_EXCL)
+	lease, err := AcquireLease(agentID, u.ID)
+	if err != nil {
+		return nil, err // ErrAlreadyAttached if taken by another session
+	}
+
+	// Create AgentSession for this CLI agent
+	// Note: We don't have ACPClient yet (Phase 2 will add ACP communication)
+	// For Phase 1, the agent is simply tracked as "attached" without communication
+	agent := &AgentSession{
+		AgentID:    agentID,
+		Workspace:  workspace,
+		createdAt:  lease.AttachedAt,
+		expiresAt:  lease.ExpiresAt,
+		state:      AgentActive, // CLI agent is already running
+		lastActive: time.Now(),
+		history:    []Message{},
+		acpClient:  nil, // Phase 1: No ACP client (communication added in Phase 3)
+	}
+
+	u.agents[agentID] = agent
+	u.lastActive = time.Now()
+
+	return agent, nil
+}
+
+// DetachAgent detaches a CLI-spawned agent from this UserSession.
+// The agent container continues running but is no longer associated with this session.
+// This operation is idempotent - calling it multiple times has no effect.
+func (u *UserSession) DetachAgent(agentID string) error {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+
+	// Check if agent is attached to this session
+	_, ok := u.agents[agentID]
+	if !ok {
+		// Already detached - idempotent
+		return nil
+	}
+
+	// Release lease (idempotent operation)
+	if err := ReleaseLease(agentID); err != nil {
+		return err
+	}
+
+	// Remove from session's agent map
+	delete(u.agents, agentID)
+	u.lastActive = time.Now()
+
+	// Note: Don't terminate the agent container, it continues running detached
+
+	return nil
 }
 
 // --- Package-private mutators (called only by Manager) ---

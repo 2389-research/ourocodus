@@ -215,11 +215,15 @@ func (l *AgentContainerLauncher) createContainerWithMounts(
 		})
 	}
 
-	// Build labels for container
-	labels := map[string]string{
-		"ourocodus.agent": "true",
-		"agent-id":        config.AgentID,
+	// Build labels for container (merge custom labels with defaults)
+	// Start with custom labels
+	labels := make(map[string]string)
+	for k, v := range config.Labels {
+		labels[k] = v
 	}
+	// Override with reserved labels to prevent tampering
+	labels["ourocodus.agent"] = "true"
+	labels["agent-id"] = config.AgentID
 
 	// Check if we're using container attach mode (where ACP runs as main process)
 	// In this mode, we skip the manager's output logging to avoid competing for stdio streams
