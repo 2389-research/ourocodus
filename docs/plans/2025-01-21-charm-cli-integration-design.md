@@ -8,6 +8,61 @@
 
 Transform `agentd` and `relay` into best-of-breed CLI tools with retro-computing aesthetics. Prioritize usability above all else—charm enhances, never obscures.
 
+## Component Usage Philosophy
+
+**CRITICAL: Use Charm/Bubbles Components to Their Fullest**
+
+All rich mode implementations MUST use official Charm ecosystem components, not manual formatting:
+
+### Required Component Usage
+
+1. **Tables → Bubbles `table`**
+   - ❌ NEVER use manual `fmt.Fprintf` or `fmt.Sprintf` for column formatting
+   - ✅ ALWAYS use `github.com/charmbracelet/bubbles/table`
+   - Provides proper column alignment, borders, and theme integration
+
+2. **Scrollable Content → Bubbles `viewport`**
+   - ❌ NEVER manually truncate or paginate output
+   - ✅ ALWAYS use `github.com/charmbracelet/bubbles/viewport`
+   - Handles keyboard navigation, scrolling, and content overflow
+
+3. **Progress Bars → Bubbles `progress`**
+   - ❌ NEVER draw progress bars with `█░▓` characters manually
+   - ✅ ALWAYS use `github.com/charmbracelet/bubbles/progress`
+   - Supports gradients, animations, and percentage display
+
+4. **Loading Animations → Bubbles `spinner`**
+   - ❌ NEVER implement custom spinner loops
+   - ✅ ALWAYS use `github.com/charmbracelet/bubbles/spinner`
+   - Provides variety of animation styles
+
+5. **User Input → Huh forms**
+   - ❌ NEVER use `fmt.Scan` or manual input loops
+   - ✅ ALWAYS use `github.com/charmbracelet/huh` for interactive forms
+   - Handles validation, multi-step wizards, and accessibility
+
+6. **Full TUI Applications → Bubble Tea**
+   - ❌ NEVER use infinite loops with terminal clearing
+   - ✅ ALWAYS use `github.com/charmbracelet/bubbletea` for interactive TUIs
+   - Elm architecture (Model/Update/View) for maintainable UIs
+
+7. **Layout → Lip Gloss**
+   - ❌ NEVER manually calculate spacing or alignment
+   - ✅ ALWAYS use `lipgloss.JoinHorizontal/JoinVertical` for multi-pane layouts
+   - Handles width/height calculations and borders automatically
+
+### Why This Matters
+
+- **Consistency**: Users get familiar patterns across all commands
+- **Maintainability**: Component updates benefit all commands automatically
+- **Accessibility**: Bubbles components handle terminal quirks and edge cases
+- **Performance**: Optimized rendering and event handling
+- **Quality**: Professional appearance without custom edge case handling
+
+### Code Review Enforcement
+
+All PRs must demonstrate proper component usage. Manual formatting will be rejected in code review.
+
 ## Aesthetic Direction
 
 **Retro Computing (1980s BBS/Terminal Era)**
@@ -113,12 +168,36 @@ Loading:     "LOADING DATASTREAM", "BUFFERING"
 
 **Live Heartbeat Monitor** - Full-screen TUI showing real-time agent health.
 
+**REQUIRED COMPONENTS:**
+- **Bubbles `viewport`** - Scrollable heartbeat log container
+- **Bubbles `progress`** - Lease countdown progress bar
+- **Bubbles `spinner`** - Loading/connecting animation
+- **Harmonica** - Smooth lag bar transitions
+- **Lip Gloss layouts** - Box borders, headers, multi-pane layout
+
 **Rich Mode Features:**
 - Live-scrolling heartbeat log with timestamps
 - Animated lag bars (smooth transitions via Harmonica)
 - Lease countdown with progress bar
 - Color flashes on events (heartbeat arrival = quick pulse)
 - Keyboard shortcuts: [q]uit, [r]efresh, [p]alette, [?]help
+
+**Implementation Requirements:**
+```go
+// MUST use Bubbles components, NOT manual box drawing
+import (
+    "github.com/charmbracelet/bubbles/viewport"
+    "github.com/charmbracelet/bubbles/progress"
+    "github.com/charmbracelet/lipgloss"
+)
+
+// Create viewport for heartbeat stream
+viewport := viewport.New(width, height)
+viewport.SetContent(heartbeatLog)
+
+// Create progress bar for lease
+progressBar := progress.New(progress.WithDefaultGradient())
+```
 
 **Layout:**
 ```
@@ -154,6 +233,13 @@ Loading:     "LOADING DATASTREAM", "BUFFERING"
 
 **Mission Control Dashboard** - Full-screen split-pane TUI for system oversight.
 
+**REQUIRED COMPONENTS:**
+- **Bubbles `table`** - Agent status table, connection list
+- **Bubbles `viewport`** - Scrollable log stream
+- **Bubbles `sparkline`** - Message rate graph
+- **Lip Gloss `JoinHorizontal`/`JoinVertical`** - Multi-pane layout
+- **Bubble Tea model** - Full TUI with Update/View pattern
+
 **Rich Mode Features:**
 - Multi-pane layout: connections, agent status, throughput, logs
 - Live sparkline graph for message rate
@@ -161,6 +247,26 @@ Loading:     "LOADING DATASTREAM", "BUFFERING"
 - Color-coded log stream (success=green, error=red)
 - Real-time NATS subscription updates
 - Keyboard navigation between panes
+
+**Implementation Requirements:**
+```go
+// MUST use Bubble Tea for full TUI, NOT manual layout
+import (
+    tea "github.com/charmbracelet/bubbletea"
+    "github.com/charmbracelet/bubbles/table"
+    "github.com/charmbracelet/bubbles/viewport"
+    "github.com/charmbracelet/lipgloss"
+)
+
+type model struct {
+    agentTable table.Model
+    logView    viewport.Model
+    ready      bool
+}
+
+func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd)
+func (m model) View() string
+```
 
 **Layout:**
 ```
@@ -188,12 +294,39 @@ Loading:     "LOADING DATASTREAM", "BUFFERING"
 
 **Interactive Agent Tables** - Browse agents with keyboard navigation.
 
+**REQUIRED COMPONENTS:**
+- **Bubbles `table`** - Main agent roster display with proper column alignment
+- **Lip Gloss styles** - Theme colors for headers, status indicators, borders
+- **ASCII art** - Header logo and status icons (⚡⏸✗💤)
+
 **Rich Mode Features:**
 - Arrow keys navigate rows
 - Enter shows agent details (expand/collapse)
 - 's' cycles sort modes (name, status, age)
 - Color coding: running=green, idle=yellow, stopped=red
 - Auto-refresh every 2s in watch mode
+
+**Implementation Requirements:**
+```go
+// MUST use Bubbles table component, NOT manual fmt.Fprintf formatting
+import "github.com/charmbracelet/bubbles/table"
+
+table := table.New(
+    table.WithColumns([]table.Column{
+        {Title: "AGENT", Width: 20},
+        {Title: "STATUS", Width: 15},
+        {Title: "SOURCE", Width: 12},
+        {Title: "ATTACHED TO", Width: 15},
+        {Title: "CREATED", Width: 12},
+    }),
+    table.WithRows(rows),
+    table.WithStyles(table.Styles{
+        Header: headerStyle,
+        Cell:   cellStyle,
+        // ... theme-based styling
+    }),
+)
+```
 
 **Layout:**
 ```
@@ -237,6 +370,12 @@ Loading:     "LOADING DATASTREAM", "BUFFERING"
 
 **Interactive Wizard** - Guided agent creation with Huh forms.
 
+**REQUIRED COMPONENTS:**
+- **Huh forms** - Interactive input wizard (text input, select, confirm)
+- **Bubbles `spinner`** - Progress animation during spawn
+- **Bubbles `progress`** - Completion percentage bar
+- **Lip Gloss styling** - Welcome screen, success screen borders
+
 **When run without args**, launch wizard with:
 1. Welcome screen (ASCII art logo)
 2. Agent ID input (validation)
@@ -246,6 +385,30 @@ Loading:     "LOADING DATASTREAM", "BUFFERING"
 6. Confirmation screen
 7. Progress animation (spinner + steps)
 8. Success screen (agent details)
+
+**Implementation Requirements:**
+```go
+// MUST use Huh for forms, Bubbles for progress
+import (
+    "github.com/charmbracelet/huh"
+    "github.com/charmbracelet/bubbles/spinner"
+    "github.com/charmbracelet/bubbles/progress"
+)
+
+form := huh.NewForm(
+    huh.NewGroup(
+        huh.NewInput().
+            Title("Agent ID").
+            Validate(validateAgentID),
+        huh.NewSelect[string]().
+            Title("Image").
+            Options(imageOptions...),
+    ),
+)
+
+spinner := spinner.New()
+progressBar := progress.New()
+```
 
 **Progress Animation:**
 ```
@@ -262,11 +425,25 @@ Loading:     "LOADING DATASTREAM", "BUFFERING"
 
 ### Remaining Commands
 
-**`agentd doctor`**: Styled health checks with visual status indicators.
+**`agentd doctor`**
 
-**`agentd stop`**: Huh confirmation prompts before destructive actions.
+**REQUIRED COMPONENTS:**
+- **Bubbles `list`** - Health check items with pass/fail indicators
+- **Bubbles `spinner`** - Running checks animation
+- **Lip Gloss styling** - Status colors (✓ green, ✗ red, ⚠ yellow)
 
-**`agentd logs`**: Bubbles viewport with syntax-highlighted output.
+**`agentd stop`**
+
+**REQUIRED COMPONENTS:**
+- **Huh `confirm`** - Yes/No prompt before destructive action
+- **Lip Gloss styling** - Warning box around confirmation
+
+**`agentd logs`**
+
+**REQUIRED COMPONENTS:**
+- **Bubbles `viewport`** - Scrollable log container with keyboard navigation
+- **Lip Gloss styling** - Syntax highlighting, log level colors
+- **Bubble Tea model** - If live-streaming logs (--follow mode)
 
 ## Implementation Strategy
 
