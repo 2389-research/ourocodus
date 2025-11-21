@@ -36,6 +36,7 @@ func init() {
 	rootCmd.AddCommand(doctorCmd)
 	rootCmd.AddCommand(spawnCmd)
 	rootCmd.AddCommand(listCmd)
+	rootCmd.AddCommand(discoverCmd)
 	rootCmd.AddCommand(stopCmd)
 	rootCmd.AddCommand(logsCmd)
 	rootCmd.AddCommand(attachCmd)
