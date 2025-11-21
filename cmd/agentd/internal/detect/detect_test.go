@@ -40,8 +40,22 @@ func TestShouldUsePlainMode_CI(t *testing.T) {
 func TestShouldUsePlainMode_Default(t *testing.T) {
 	// Clear environment
 	os.Clearenv()
-	// When no flags or env vars, should return false (use rich mode)
-	assert.False(t, ShouldUsePlainMode(false, false, os.Environ))
+	// When no flags or env vars, auto-detection kicks in
+	// Result depends on TTY status and terminal size
+	// During test execution (non-TTY), should return true (plain mode)
+	result := ShouldUsePlainMode(false, false, os.Environ)
+	// In non-TTY environment (like tests), expect plain mode
+	if !IsTTY() {
+		assert.True(t, result, "should use plain mode in non-TTY environment")
+	} else {
+		// In TTY, result depends on terminal size
+		width, height := GetTerminalSize()
+		if IsTerminalTooSmall(width, height) {
+			assert.True(t, result, "should use plain mode for small terminal")
+		} else {
+			assert.False(t, result, "should use rich mode in adequately-sized TTY")
+		}
+	}
 }
 
 func TestGetTerminalSize(t *testing.T) {

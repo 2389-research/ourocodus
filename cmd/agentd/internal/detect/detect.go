@@ -18,7 +18,7 @@ func IsTTY() bool {
 }
 
 // ShouldUsePlainMode determines if plain mode should be used based on flags and environment.
-// Priority: --json > --plain > environment detection
+// Priority: --json > --plain > environment detection > auto-detect TTY > terminal size
 func ShouldUsePlainMode(jsonMode bool, plainMode bool, getenv func() []string) bool {
 	// Explicit flags take precedence
 	if jsonMode || plainMode {
@@ -46,7 +46,14 @@ func ShouldUsePlainMode(jsonMode bool, plainMode bool, getenv func() []string) b
 		}
 	}
 
-	return false
+	// Auto-detect: if not a TTY, use plain mode
+	if !IsTTY() {
+		return true
+	}
+
+	// Check terminal size
+	width, height := GetTerminalSize()
+	return IsTerminalTooSmall(width, height)
 }
 
 // GetTerminalSize returns the current terminal width and height.
