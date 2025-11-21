@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
 	"text/tabwriter"
 	"time"
 
@@ -99,14 +100,33 @@ func renderRichTable(w io.Writer, agents []AgentInfo, th *theme.RetroTheme) erro
 	// Detect unicode support
 	supportsUnicode := detect.SupportsUnicode()
 
-	// Header with theme styling - use Lip Gloss border instead of manual box
+	// Header with theme styling - rainbow gradient logo
 	logoText := theme.GetLogo(theme.LogoSmall)
+
+	// Apply rainbow gradient to logo (line by line for color variation)
+	lines := strings.Split(logoText, "\n")
+	rainbowColors := []lipgloss.Color{
+		lipgloss.Color("#FF0000"), // Red
+		lipgloss.Color("#FF7F00"), // Orange
+		lipgloss.Color("#FFFF00"), // Yellow
+		lipgloss.Color("#00FF00"), // Green
+		lipgloss.Color("#0000FF"), // Blue
+	}
+
+	var coloredLines []string
+	for i, line := range lines {
+		color := rainbowColors[i%len(rainbowColors)]
+		coloredLine := lipgloss.NewStyle().Foreground(color).Render(line)
+		coloredLines = append(coloredLines, coloredLine)
+	}
+	coloredLogo := strings.Join(coloredLines, "\n")
+
 	logoBox := lipgloss.NewStyle().
 		Border(lipgloss.NormalBorder()).
 		BorderForeground(th.Primary).
 		Padding(1, 2).
 		Align(lipgloss.Center).
-		Render(logoText)
+		Render(coloredLogo)
 	_, _ = fmt.Fprintln(w, logoBox)
 	_, _ = fmt.Fprintln(w)
 
