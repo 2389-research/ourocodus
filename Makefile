@@ -160,6 +160,11 @@ demo:
 	@echo "Running PR #27 features demo..."
 	go run examples/basic-demo/main.go
 
+# Run agent adoption demo (Phase 1/2 features)
+demo-adoption:
+	@echo "Running Agent Adoption Demo (Phase 1/2)..."
+	@./scripts/demo-agent-adoption.sh
+
 # Run interactive REPL for manual testing
 interactive:
 	@echo "Starting interactive REPL..."
