@@ -32,7 +32,7 @@ func TestParseMode(t *testing.T) {
 		{"rich", ModeRich, true},
 		{"plain", ModePlain, true},
 		{"json", ModeJSON, true},
-		{"RICH", ModeRich, true},  // case insensitive
+		{"RICH", ModeRich, true}, // case insensitive
 		{"JSON", ModeJSON, true},
 		{"invalid", ModePlain, false},
 		{"", ModePlain, false},
@@ -49,11 +49,11 @@ func TestParseMode(t *testing.T) {
 
 func TestDetectMode(t *testing.T) {
 	tests := []struct {
-		name       string
-		jsonFlag   bool
-		plainFlag  bool
+		name        string
+		jsonFlag    bool
+		plainFlag   bool
 		shouldPlain bool
-		expected   Mode
+		expected    Mode
 	}{
 		{"json flag", true, false, false, ModeJSON},
 		{"plain flag", false, true, false, ModePlain},

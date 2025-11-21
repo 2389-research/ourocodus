@@ -100,9 +100,9 @@ func TestParsePaletteName(t *testing.T) {
 		{"amber", PaletteAmber, true},
 		{"green", PaletteGreen, true},
 		{"c64", PaletteC64, true},
-		{"CGA", PaletteCGA, true},        // case insensitive
+		{"CGA", PaletteCGA, true}, // case insensitive
 		{"AMBER", PaletteAmber, true},
-		{"invalid", PaletteCGA, false},  // defaults to CGA
+		{"invalid", PaletteCGA, false}, // defaults to CGA
 		{"", PaletteCGA, false},
 	}
 
