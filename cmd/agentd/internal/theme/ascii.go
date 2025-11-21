@@ -2,9 +2,8 @@ package theme
 
 import (
 	"fmt"
-	"math/rand"
+	"math/rand/v2"
 	"strings"
-	"time"
 )
 
 // LogoSize represents the size variant of the logo
@@ -35,8 +34,6 @@ const (
 	MsgError
 	MsgLoading
 )
-
-var rng = rand.New(rand.NewSource(time.Now().UnixNano()))
 
 // GetLogo returns the Ourocodus ASCII art logo in the specified size
 func GetLogo(size LogoSize) string {
@@ -174,5 +171,6 @@ func GetVintageMessage(category MessageCategory) string {
 		return "SYSTEM READY"
 	}
 
-	return choices[rng.Intn(len(choices))]
+	// #nosec G404 -- Using math/rand/v2 for non-cryptographic random message selection
+	return choices[rand.IntN(len(choices))]
 }
