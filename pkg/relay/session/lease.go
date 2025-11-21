@@ -181,7 +181,7 @@ func acquireLeaseWithRetry(agentID, userSessionID string, retryCount int) (*Leas
 		}
 		return nil, fmt.Errorf("failed to create lease file: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	lease := &Lease{
 		AgentID:           agentID,

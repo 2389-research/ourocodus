@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -13,6 +14,7 @@ import (
 	"github.com/2389-research/ourocodus/pkg/containersession"
 	"github.com/2389-research/ourocodus/pkg/relay/session"
 	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/client"
 )
 
@@ -32,7 +34,10 @@ func TestAgentAttachDetach_HappyPath(t *testing.T) {
 	if err != nil {
 		t.Skipf("Docker not available: %v", err)
 	}
-	defer cli.Close()
+	defer func() { _ = cli.Close() }()
+
+	// Ensure alpine image is available
+	ensureAlpineImage(t, cli)
 
 	// Create temporary lease directory
 	tempDir := t.TempDir()
@@ -175,7 +180,10 @@ func TestAgentAttach_NonExistentAgent(t *testing.T) {
 	if err != nil {
 		t.Skipf("Docker not available: %v", err)
 	}
-	defer cli.Close()
+	defer func() { _ = cli.Close() }()
+
+	// Ensure alpine image is available
+	ensureAlpineImage(t, cli)
 
 	// Create temporary lease directory
 	tempDir := t.TempDir()
@@ -243,7 +251,10 @@ func TestAgentAttach_AlreadyAttached(t *testing.T) {
 	if err != nil {
 		t.Skipf("Docker not available: %v", err)
 	}
-	defer cli.Close()
+	defer func() { _ = cli.Close() }()
+
+	// Ensure alpine image is available
+	ensureAlpineImage(t, cli)
 
 	// Create temporary lease directory
 	tempDir := t.TempDir()
@@ -351,7 +362,10 @@ func TestAgentDetach_NotAttachedToYou(t *testing.T) {
 	if err != nil {
 		t.Skipf("Docker not available: %v", err)
 	}
-	defer cli.Close()
+	defer func() { _ = cli.Close() }()
+
+	// Ensure alpine image is available
+	ensureAlpineImage(t, cli)
 
 	// Create temporary lease directory
 	tempDir := t.TempDir()
@@ -463,7 +477,10 @@ func TestAgentAttachDetach_Idempotent(t *testing.T) {
 	if err != nil {
 		t.Skipf("Docker not available: %v", err)
 	}
-	defer cli.Close()
+	defer func() { _ = cli.Close() }()
+
+	// Ensure alpine image is available
+	ensureAlpineImage(t, cli)
 
 	// Create temporary lease directory
 	tempDir := t.TempDir()
@@ -570,6 +587,37 @@ func TestAgentAttachDetach_Idempotent(t *testing.T) {
 }
 
 // Helper functions
+
+// ensureAlpineImage ensures alpine:latest is available, pulling it if necessary
+func ensureAlpineImage(t *testing.T, cli *client.Client) {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	// Check if image exists
+	_, err := cli.ImageInspect(ctx, "alpine:latest")
+	if err == nil {
+		// Image already exists
+		return
+	}
+
+	// Try to pull image
+	t.Logf("Pulling alpine:latest image...")
+	reader, err := cli.ImagePull(ctx, "docker.io/library/alpine:latest", image.PullOptions{})
+	if err != nil {
+		t.Skipf("Cannot pull alpine:latest image: %v", err)
+	}
+	defer func() { _ = reader.Close() }()
+
+	// Wait for pull to complete
+	_, err = io.Copy(io.Discard, reader)
+	if err != nil {
+		t.Skipf("Failed to pull alpine:latest image: %v", err)
+	}
+
+	t.Logf("Successfully pulled alpine:latest image")
+}
 
 // setupDockerSocket configures the Docker socket for Colima if available
 func setupDockerSocket(t *testing.T) {

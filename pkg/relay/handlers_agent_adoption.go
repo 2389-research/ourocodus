@@ -121,7 +121,7 @@ func (s *Server) discoverAgents(ctx context.Context) ([]AgentInfo, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Docker client: %w", err)
 	}
-	defer cli.Close()
+	defer func() { _ = cli.Close() }()
 
 	// Filter for agent containers
 	filterArgs := filters.NewArgs()
@@ -402,7 +402,7 @@ func (s *Server) getAgentWorkspace(ctx context.Context, agentID string) (string,
 	if err != nil {
 		return "", fmt.Errorf("failed to create Docker client: %w", err)
 	}
-	defer cli.Close()
+	defer func() { _ = cli.Close() }()
 
 	// Filter for the specific agent
 	filterArgs := filters.NewArgs()
