@@ -4,12 +4,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"strings"
 	"text/tabwriter"
 	"time"
 
 	"github.com/2389-research/ourocodus/cmd/agentd/internal/output"
 	"github.com/2389-research/ourocodus/cmd/agentd/internal/theme"
+	"github.com/charmbracelet/bubbles/table"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -100,47 +100,65 @@ func renderRichTable(w io.Writer, agents []AgentInfo, th *theme.RetroTheme) erro
 	_, _ = fmt.Fprintln(w, header)
 	_, _ = fmt.Fprintln(w)
 
-	// Table header
-	headerStyle := lipgloss.NewStyle().
-		Foreground(th.Primary).
-		Bold(true)
+	// Define table columns with proper widths
+	columns := []table.Column{
+		{Title: "AGENT", Width: 20},
+		{Title: "STATUS", Width: 15},
+		{Title: "SOURCE", Width: 12},
+		{Title: "ATTACHED TO", Width: 15},
+		{Title: "CREATED", Width: 12},
+	}
 
-	_, _ = fmt.Fprintf(w, "%s  %s  %s  %s  %s\n",
-		headerStyle.Render("AGENT"),
-		headerStyle.Render("STATUS"),
-		headerStyle.Render("SOURCE"),
-		headerStyle.Render("ATTACHED TO"),
-		headerStyle.Render("CREATED"),
-	)
-
-	// Separator line
-	separatorStyle := lipgloss.NewStyle().Foreground(th.Muted)
-	_, _ = fmt.Fprintln(w, separatorStyle.Render(strings.Repeat("─", 80)))
-
-	// Table rows
+	// Build table rows
+	rows := make([]table.Row, 0, len(agents))
 	for _, agent := range agents {
 		statusIcon := getStatusIcon(agent.Status)
 		statusColor := getStatusColor(agent.Status, th)
 
+		// Format attached session
 		attachedTo := "─"
 		if agent.AttachedTo != "" {
-			accentStyle := lipgloss.NewStyle().Foreground(th.Accent)
-			attachedTo = accentStyle.Render(formatShortID(agent.AttachedTo, 9))
+			attachedTo = formatShortID(agent.AttachedTo, 9)
 		}
 
+		// Apply styling to cell content
 		sourceStyle := getSourceStyle(agent.SpawnSource, th)
 		mutedStyle := lipgloss.NewStyle().Foreground(th.Muted)
 
-		_, _ = fmt.Fprintf(w, "%s  %s %s  %s  %s  %s\n",
-			th.Highlight.Render(agent.AgentID),
-			statusIcon,
-			statusColor.Render(agent.Status),
+		rows = append(rows, table.Row{
+			agent.AgentID,
+			statusIcon + " " + statusColor.Render(agent.Status),
 			sourceStyle.Render(agent.SpawnSource),
 			attachedTo,
 			mutedStyle.Render(formatDuration(time.Since(agent.CreatedAt))),
-		)
+		})
 	}
 
+	// Create and configure the table
+	t := table.New(
+		table.WithColumns(columns),
+		table.WithRows(rows),
+		table.WithFocused(false),
+	)
+
+	// Apply theme styling to table
+	tableStyle := table.DefaultStyles()
+	tableStyle.Header = tableStyle.Header.
+		BorderStyle(lipgloss.NormalBorder()).
+		BorderForeground(th.Primary).
+		BorderBottom(true).
+		Bold(true).
+		Foreground(th.Primary)
+	tableStyle.Selected = tableStyle.Selected.
+		Foreground(th.Accent).
+		Bold(false)
+	tableStyle.Cell = tableStyle.Cell.
+		Foreground(th.Accent)
+
+	t.SetStyles(tableStyle)
+
+	// Render the table
+	_, _ = fmt.Fprintln(w, t.View())
 	_, _ = fmt.Fprintln(w)
 
 	// Footer with summary
