@@ -187,20 +187,9 @@ func (s *Server) discoverAgents(ctx context.Context) ([]AgentInfo, error) {
 	return agents, nil
 }
 
-// handleAgentAttach handles agent:attach messages
+// validateAttachRequest validates required fields for agent:attach
 // Returns true if connection should be closed
-func (s *Server) handleAgentAttach(ctx context.Context, conn WebSocketConn, rawMessage []byte) bool {
-	var req AgentAttachRequest
-	if err := json.Unmarshal(rawMessage, &req); err != nil {
-		s.logger.Printf("Failed to parse agent:attach message: %v", err)
-		return s.handleValidationError(conn, ValidationError{
-			Code:        "INVALID_MESSAGE",
-			Message:     "Failed to parse agent:attach message",
-			Recoverable: true,
-		})
-	}
-
-	// Validate required fields
+func (s *Server) validateAttachRequest(conn WebSocketConn, req *AgentAttachRequest) bool {
 	if req.AgentID == "" {
 		s.logger.Printf("agent:attach missing agentId")
 		errorMsg := NewErrorMessage("MISSING_AGENT_ID", "agentId is required", true)
@@ -218,6 +207,54 @@ func (s *Server) handleAgentAttach(ctx context.Context, conn WebSocketConn, rawM
 			return true
 		}
 		return false
+	}
+	return false
+}
+
+// handleAlreadyAttachedError handles the case where agent is already attached
+// Returns true if connection should be closed
+func (s *Server) handleAlreadyAttachedError(conn WebSocketConn, req *AgentAttachRequest) bool {
+	existingLease, readErr := session.ReadLease(req.AgentID)
+	if readErr == nil && existingLease.UserSessionID == req.UserSessionID {
+		// Already attached to this user - return success (idempotent)
+		resp := AgentAttachResponse{
+			Type:      "agent:attached",
+			AgentID:   req.AgentID,
+			SessionID: req.UserSessionID,
+			ExpiresAt: existingLease.ExpiresAt,
+		}
+		if err := conn.WriteJSON(resp); err != nil {
+			s.logger.Printf("Failed to send agent:attached response: %v", err)
+			return true
+		}
+		return false
+	}
+	// Attached to different user
+	s.logger.Printf("Agent %s already attached to session %s", req.AgentID, existingLease.UserSessionID)
+	errorMsg := NewErrorMessage("AGENT_ALREADY_ATTACHED", "Agent is already attached to another session", true)
+	if err := conn.WriteJSON(errorMsg); err != nil {
+		s.logger.Printf("Failed to send error response: %v", err)
+		return true
+	}
+	return false
+}
+
+// handleAgentAttach handles agent:attach messages
+// Returns true if connection should be closed
+func (s *Server) handleAgentAttach(ctx context.Context, conn WebSocketConn, rawMessage []byte) bool {
+	var req AgentAttachRequest
+	if err := json.Unmarshal(rawMessage, &req); err != nil {
+		s.logger.Printf("Failed to parse agent:attach message: %v", err)
+		return s.handleValidationError(conn, ValidationError{
+			Code:        "INVALID_MESSAGE",
+			Message:     "Failed to parse agent:attach message",
+			Recoverable: true,
+		})
+	}
+
+	// Validate required fields
+	if shouldClose := s.validateAttachRequest(conn, &req); shouldClose {
+		return shouldClose
 	}
 
 	// Get workspace path from Docker
@@ -248,30 +285,7 @@ func (s *Server) handleAgentAttach(ctx context.Context, conn WebSocketConn, rawM
 	agentSession, err := userSession.AttachAgent(req.AgentID, workspace)
 	if err != nil {
 		if err == session.ErrAlreadyAttached {
-			// Check if attached to current user
-			existingLease, readErr := session.ReadLease(req.AgentID)
-			if readErr == nil && existingLease.UserSessionID == req.UserSessionID {
-				// Already attached to this user - return success (idempotent)
-				resp := AgentAttachResponse{
-					Type:      "agent:attached",
-					AgentID:   req.AgentID,
-					SessionID: req.UserSessionID,
-					ExpiresAt: existingLease.ExpiresAt,
-				}
-				if err := conn.WriteJSON(resp); err != nil {
-					s.logger.Printf("Failed to send agent:attached response: %v", err)
-					return true
-				}
-				return false
-			}
-			// Attached to different user
-			s.logger.Printf("Agent %s already attached to session %s", req.AgentID, existingLease.UserSessionID)
-			errorMsg := NewErrorMessage("AGENT_ALREADY_ATTACHED", "Agent is already attached to another session", true)
-			if err := conn.WriteJSON(errorMsg); err != nil {
-				s.logger.Printf("Failed to send error response: %v", err)
-				return true
-			}
-			return false
+			return s.handleAlreadyAttachedError(conn, &req)
 		}
 		s.logger.Printf("Failed to attach agent %s to session %s: %v", req.AgentID, req.UserSessionID, err)
 		errorMsg := NewErrorMessage("ATTACH_FAILED", fmt.Sprintf("Failed to attach agent: %v", err), true)
@@ -300,20 +314,9 @@ func (s *Server) handleAgentAttach(ctx context.Context, conn WebSocketConn, rawM
 	return false
 }
 
-// handleAgentDetach handles agent:detach messages
+// validateDetachRequest validates required fields for agent:detach
 // Returns true if connection should be closed
-func (s *Server) handleAgentDetach(ctx context.Context, conn WebSocketConn, rawMessage []byte) bool {
-	var req AgentDetachRequest
-	if err := json.Unmarshal(rawMessage, &req); err != nil {
-		s.logger.Printf("Failed to parse agent:detach message: %v", err)
-		return s.handleValidationError(conn, ValidationError{
-			Code:        "INVALID_MESSAGE",
-			Message:     "Failed to parse agent:detach message",
-			Recoverable: true,
-		})
-	}
-
-	// Validate required fields
+func (s *Server) validateDetachRequest(conn WebSocketConn, req *AgentDetachRequest) bool {
 	if req.AgentID == "" {
 		s.logger.Printf("agent:detach missing agentId")
 		errorMsg := NewErrorMessage("MISSING_AGENT_ID", "agentId is required", true)
@@ -332,6 +335,55 @@ func (s *Server) handleAgentDetach(ctx context.Context, conn WebSocketConn, rawM
 		}
 		return false
 	}
+	return false
+}
+
+// checkDetachOwnership checks if agent can be detached by this session
+// Returns (shouldClose, handled) - if handled is true, response was already sent
+func (s *Server) checkDetachOwnership(conn WebSocketConn, req *AgentDetachRequest, agent *session.AgentSession) (bool, bool) {
+	if agent == nil {
+		// Check if it's attached to a different session
+		lease, err := session.ReadLease(req.AgentID)
+		if err == nil && lease.UserSessionID != req.UserSessionID {
+			s.logger.Printf("Agent %s is attached to session %s, not %s", req.AgentID, lease.UserSessionID, req.UserSessionID)
+			errorMsg := NewErrorMessage("NOT_ATTACHED_TO_YOU", "Agent is not attached to your session", true)
+			if err := conn.WriteJSON(errorMsg); err != nil {
+				s.logger.Printf("Failed to send error response: %v", err)
+				return true, true
+			}
+			return false, true
+		}
+		// Not attached to anyone - idempotent success
+		resp := AgentDetachResponse{
+			Type:    "agent:detached",
+			AgentID: req.AgentID,
+		}
+		if err := conn.WriteJSON(resp); err != nil {
+			s.logger.Printf("Failed to send agent:detached response: %v", err)
+			return true, true
+		}
+		return false, true
+	}
+	return false, false
+}
+
+// handleAgentDetach handles agent:detach messages
+// Returns true if connection should be closed
+func (s *Server) handleAgentDetach(ctx context.Context, conn WebSocketConn, rawMessage []byte) bool {
+	var req AgentDetachRequest
+	if err := json.Unmarshal(rawMessage, &req); err != nil {
+		s.logger.Printf("Failed to parse agent:detach message: %v", err)
+		return s.handleValidationError(conn, ValidationError{
+			Code:        "INVALID_MESSAGE",
+			Message:     "Failed to parse agent:detach message",
+			Recoverable: true,
+		})
+	}
+
+	// Validate required fields
+	if shouldClose := s.validateDetachRequest(conn, &req); shouldClose {
+		return shouldClose
+	}
 
 	// Get UserSession from session manager
 	userSession := s.sessionManager.Get(req.UserSessionID)
@@ -347,28 +399,8 @@ func (s *Server) handleAgentDetach(ctx context.Context, conn WebSocketConn, rawM
 
 	// Check if agent is attached to this session before detaching
 	agent := userSession.GetAgent(req.AgentID)
-	if agent == nil {
-		// Check if it's attached to a different session
-		lease, err := session.ReadLease(req.AgentID)
-		if err == nil && lease.UserSessionID != req.UserSessionID {
-			s.logger.Printf("Agent %s is attached to session %s, not %s", req.AgentID, lease.UserSessionID, req.UserSessionID)
-			errorMsg := NewErrorMessage("NOT_ATTACHED_TO_YOU", "Agent is not attached to your session", true)
-			if err := conn.WriteJSON(errorMsg); err != nil {
-				s.logger.Printf("Failed to send error response: %v", err)
-				return true
-			}
-			return false
-		}
-		// Not attached to anyone - idempotent success
-		resp := AgentDetachResponse{
-			Type:    "agent:detached",
-			AgentID: req.AgentID,
-		}
-		if err := conn.WriteJSON(resp); err != nil {
-			s.logger.Printf("Failed to send agent:detached response: %v", err)
-			return true
-		}
-		return false
+	if shouldClose, handled := s.checkDetachOwnership(conn, &req, agent); handled {
+		return shouldClose
 	}
 
 	// Detach agent from user session

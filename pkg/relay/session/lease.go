@@ -145,6 +145,7 @@ func acquireLeaseWithRetry(agentID, userSessionID string, retryCount int) (*Leas
 	leasePath := filepath.Join(LeaseDir, agentID+".lease")
 
 	// O_EXCL ensures atomic creation (fails if exists)
+	//nolint:gosec // G304: False positive - agentID is validated above to prevent path traversal
 	f, err := os.OpenFile(leasePath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
 		if os.IsExist(err) {
@@ -230,6 +231,7 @@ func ReadLease(agentID string) (*Lease, error) {
 	}
 
 	leasePath := filepath.Join(LeaseDir, agentID+".lease")
+	//nolint:gosec // G304: False positive - agentID is validated above to prevent path traversal
 	data, err := os.ReadFile(leasePath)
 	if err != nil {
 		if os.IsNotExist(err) {
