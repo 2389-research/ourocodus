@@ -145,7 +145,7 @@ func buildSpawnConfig(agentID string) (container.SpawnConfig, error) {
 		APIKey:     apiKey,
 		// GitSSHKey and GitHubToken handled by credential mounter
 		Labels: map[string]string{
-			"ourocodus.agent/spawn-source": "cli",
+			LabelSpawnSource: "cli",
 		},
 	}
 

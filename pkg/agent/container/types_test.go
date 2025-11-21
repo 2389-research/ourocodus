@@ -140,7 +140,6 @@ func TestSpawnConfig_WithCustomLabels(t *testing.T) {
 	config := SpawnConfig{
 		AgentID:   "coder-abc123",
 		ImageName: "ourocodus/agent:latest",
-		Command:   []string{"/bin/bash"},
 		Labels: map[string]string{
 			"ourocodus.agent/spawn-source": "cli",
 			"custom-label":                 "custom-value",
