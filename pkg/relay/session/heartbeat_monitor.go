@@ -11,13 +11,11 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/2389-research/ourocodus/pkg/heartbeat"
 	"github.com/nats-io/nats.go"
 )
 
 const (
-	// HeartbeatSubjectPattern is the NATS subject pattern for subscribing to all agent heartbeats
-	HeartbeatSubjectPattern = "agent.heartbeat.*"
-
 	// ReaperInterval is how often the reaper checks for expired leases
 	ReaperInterval = 1 * time.Minute
 )
@@ -30,13 +28,6 @@ type HeartbeatMonitor struct {
 	mu       sync.RWMutex
 	logger   atomic.Value // *log.Logger
 	stopOnce sync.Once
-}
-
-// heartbeatMessage represents the structure of a heartbeat message from an agent
-type heartbeatMessage struct {
-	AgentID   string    `json:"agentId"`
-	Timestamp time.Time `json:"timestamp"`
-	Status    string    `json:"status"`
 }
 
 // NewHeartbeatMonitor creates a new heartbeat monitor.
@@ -87,8 +78,8 @@ func NewHeartbeatMonitor(natsURL string) (*HeartbeatMonitor, error) {
 // The monitor continues until the context is cancelled.
 func (h *HeartbeatMonitor) Start(ctx context.Context) error {
 	// Subscribe to all agent heartbeats
-	sub, err := h.nats.Subscribe(HeartbeatSubjectPattern, func(msg *nats.Msg) {
-		var hb heartbeatMessage
+	sub, err := h.nats.Subscribe(heartbeat.SubjectPattern, func(msg *nats.Msg) {
+		var hb heartbeat.Message
 
 		if err := json.Unmarshal(msg.Data, &hb); err != nil {
 			h.getLogger().Printf("Failed to unmarshal heartbeat: %v", err)

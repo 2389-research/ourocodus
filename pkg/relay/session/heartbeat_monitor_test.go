@@ -10,36 +10,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nats-io/nats-server/v2/server"
+	"github.com/2389-research/ourocodus/pkg/heartbeat"
+	"github.com/2389-research/ourocodus/pkg/internal/testutil"
 	"github.com/nats-io/nats.go"
 )
 
-// startTestNATSServer starts an embedded NATS server for testing
-func startTestNATSServer(t *testing.T) *server.Server {
-	t.Helper()
-
-	opts := &server.Options{
-		Host: "127.0.0.1",
-		Port: -1, // Random port
-	}
-
-	ns, err := server.NewServer(opts)
-	if err != nil {
-		t.Fatalf("failed to create NATS server: %v", err)
-	}
-
-	go ns.Start()
-
-	// Wait for server to be ready
-	if !ns.ReadyForConnections(5 * time.Second) {
-		t.Fatal("NATS server not ready")
-	}
-
-	return ns
-}
-
 func TestNewHeartbeatMonitor(t *testing.T) {
-	ns := startTestNATSServer(t)
+	ns := testutil.StartTestNATSServer(t)
 	defer ns.Shutdown()
 
 	natsURL := ns.ClientURL()
@@ -89,7 +66,7 @@ func TestNewHeartbeatMonitor(t *testing.T) {
 }
 
 func TestHeartbeatMonitor_ReceivesHeartbeat(t *testing.T) {
-	ns := startTestNATSServer(t)
+	ns := testutil.StartTestNATSServer(t)
 	defer ns.Shutdown()
 
 	natsURL := ns.ClientURL()
@@ -117,11 +94,7 @@ func TestHeartbeatMonitor_ReceivesHeartbeat(t *testing.T) {
 	defer nc.Close()
 
 	// Publish heartbeat
-	hb := struct {
-		AgentID   string    `json:"agentId"`
-		Timestamp time.Time `json:"timestamp"`
-		Status    string    `json:"status"`
-	}{
+	hb := heartbeat.Message{
 		AgentID:   agentID,
 		Timestamp: time.Now(),
 		Status:    "active",
@@ -148,7 +121,7 @@ func TestHeartbeatMonitor_ReceivesHeartbeat(t *testing.T) {
 }
 
 func TestHeartbeatMonitor_RenewLeaseOnHeartbeat(t *testing.T) {
-	ns := startTestNATSServer(t)
+	ns := testutil.StartTestNATSServer(t)
 	defer ns.Shutdown()
 
 	// Setup temporary lease directory
@@ -193,11 +166,7 @@ func TestHeartbeatMonitor_RenewLeaseOnHeartbeat(t *testing.T) {
 	defer nc.Close()
 
 	// Publish heartbeat
-	hb := struct {
-		AgentID   string    `json:"agentId"`
-		Timestamp time.Time `json:"timestamp"`
-		Status    string    `json:"status"`
-	}{
+	hb := heartbeat.Message{
 		AgentID:   agentID,
 		Timestamp: time.Now(),
 		Status:    "active",
@@ -229,7 +198,7 @@ func TestHeartbeatMonitor_RenewLeaseOnHeartbeat(t *testing.T) {
 }
 
 func TestHeartbeatMonitor_NoRenewalForDetachedAgent(t *testing.T) {
-	ns := startTestNATSServer(t)
+	ns := testutil.StartTestNATSServer(t)
 	defer ns.Shutdown()
 
 	// Setup temporary lease directory
@@ -269,11 +238,7 @@ func TestHeartbeatMonitor_NoRenewalForDetachedAgent(t *testing.T) {
 	defer nc.Close()
 
 	// Publish heartbeat
-	hb := struct {
-		AgentID   string    `json:"agentId"`
-		Timestamp time.Time `json:"timestamp"`
-		Status    string    `json:"status"`
-	}{
+	hb := heartbeat.Message{
 		AgentID:   agentID,
 		Timestamp: time.Now(),
 		Status:    "active",
@@ -310,7 +275,7 @@ func TestHeartbeatMonitor_ReapExpiredLeases(t *testing.T) {
 		t.Skip("skipping reaper test in short mode")
 	}
 
-	ns := startTestNATSServer(t)
+	ns := testutil.StartTestNATSServer(t)
 	defer ns.Shutdown()
 
 	// Setup temporary lease directory
@@ -366,7 +331,7 @@ func TestHeartbeatMonitor_ReapExpiredLeases(t *testing.T) {
 }
 
 func TestHeartbeatMonitor_GracefulStop(t *testing.T) {
-	ns := startTestNATSServer(t)
+	ns := testutil.StartTestNATSServer(t)
 	defer ns.Shutdown()
 
 	natsURL := ns.ClientURL()
@@ -394,7 +359,7 @@ func TestHeartbeatMonitor_GracefulStop(t *testing.T) {
 }
 
 func TestHeartbeatMonitor_InvalidHeartbeatMessage(t *testing.T) {
-	ns := startTestNATSServer(t)
+	ns := testutil.StartTestNATSServer(t)
 	defer ns.Shutdown()
 
 	natsURL := ns.ClientURL()

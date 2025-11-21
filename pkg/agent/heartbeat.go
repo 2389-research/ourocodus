@@ -10,24 +10,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/2389-research/ourocodus/pkg/heartbeat"
 	"github.com/nats-io/nats.go"
 )
-
-const (
-	// HeartbeatInterval is the interval between heartbeat publishes
-	HeartbeatInterval = 30 * time.Second
-
-	// HeartbeatSubject is the NATS subject pattern for agent heartbeats
-	// The %s will be replaced with the agent ID
-	HeartbeatSubject = "agent.heartbeat.%s"
-)
-
-// Heartbeat represents a heartbeat message published by an agent
-type Heartbeat struct {
-	AgentID   string    `json:"agentId"`
-	Timestamp time.Time `json:"timestamp"`
-	Status    string    `json:"status"`
-}
 
 // HeartbeatPublisher publishes periodic heartbeats to NATS for liveness detection
 type HeartbeatPublisher struct {
@@ -82,15 +67,15 @@ func NewHeartbeatPublisher(agentID, natsURL string) (*HeartbeatPublisher, error)
 // Start begins publishing heartbeats at regular intervals.
 // This method blocks until the context is cancelled.
 // It publishes an immediate heartbeat on start, then subsequent heartbeats
-// every HeartbeatInterval (30 seconds).
+// every 30 seconds (heartbeat.Interval).
 //
 // The heartbeat publisher is designed to be resilient - publish failures
 // are logged but do not stop the publisher or crash the agent.
 //
 // Start should only be called once per HeartbeatPublisher instance.
 func (h *HeartbeatPublisher) Start(ctx context.Context) {
-	subject := fmt.Sprintf(HeartbeatSubject, h.agentID)
-	ticker := time.NewTicker(HeartbeatInterval)
+	subject := fmt.Sprintf("%s.%s", heartbeat.SubjectPrefix, h.agentID)
+	ticker := time.NewTicker(heartbeat.Interval)
 	defer ticker.Stop()
 
 	// Send initial heartbeat immediately
@@ -109,7 +94,7 @@ func (h *HeartbeatPublisher) Start(ctx context.Context) {
 // publish sends a single heartbeat message to NATS.
 // Errors are logged but do not interrupt the heartbeat loop.
 func (h *HeartbeatPublisher) publish(subject string) {
-	hb := Heartbeat{
+	hb := heartbeat.Message{
 		AgentID:   h.agentID,
 		Timestamp: time.Now(),
 		Status:    "active",

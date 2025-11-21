@@ -8,36 +8,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nats-io/nats-server/v2/server"
+	"github.com/2389-research/ourocodus/pkg/heartbeat"
+	"github.com/2389-research/ourocodus/pkg/internal/testutil"
 	"github.com/nats-io/nats.go"
 )
 
-// startTestNATSServer starts an embedded NATS server for testing
-func startTestNATSServer(t *testing.T) *server.Server {
-	t.Helper()
-
-	opts := &server.Options{
-		Host: "127.0.0.1",
-		Port: -1, // Random port
-	}
-
-	ns, err := server.NewServer(opts)
-	if err != nil {
-		t.Fatalf("failed to create NATS server: %v", err)
-	}
-
-	go ns.Start()
-
-	// Wait for server to be ready
-	if !ns.ReadyForConnections(5 * time.Second) {
-		t.Fatal("NATS server not ready")
-	}
-
-	return ns
-}
-
 func TestNewHeartbeatPublisher(t *testing.T) {
-	ns := startTestNATSServer(t)
+	ns := testutil.StartTestNATSServer(t)
 	defer ns.Shutdown()
 
 	natsURL := ns.ClientURL()
@@ -90,7 +67,7 @@ func TestNewHeartbeatPublisher(t *testing.T) {
 }
 
 func TestHeartbeatPublisher_ImmediatePublish(t *testing.T) {
-	ns := startTestNATSServer(t)
+	ns := testutil.StartTestNATSServer(t)
 	defer ns.Shutdown()
 
 	natsURL := ns.ClientURL()
@@ -103,11 +80,11 @@ func TestHeartbeatPublisher_ImmediatePublish(t *testing.T) {
 	}
 	defer nc.Close()
 
-	heartbeats := make(chan Heartbeat, 10)
+	heartbeats := make(chan heartbeat.Message, 10)
 	subject := "agent.heartbeat.*"
 
 	_, err = nc.Subscribe(subject, func(msg *nats.Msg) {
-		var hb Heartbeat
+		var hb heartbeat.Message
 		if err := json.Unmarshal(msg.Data, &hb); err != nil {
 			t.Errorf("failed to unmarshal heartbeat: %v", err)
 			return
@@ -152,7 +129,7 @@ func TestHeartbeatPublisher_PeriodicPublish(t *testing.T) {
 		t.Skip("skipping periodic publish test in short mode")
 	}
 
-	ns := startTestNATSServer(t)
+	ns := testutil.StartTestNATSServer(t)
 	defer ns.Shutdown()
 
 	natsURL := ns.ClientURL()
@@ -165,11 +142,11 @@ func TestHeartbeatPublisher_PeriodicPublish(t *testing.T) {
 	}
 	defer nc.Close()
 
-	heartbeats := make(chan Heartbeat, 10)
+	heartbeats := make(chan heartbeat.Message, 10)
 	subject := "agent.heartbeat.*"
 
 	_, err = nc.Subscribe(subject, func(msg *nats.Msg) {
-		var hb Heartbeat
+		var hb heartbeat.Message
 		if err := json.Unmarshal(msg.Data, &hb); err != nil {
 			return
 		}
@@ -214,7 +191,7 @@ collectLoop:
 }
 
 func TestHeartbeatPublisher_GracefulStop(t *testing.T) {
-	ns := startTestNATSServer(t)
+	ns := testutil.StartTestNATSServer(t)
 	defer ns.Shutdown()
 
 	natsURL := ns.ClientURL()
@@ -243,7 +220,7 @@ func TestHeartbeatPublisher_GracefulStop(t *testing.T) {
 }
 
 func TestHeartbeatPublisher_LoggingOnError(t *testing.T) {
-	ns := startTestNATSServer(t)
+	ns := testutil.StartTestNATSServer(t)
 	defer ns.Shutdown()
 
 	natsURL := ns.ClientURL()
@@ -277,7 +254,7 @@ func TestHeartbeatPublisher_LoggingOnError(t *testing.T) {
 }
 
 func TestHeartbeatPublisher_ContextCancellation(t *testing.T) {
-	ns := startTestNATSServer(t)
+	ns := testutil.StartTestNATSServer(t)
 	defer ns.Shutdown()
 
 	natsURL := ns.ClientURL()
