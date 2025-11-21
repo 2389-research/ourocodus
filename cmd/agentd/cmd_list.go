@@ -8,6 +8,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/2389-research/ourocodus/pkg/relay/session"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/client"
@@ -62,6 +63,7 @@ type agentInfo struct {
 	Status      string
 	Workspace   string
 	SpawnSource string
+	AttachedTo  string
 	CreatedAt   time.Time
 }
 
@@ -84,6 +86,13 @@ func listAgentsFromDocker(ctx context.Context) ([]agentInfo, error) {
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to list containers: %w", err)
+	}
+
+	// Get all leases to determine attached status
+	leases, err := listLeasesForList()
+	if err != nil {
+		// Don't fail if leases can't be read, just continue without adoption status
+		leases = make(map[string]string)
 	}
 
 	agents := make([]agentInfo, 0, len(containers))
@@ -114,12 +123,16 @@ func listAgentsFromDocker(ctx context.Context) ([]agentInfo, error) {
 			spawnSource = "unknown"
 		}
 
+		// Get attachment status from leases
+		attachedTo := leases[agentID]
+
 		agents = append(agents, agentInfo{
 			AgentID:     agentID,
 			ContainerID: c.ID,
 			Status:      c.State,
 			Workspace:   workspace,
 			SpawnSource: spawnSource,
+			AttachedTo:  attachedTo,
 			CreatedAt:   time.Unix(c.Created, 0),
 		})
 	}
@@ -134,18 +147,24 @@ func printListTableFromAgentInfo(agents []agentInfo) error {
 	// Print header with color
 	headerColor := color.New(color.FgCyan, color.Bold)
 	_, _ = fmt.Fprintln(w)
-	_, _ = headerColor.Fprintln(w, "AGENT\tSTATUS\tSOURCE\tWORKSPACE\tCONTAINER\tCREATED")
+	_, _ = headerColor.Fprintln(w, "AGENT\tSTATUS\tSOURCE\tATTACHED TO\tWORKSPACE\tCREATED")
 
 	for _, agent := range agents {
 		// Color the agent ID
 		agentName := color.New(color.FgWhite, color.Bold).Sprint(agent.AgentID)
 
+		// Format attached status
+		attachedTo := "-"
+		if agent.AttachedTo != "" {
+			attachedTo = formatAttachedTo(agent.AttachedTo)
+		}
+
 		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
 			agentName,
 			formatStateString(agent.Status),
 			formatSpawnSource(agent.SpawnSource),
+			attachedTo,
 			formatWorkspace(agent.Workspace),
-			formatContainerID(agent.ContainerID),
 			formatDuration(time.Since(agent.CreatedAt)),
 		)
 	}
@@ -223,4 +242,29 @@ func formatDuration(d time.Duration) string {
 		return fmt.Sprintf("%dh ago", int(d.Hours()))
 	}
 	return fmt.Sprintf("%dd ago", int(d.Hours()/24))
+}
+
+// listLeasesForList returns a map of agentID -> userSessionID for attached agents
+func listLeasesForList() (map[string]string, error) {
+	leases, err := session.ListLeases()
+	if err != nil {
+		return nil, err
+	}
+
+	result := make(map[string]string)
+	for _, lease := range leases {
+		if !session.IsLeaseExpired(lease) {
+			result[lease.AgentID] = lease.UserSessionID
+		}
+	}
+
+	return result, nil
+}
+
+// formatAttachedTo formats the attached session ID for display
+func formatAttachedTo(sessionID string) string {
+	if len(sessionID) <= 12 {
+		return color.New(color.FgYellow).Sprint(sessionID)
+	}
+	return color.New(color.FgYellow).Sprint(sessionID[:9] + "...")
 }
