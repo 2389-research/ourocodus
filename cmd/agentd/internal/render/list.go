@@ -70,8 +70,8 @@ func renderPlainTable(w io.Writer, agents []AgentInfo) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 
 	// Header
-	fmt.Fprintln(tw)
-	fmt.Fprintf(tw, "AGENT\tSTATUS\tSOURCE\tATTACHED TO\tWORKSPACE\tCREATED\n")
+	_, _ = fmt.Fprintln(tw)
+	_, _ = fmt.Fprintf(tw, "AGENT\tSTATUS\tSOURCE\tATTACHED TO\tWORKSPACE\tCREATED\n")
 
 	// Rows
 	for _, agent := range agents {
@@ -80,7 +80,7 @@ func renderPlainTable(w io.Writer, agents []AgentInfo) error {
 			attachedTo = formatShortID(agent.AttachedTo, 9)
 		}
 
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n",
+		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n",
 			agent.AgentID,
 			agent.Status,
 			agent.SpawnSource,
@@ -90,22 +90,22 @@ func renderPlainTable(w io.Writer, agents []AgentInfo) error {
 		)
 	}
 
-	fmt.Fprintln(tw)
+	_, _ = fmt.Fprintln(tw)
 	return tw.Flush()
 }
 
 func renderRichTable(w io.Writer, agents []AgentInfo, th *theme.RetroTheme) error {
 	// Header with theme styling
 	header := th.Header.Render(theme.GetLogo(theme.LogoSmall))
-	fmt.Fprintln(w, header)
-	fmt.Fprintln(w)
+	_, _ = fmt.Fprintln(w, header)
+	_, _ = fmt.Fprintln(w)
 
 	// Table header
 	headerStyle := lipgloss.NewStyle().
 		Foreground(th.Primary).
 		Bold(true)
 
-	fmt.Fprintf(w, "%s  %s  %s  %s  %s\n",
+	_, _ = fmt.Fprintf(w, "%s  %s  %s  %s  %s\n",
 		headerStyle.Render("AGENT"),
 		headerStyle.Render("STATUS"),
 		headerStyle.Render("SOURCE"),
@@ -115,7 +115,7 @@ func renderRichTable(w io.Writer, agents []AgentInfo, th *theme.RetroTheme) erro
 
 	// Separator line
 	separatorStyle := lipgloss.NewStyle().Foreground(th.Muted)
-	fmt.Fprintln(w, separatorStyle.Render(strings.Repeat("─", 80)))
+	_, _ = fmt.Fprintln(w, separatorStyle.Render(strings.Repeat("─", 80)))
 
 	// Table rows
 	for _, agent := range agents {
@@ -131,7 +131,7 @@ func renderRichTable(w io.Writer, agents []AgentInfo, th *theme.RetroTheme) erro
 		sourceStyle := getSourceStyle(agent.SpawnSource, th)
 		mutedStyle := lipgloss.NewStyle().Foreground(th.Muted)
 
-		fmt.Fprintf(w, "%s  %s %s  %s  %s  %s\n",
+		_, _ = fmt.Fprintf(w, "%s  %s %s  %s  %s  %s\n",
 			th.Highlight.Render(agent.AgentID),
 			statusIcon,
 			statusColor.Render(agent.Status),
@@ -141,12 +141,12 @@ func renderRichTable(w io.Writer, agents []AgentInfo, th *theme.RetroTheme) erro
 		)
 	}
 
-	fmt.Fprintln(w)
+	_, _ = fmt.Fprintln(w)
 
 	// Footer with summary
 	summaryStyle := lipgloss.NewStyle().Foreground(th.Secondary)
 	summary := fmt.Sprintf("Total: %d agents", len(agents))
-	fmt.Fprintln(w, summaryStyle.Render(summary))
+	_, _ = fmt.Fprintln(w, summaryStyle.Render(summary))
 
 	return nil
 }

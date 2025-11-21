@@ -2,58 +2,103 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
-	"text/tabwriter"
 	"time"
 
+	"github.com/2389-research/ourocodus/cmd/agentd/internal/detect"
+	"github.com/2389-research/ourocodus/cmd/agentd/internal/output"
+	"github.com/2389-research/ourocodus/cmd/agentd/internal/render"
+	"github.com/2389-research/ourocodus/cmd/agentd/internal/theme"
 	"github.com/2389-research/ourocodus/pkg/relay/session"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/client"
-	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 )
 
-var listFormat string
+var (
+	listFormat    string
+	listPlainFlag bool
+	listTheme     string
+)
 
 var listCmd = &cobra.Command{
 	Use:   "list",
 	Short: "📋 List all active agents",
 	Long:  "Shows all active agents with their status, workspace, and container information.",
-	Example: `  # List all running agents
+	Example: `  # List all running agents (auto-detect mode)
   agentd list
 
-  # List in JSON format
-  agentd list --format json`,
+  # Force plain text output
+  agentd list --plain
+
+  # JSON output for scripting
+  agentd list --format json
+
+  # Use amber theme for rich mode
+  agentd list --theme amber`,
 	RunE: runList,
 }
 
 func init() {
-	listCmd.Flags().StringVar(&listFormat, "format", "table", "Output format (table|json)")
+	listCmd.Flags().StringVar(&listFormat, "format", "auto", "Output format (auto|rich|plain|json)")
+	listCmd.Flags().BoolVar(&listPlainFlag, "plain", false, "Force plain text output (alias for --format plain)")
+	listCmd.Flags().StringVar(&listTheme, "theme", "cga", "Color theme for rich mode (cga|amber|green|c64)")
 }
 
 func runList(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 
-	// Query Docker directly for agentd containers
+	// Step 1: Detect output mode
+	jsonFlag := listFormat == "json"
+	plainFlag := listPlainFlag || listFormat == "plain"
+	shouldPlain := detect.ShouldUsePlainMode(jsonFlag, plainFlag, os.Environ)
+
+	mode := output.ModeRich
+	if listFormat != "auto" {
+		// Explicit format flag takes precedence
+		parsedMode, valid := output.ParseMode(listFormat)
+		if valid {
+			mode = parsedMode
+		}
+	} else {
+		// Auto-detect mode
+		mode = output.DetectMode(jsonFlag, plainFlag, shouldPlain)
+	}
+
+	// Step 2: Create theme if rich mode
+	var th *theme.RetroTheme
+	if mode.IsRich() {
+		palette, valid := theme.ParsePaletteName(listTheme)
+		if !valid {
+			palette = theme.PaletteCGA
+		}
+		th = theme.NewRetroTheme(palette)
+	}
+
+	// Step 3: Query Docker for agents
 	agents, err := listAgentsFromDocker(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to list agents: %w", err)
 	}
 
-	if len(agents) == 0 {
-		_, _ = color.New(color.FgHiBlack).Println("✨ No agents running.")
-		return nil
+	// Step 4: Convert to render.AgentInfo format
+	renderAgents := make([]render.AgentInfo, len(agents))
+	for i, agent := range agents {
+		renderAgents[i] = render.AgentInfo{
+			AgentID:     agent.AgentID,
+			ContainerID: agent.ContainerID,
+			Status:      agent.Status,
+			Workspace:   agent.Workspace,
+			SpawnSource: agent.SpawnSource,
+			AttachedTo:  agent.AttachedTo,
+			CreatedAt:   agent.CreatedAt,
+		}
 	}
 
-	// Print based on format
-	if listFormat == "json" {
-		return printListJSONFromAgentInfo(agents)
-	}
-
-	return printListTableFromAgentInfo(agents)
+	// Step 5: Render using new renderer
+	return render.RenderAgentList(os.Stdout, renderAgents, mode, th)
 }
 
 // agentInfo represents an agent discovered from Docker
@@ -140,104 +185,6 @@ func listAgentsFromDocker(ctx context.Context) ([]agentInfo, error) {
 	return agents, nil
 }
 
-// printListTableFromAgentInfo prints agents in a formatted table
-func printListTableFromAgentInfo(agents []agentInfo) error {
-	// Use StripEscape flag to handle ANSI color codes properly
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', tabwriter.StripEscape)
-
-	// Print header with color
-	headerColor := color.New(color.FgCyan, color.Bold)
-	_, _ = fmt.Fprintln(w)
-	_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
-		headerColor.Sprint("AGENT"),
-		headerColor.Sprint("STATUS"),
-		headerColor.Sprint("SOURCE"),
-		headerColor.Sprint("ATTACHED TO"),
-		headerColor.Sprint("WORKSPACE"),
-		headerColor.Sprint("CREATED"),
-	)
-
-	for _, agent := range agents {
-		// Color the agent ID
-		agentName := color.New(color.FgWhite, color.Bold).Sprint(agent.AgentID)
-
-		// Format attached status
-		attachedTo := "-"
-		if agent.AttachedTo != "" {
-			attachedTo = formatAttachedTo(agent.AttachedTo)
-		}
-
-		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
-			agentName,
-			formatStateString(agent.Status),
-			formatSpawnSource(agent.SpawnSource),
-			attachedTo,
-			formatWorkspace(agent.Workspace),
-			formatDuration(time.Since(agent.CreatedAt)),
-		)
-	}
-
-	_, _ = fmt.Fprintln(w)
-	return w.Flush()
-}
-
-// printListJSONFromAgentInfo prints agents in JSON format
-func printListJSONFromAgentInfo(agents []agentInfo) error {
-	encoder := json.NewEncoder(os.Stdout)
-	encoder.SetIndent("", "  ")
-	return encoder.Encode(agents)
-}
-
-// formatStateString converts Docker state string to human-readable colored string
-func formatStateString(state string) string {
-	switch state {
-	case "running":
-		return successColor.Sprint("running")
-	case "exited", "stopped":
-		return color.New(color.FgHiBlack).Sprint("stopped")
-	case "dead", "removing":
-		return errorColor.Sprint("failed")
-	case "created", "restarting":
-		return color.New(color.FgYellow).Sprint("pending")
-	case "paused":
-		return color.New(color.FgYellow).Sprint("paused")
-	default:
-		return color.New(color.FgHiBlack).Sprint(state)
-	}
-}
-
-// formatSpawnSource formats the spawn source label
-func formatSpawnSource(source string) string {
-	switch source {
-	case "cli":
-		return color.New(color.FgCyan).Sprint("cli")
-	case "relay":
-		return color.New(color.FgMagenta).Sprint("relay")
-	case "unknown":
-		return color.New(color.FgHiBlack).Sprint("unknown")
-	default:
-		return color.New(color.FgWhite).Sprint(source)
-	}
-}
-
-// formatWorkspace shortens workspace path for display
-func formatWorkspace(path string) string {
-	// Show relative path from current directory if possible
-	if len(path) > 60 {
-		// Truncate long paths
-		return "..." + path[len(path)-57:]
-	}
-	return path
-}
-
-// formatContainerID shows short container ID
-func formatContainerID(id string) string {
-	if len(id) > 12 {
-		return id[:12]
-	}
-	return id
-}
-
 // listLeasesForList returns a map of agentID -> userSessionID for attached agents
 func listLeasesForList() (map[string]string, error) {
 	leases, err := session.ListLeases()
@@ -255,10 +202,52 @@ func listLeasesForList() (map[string]string, error) {
 	return result, nil
 }
 
-// formatAttachedTo formats the attached session ID for display
-func formatAttachedTo(sessionID string) string {
-	if len(sessionID) <= 12 {
-		return color.New(color.FgYellow).Sprint(sessionID)
+// formatContainerID shows short container ID
+func formatContainerID(id string) string {
+	if len(id) > 12 {
+		return id[:12]
 	}
-	return color.New(color.FgYellow).Sprint(sessionID[:9] + "...")
+	return id
+}
+
+// formatWorkspace shortens workspace path for display
+func formatWorkspace(path string) string {
+	// Show relative path from current directory if possible
+	if len(path) > 60 {
+		// Truncate long paths
+		return "..." + path[len(path)-57:]
+	}
+	return path
+}
+
+// formatSpawnSource formats the spawn source label (kept for compatibility with cmd_discover.go)
+func formatSpawnSource(source string) string {
+	switch source {
+	case "cli":
+		return "cli"
+	case "relay":
+		return "relay"
+	case "unknown":
+		return "unknown"
+	default:
+		return source
+	}
+}
+
+// formatStateString converts Docker state string to human-readable string (kept for tests)
+func formatStateString(state string) string {
+	switch state {
+	case "running":
+		return "running"
+	case "exited", "stopped":
+		return "stopped"
+	case "dead", "removing":
+		return "failed"
+	case "created", "restarting":
+		return "pending"
+	case "paused":
+		return "paused"
+	default:
+		return state
+	}
 }
