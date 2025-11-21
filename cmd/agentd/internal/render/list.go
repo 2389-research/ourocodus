@@ -99,9 +99,15 @@ func renderRichTable(w io.Writer, agents []AgentInfo, th *theme.RetroTheme) erro
 	// Detect unicode support
 	supportsUnicode := detect.SupportsUnicode()
 
-	// Header with theme styling
-	header := th.Header.Render(theme.GetLogo(theme.LogoSmall))
-	_, _ = fmt.Fprintln(w, header)
+	// Header with theme styling - use Lip Gloss border instead of manual box
+	logoText := theme.GetLogo(theme.LogoSmall)
+	logoBox := lipgloss.NewStyle().
+		Border(lipgloss.NormalBorder()).
+		BorderForeground(th.Primary).
+		Padding(1, 2).
+		Align(lipgloss.Center).
+		Render(logoText)
+	_, _ = fmt.Fprintln(w, logoBox)
 	_, _ = fmt.Fprintln(w)
 
 	// Define table columns with proper widths
