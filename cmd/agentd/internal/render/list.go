@@ -117,7 +117,6 @@ func renderRichTable(w io.Writer, agents []AgentInfo, th *theme.RetroTheme) erro
 	rows := make([]table.Row, 0, len(agents))
 	for _, agent := range agents {
 		statusIcon := getStatusIcon(agent.Status, supportsUnicode)
-		statusColor := getStatusColor(agent.Status, th)
 
 		// Format attached session
 		attachedTo := "─"
@@ -125,16 +124,13 @@ func renderRichTable(w io.Writer, agents []AgentInfo, th *theme.RetroTheme) erro
 			attachedTo = formatShortID(agent.AttachedTo, 9)
 		}
 
-		// Apply styling to cell content
-		sourceStyle := getSourceStyle(agent.SpawnSource, th)
-		mutedStyle := lipgloss.NewStyle().Foreground(th.Muted)
-
+		// Use plain text in table rows - let Bubbles handle styling
 		rows = append(rows, table.Row{
 			agent.AgentID,
-			statusIcon + " " + statusColor.Render(agent.Status),
-			sourceStyle.Render(agent.SpawnSource),
+			statusIcon + " " + agent.Status,
+			agent.SpawnSource,
 			attachedTo,
-			mutedStyle.Render(formatDuration(time.Since(agent.CreatedAt))),
+			formatDuration(time.Since(agent.CreatedAt)),
 		})
 	}
 
@@ -183,30 +179,6 @@ func getStatusIcon(status string, unicode bool) string {
 		return theme.GetAgentStatusIcon(theme.StatusStopped, unicode)
 	default:
 		return theme.GetAgentStatusIcon(theme.StatusIdle, unicode)
-	}
-}
-
-func getStatusColor(status string, th *theme.RetroTheme) lipgloss.Style {
-	switch status {
-	case "running":
-		return lipgloss.NewStyle().Foreground(th.Success)
-	case "paused":
-		return lipgloss.NewStyle().Foreground(th.Warning)
-	case "exited", "stopped":
-		return lipgloss.NewStyle().Foreground(th.Error)
-	default:
-		return lipgloss.NewStyle().Foreground(th.Muted)
-	}
-}
-
-func getSourceStyle(source string, th *theme.RetroTheme) lipgloss.Style {
-	switch source {
-	case "cli":
-		return lipgloss.NewStyle().Foreground(th.Primary)
-	case "relay":
-		return lipgloss.NewStyle().Foreground(th.Secondary)
-	default:
-		return lipgloss.NewStyle().Foreground(th.Muted)
 	}
 }
 
