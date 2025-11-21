@@ -125,10 +125,13 @@ func findAgentContainer(ctx context.Context, agentID string) (string, string, er
 		return "", "", nil // Not found
 	}
 
-	// Extract workspace from mounts
+	// Extract workspace from mounts (look for /workspace mount, not .creds)
 	workspace := ""
-	if len(containers[0].Mounts) > 0 {
-		workspace = containers[0].Mounts[0].Source // Host path
+	for _, mnt := range containers[0].Mounts {
+		if mnt.Destination == "/workspace" {
+			workspace = mnt.Source // Host path
+			break
+		}
 	}
 
 	return containers[0].ID, workspace, nil

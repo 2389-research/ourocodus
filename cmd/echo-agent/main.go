@@ -2,14 +2,41 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/2389-research/ourocodus/pkg/acp"
+	"github.com/2389-research/ourocodus/pkg/agent"
 )
 
 func main() {
+	// Setup context for graceful shutdown
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+
+	// Start heartbeat publisher if NATS is configured
+	agentID := os.Getenv("AGENT_ID")
+	natsURL := os.Getenv("NATS_URL")
+	if natsURL == "" {
+		natsURL = "nats://localhost:4222" // Default
+	}
+
+	if agentID != "" {
+		publisher, err := agent.NewHeartbeatPublisher(agentID, natsURL)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: Failed to start heartbeat publisher: %v\n", err)
+		} else {
+			// Start heartbeat publisher in background
+			go publisher.Start(ctx)
+			defer publisher.Stop()
+		}
+	}
+
+	// Process ACP messages from stdin
 	scanner := bufio.NewScanner(os.Stdin)
 	for scanner.Scan() {
 		line := scanner.Bytes()
