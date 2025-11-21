@@ -238,20 +238,6 @@ func formatContainerID(id string) string {
 	return id
 }
 
-// formatDuration formats time.Duration as human-readable string
-func formatDuration(d time.Duration) string {
-	if d < time.Minute {
-		return fmt.Sprintf("%ds ago", int(d.Seconds()))
-	}
-	if d < time.Hour {
-		return fmt.Sprintf("%dm ago", int(d.Minutes()))
-	}
-	if d < 24*time.Hour {
-		return fmt.Sprintf("%dh ago", int(d.Hours()))
-	}
-	return fmt.Sprintf("%dd ago", int(d.Hours()/24))
-}
-
 // listLeasesForList returns a map of agentID -> userSessionID for attached agents
 func listLeasesForList() (map[string]string, error) {
 	leases, err := session.ListLeases()

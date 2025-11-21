@@ -57,7 +57,7 @@ func runWatch(cmd *cobra.Command, args []string) error {
 	// Print header
 	if !watchRaw {
 		headerColor := color.New(color.FgCyan, color.Bold)
-		headerColor.Printf("👁️  Watching agent: %s\n", agentID)
+		_, _ = headerColor.Printf("👁️  Watching agent: %s\n", agentID)
 		fmt.Println(color.New(color.FgHiBlack).Sprint("Press Ctrl+C to stop..."))
 		fmt.Println()
 	}
@@ -110,11 +110,7 @@ func runWatch(cmd *cobra.Command, args []string) error {
 			}
 
 		case lease := <-leaseChan:
-			if err := handleLeaseChange(lease, watchRaw); err != nil {
-				if !watchRaw {
-					fmt.Printf("Error handling lease change: %v\n", err)
-				}
-			}
+			handleLeaseChange(lease, watchRaw)
 		}
 	}
 }
@@ -165,20 +161,38 @@ func handleHeartbeat(msg *nats.Msg, raw bool) error {
 }
 
 // handleLeaseChange processes a lease change event
-func handleLeaseChange(lease *session.Lease, raw bool) error {
+func handleLeaseChange(lease *session.Lease, raw bool) {
+	timestamp := time.Now().Format("15:04:05")
+
+	// Handle lease detach (nil lease)
+	if lease == nil {
+		if raw {
+			data, _ := json.Marshal(map[string]interface{}{
+				"type": "lease_detached",
+			})
+			fmt.Println(string(data))
+		} else {
+			fmt.Printf("[%s] %s Lease detached\n",
+				timestamp,
+				color.New(color.FgYellow).Sprint("🔓"),
+			)
+		}
+		return
+	}
+
+	// Handle lease renewal
 	if raw {
 		// Output raw JSON
 		data, _ := json.Marshal(map[string]interface{}{
-			"type":           "lease_renewal",
-			"agentId":        lease.AgentID,
-			"userSessionId":  lease.UserSessionID,
-			"expiresAt":      lease.ExpiresAt,
+			"type":            "lease_renewal",
+			"agentId":         lease.AgentID,
+			"userSessionId":   lease.UserSessionID,
+			"expiresAt":       lease.ExpiresAt,
 			"timeUntilExpiry": time.Until(lease.ExpiresAt).Seconds(),
 		})
 		fmt.Println(string(data))
 	} else {
 		// Human-readable output
-		timestamp := time.Now().Format("15:04:05")
 		timeUntil := time.Until(lease.ExpiresAt)
 
 		fmt.Printf("[%s] %s Lease renewed (expires in %s, session=%s)\n",
@@ -188,8 +202,6 @@ func handleLeaseChange(lease *session.Lease, raw bool) error {
 			formatSessionID(lease.UserSessionID),
 		)
 	}
-
-	return nil
 }
 
 // readLeaseState reads the current lease state for an agent
@@ -214,13 +226,17 @@ func monitorLease(ctx context.Context, agentID string, lastState *session.Lease,
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			currentLease, _ := readLeaseState(agentID)
+			currentLease, err := readLeaseState(agentID)
+			if err != nil {
+				// Log unexpected errors (ErrLeaseNotFound is already handled in readLeaseState)
+				fmt.Fprintf(os.Stderr, "Warning: failed to read lease state: %v\n", err)
+				continue
+			}
 
 			// Check if lease changed
 			if hasLeaseChanged(lastState, currentLease) {
-				if currentLease != nil {
-					leaseChan <- currentLease
-				}
+				// Send lease change event (including nil for detach)
+				leaseChan <- currentLease
 				lastState = currentLease
 			}
 		}

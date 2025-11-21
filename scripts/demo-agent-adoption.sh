@@ -5,7 +5,7 @@
 set -e
 
 # Ensure DOCKER_HOST is set for Colima
-export DOCKER_HOST=${DOCKER_HOST:-unix:///Users/clint/.colima/default/docker.sock}
+export DOCKER_HOST=${DOCKER_HOST:-unix://${HOME}/.colima/default/docker.sock}
 
 # Colors for narration
 CYAN='\033[0;36m'

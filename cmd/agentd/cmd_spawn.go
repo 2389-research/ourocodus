@@ -137,9 +137,14 @@ func buildSpawnConfig(agentID string) (container.SpawnConfig, error) {
 	}
 
 	// Add agent ID and NATS URL to environment for heartbeat publishing
+	// Use NATS_URL from environment if set, otherwise default to host.docker.internal
+	natsURL := os.Getenv("NATS_URL")
+	if natsURL == "" {
+		natsURL = "nats://host.docker.internal:4222"
+	}
 	env = append(env,
 		fmt.Sprintf("AGENT_ID=%s", agentID),
-		"NATS_URL=nats://host.docker.internal:4222", // Docker host network access
+		fmt.Sprintf("NATS_URL=%s", natsURL),
 	)
 
 	config := container.SpawnConfig{

@@ -29,7 +29,7 @@ var discoverCmd = &cobra.Command{
 	Long: `Discover all running agents and show their adoption status.
 
 This command queries Docker for agent containers and checks their lease status
-to determine if they are attached, detached, or orphaned (no heartbeat).`,
+to determine if they are attached or discovered (not yet attached).`,
 	Example: `  # Discover agents once
   agentd discover
 
@@ -67,15 +67,15 @@ func runDiscover(cmd *cobra.Command, args []string) error {
 
 // discoveredAgent represents an agent with adoption status
 type discoveredAgent struct {
-	AgentID       string    `json:"agentId"`
-	ContainerID   string    `json:"containerId"`
-	Status        string    `json:"status"` // discovered, attached, orphaned
-	Workspace     string    `json:"workspace"`
-	SpawnSource   string    `json:"spawnSource"`
-	AttachedTo    string    `json:"attachedTo,omitempty"`
-	LeaseExpires  time.Time `json:"leaseExpires,omitempty"`
-	HeartbeatAge  string    `json:"heartbeatAge,omitempty"`
-	CreatedAt     time.Time `json:"createdAt"`
+	AgentID      string    `json:"agentId"`
+	ContainerID  string    `json:"containerId"`
+	Status       string    `json:"status"` // discovered, attached, orphaned
+	Workspace    string    `json:"workspace"`
+	SpawnSource  string    `json:"spawnSource"`
+	AttachedTo   string    `json:"attachedTo,omitempty"`
+	LeaseExpires time.Time `json:"leaseExpires,omitempty"`
+	HeartbeatAge string    `json:"heartbeatAge,omitempty"`
+	CreatedAt    time.Time `json:"createdAt"`
 }
 
 // discoverAgents queries Docker and lease files to discover agents with adoption status
@@ -208,7 +208,7 @@ func displayAgentsTable(agents []discoveredAgent) error {
 		if !agent.LeaseExpires.IsZero() {
 			timeUntil := time.Until(agent.LeaseExpires)
 			if timeUntil > 0 {
-				leaseExpiry = formatDuration(timeUntil)
+				leaseExpiry = "in " + formatDurationWithoutSuffix(timeUntil)
 			} else {
 				leaseExpiry = color.New(color.FgRed).Sprint("expired")
 			}
