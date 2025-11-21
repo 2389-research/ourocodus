@@ -369,6 +369,8 @@ func (s *Server) checkDetachOwnership(conn WebSocketConn, req *AgentDetachReques
 
 // handleAgentDetach handles agent:detach messages
 // Returns true if connection should be closed
+//
+//nolint:unparam // ctx parameter required by handler interface, may be used in future
 func (s *Server) handleAgentDetach(ctx context.Context, conn WebSocketConn, rawMessage []byte) bool {
 	var req AgentDetachRequest
 	if err := json.Unmarshal(rawMessage, &req); err != nil {
