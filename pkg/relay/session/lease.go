@@ -35,6 +35,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/2389-research/ourocodus/pkg/heartbeat"
 )
 
 // Logger interface for optional lease operation logging
@@ -66,9 +68,6 @@ func getLeaseDir() string {
 const (
 	// LeaseTTL is the duration before a lease expires
 	LeaseTTL = 5 * time.Minute
-
-	// HeartbeatInterval is how often agents should send heartbeats
-	HeartbeatInterval = 30 * time.Second
 
 	// MaxLeaseRetries is the maximum number of times to retry acquiring a lease
 	// when encountering expired leases
@@ -189,7 +188,7 @@ func acquireLeaseWithRetry(agentID, userSessionID string, retryCount int) (*Leas
 		UserSessionID:     userSessionID,
 		AttachedAt:        time.Now(),
 		ExpiresAt:         time.Now().Add(LeaseTTL),
-		HeartbeatInterval: HeartbeatInterval.String(),
+		HeartbeatInterval: heartbeat.Interval.String(),
 	}
 
 	if err := json.NewEncoder(f).Encode(lease); err != nil {
