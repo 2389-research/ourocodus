@@ -156,7 +156,12 @@ func FindAgentContainerIDForTesting(ctx context.Context, agentID string) (contai
 	workspace = ctr.Labels["ourocodus.agent/workspace"]
 
 	if workspace == "" {
-		return "", "", fmt.Errorf("container %s missing workspace label", containerID[:12])
+		// Defensive: format container ID safely for error message
+		shortID := containerID
+		if len(containerID) > 12 {
+			shortID = containerID[:12]
+		}
+		return "", "", fmt.Errorf("container %s missing workspace label", shortID)
 	}
 
 	return containerID, workspace, nil

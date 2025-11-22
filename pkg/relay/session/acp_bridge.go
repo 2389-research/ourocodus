@@ -166,12 +166,14 @@ func (b *ACPBridge) SendMessage(ctx context.Context, content string) (interface{
 	}
 
 	// Parse response
+	type rpcError struct {
+		Code    int         `json:"code"`
+		Message string      `json:"message"`
+		Data    interface{} `json:"data,omitempty"` // Additional error context from agent
+	}
 	var resp struct {
 		Result interface{} `json:"result"`
-		Error  *struct {
-			Code    int    `json:"code"`
-			Message string `json:"message"`
-		} `json:"error"`
+		Error  *rpcError   `json:"error"`
 	}
 
 	if err := json.Unmarshal(respBytes, &resp); err != nil {
@@ -179,6 +181,10 @@ func (b *ACPBridge) SendMessage(ctx context.Context, content string) (interface{
 	}
 
 	if resp.Error != nil {
+		// Include data field in error if present
+		if resp.Error.Data != nil {
+			return nil, fmt.Errorf("agent error %d: %s (data: %v)", resp.Error.Code, resp.Error.Message, resp.Error.Data)
+		}
 		return nil, fmt.Errorf("agent error %d: %s", resp.Error.Code, resp.Error.Message)
 	}
 

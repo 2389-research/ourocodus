@@ -2,6 +2,7 @@ package session_test
 
 import (
 	"context"
+	"os"
 	"testing"
 	"time"
 
@@ -23,6 +24,12 @@ import (
 func TestACPBridge_Integration(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")
+	}
+
+	// Skip if not explicitly enabled via environment variable
+	// This test requires Docker daemon and a running agent container
+	if os.Getenv("RUN_INTEGRATION_TESTS") != "true" {
+		t.Skip("Skipping integration test (set RUN_INTEGRATION_TESTS=true to run)")
 	}
 
 	// Test configuration
