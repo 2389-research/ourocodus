@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/2389-research/ourocodus/pkg/acp"
+	"github.com/2389-research/ourocodus/pkg/relay/ratelimit"
 	"github.com/2389-research/ourocodus/pkg/relay/session"
 	"github.com/gorilla/websocket"
 )
@@ -44,10 +45,14 @@ type Server struct {
 	sessionClock   *SessionClockAdapter // Adapts relay.Clock to time.Time for internal use
 	upgrader       Upgrader
 	sessionManager SessionManagerInterface
+	rateLimiter    *ratelimit.Limiter // Phase 4: Rate limiting for attach operations
 }
 
 // NewServer creates a new relay server with dependency injection
 func NewServer(idGen IDGenerator, logger Logger, clock Clock, upgrader Upgrader, sessionManager SessionManagerInterface) *Server {
+	// Phase 4: Configure rate limiter for attach operations
+	// 10 tokens max (burst capacity), 1 token per second refill
+	// Allows 10 rapid attach attempts, then 1 per second
 	return &Server{
 		serverID:       idGen.Generate(),
 		logger:         logger,
@@ -55,6 +60,7 @@ func NewServer(idGen IDGenerator, logger Logger, clock Clock, upgrader Upgrader,
 		sessionClock:   &SessionClockAdapter{clock: clock},
 		upgrader:       upgrader,
 		sessionManager: sessionManager,
+		rateLimiter:    ratelimit.NewLimiter(10, 1),
 	}
 }
 

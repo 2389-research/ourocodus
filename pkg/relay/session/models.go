@@ -2,8 +2,11 @@ package session
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
+
+	"github.com/2389-research/ourocodus/pkg/relay/audit"
 )
 
 // UserSessionState represents the lifecycle state of a user session (container)
@@ -295,24 +298,63 @@ func (a *AgentSession) GetHistory() []Message {
 // AttachAgent attaches a CLI-spawned agent to this UserSession.
 // Returns the agent session if successful, or error if agent is already attached elsewhere.
 // This operation is idempotent - calling it multiple times for the same agent has no effect.
-func (u *UserSession) AttachAgent(agentID string, workspace string) (*AgentSession, error) {
+//
+// Phase 4: Requires a valid attach token for security.
+// The token must match the one generated during agent spawn.
+func (u *UserSession) AttachAgent(agentID string, workspace string, attachToken string) (*AgentSession, error) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 
 	// Check if already attached to this session (idempotent)
 	if existing, ok := u.agents[agentID]; ok {
+		// Audit: Successful idempotent attach
+		audit.LogAgentAttach(u.ID, agentID, true, nil)
 		return existing, nil
+	}
+
+	// Verify attach token BEFORE acquiring lease (Phase 4: Security)
+	if err := verifyAttachToken(agentID, attachToken); err != nil {
+		// Audit: Token verification failure
+		audit.LogAuthFailure(u.ID, agentID, err.Error(), map[string]string{
+			"operation": "attach",
+		})
+		return nil, err
 	}
 
 	// Try to acquire lease (this is atomic via O_EXCL)
 	lease, err := AcquireLease(agentID, u.ID)
 	if err != nil {
+		// Audit: Lease acquisition failure
+		audit.LogAgentAttach(u.ID, agentID, false, err)
 		return nil, err // ErrAlreadyAttached if taken by another session
 	}
 
+	// Find the agent's container to establish ACP communication (Phase 3)
+	containerID, discoveredWorkspace, err := findAgentContainerID(context.Background(), agentID)
+	if err != nil {
+		// Release lease if we can't find the container
+		_ = ReleaseLease(agentID)
+		// Audit: Container discovery failure
+		audit.LogAgentAttach(u.ID, agentID, false, fmt.Errorf("failed to find agent container: %w", err))
+		return nil, fmt.Errorf("failed to find agent container: %w", err)
+	}
+
+	// Use discovered workspace if none was provided
+	if workspace == "" {
+		workspace = discoveredWorkspace
+	}
+
+	// Create ACP bridge for bidirectional communication (Phase 3)
+	bridge, err := NewACPBridge(context.Background(), containerID, agentID)
+	if err != nil {
+		// Release lease if bridge creation fails
+		_ = ReleaseLease(agentID)
+		// Audit: ACP bridge creation failure
+		audit.LogAgentAttach(u.ID, agentID, false, fmt.Errorf("failed to create ACP bridge: %w", err))
+		return nil, fmt.Errorf("failed to create ACP bridge: %w", err)
+	}
+
 	// Create AgentSession for this CLI agent
-	// Note: We don't have ACPClient yet (Phase 2 will add ACP communication)
-	// For Phase 1, the agent is simply tracked as "attached" without communication
 	agent := &AgentSession{
 		AgentID:    agentID,
 		Workspace:  workspace,
@@ -321,11 +363,14 @@ func (u *UserSession) AttachAgent(agentID string, workspace string) (*AgentSessi
 		state:      AgentActive, // CLI agent is already running
 		lastActive: time.Now(),
 		history:    []Message{},
-		acpClient:  nil, // Phase 1: No ACP client (communication added in Phase 3)
+		acpClient:  bridge, // Phase 3: ACP bridge for communication
 	}
 
 	u.agents[agentID] = agent
 	u.lastActive = time.Now()
+
+	// Audit: Successful agent attachment
+	audit.LogAgentAttach(u.ID, agentID, true, nil)
 
 	return agent, nil
 }
@@ -338,20 +383,32 @@ func (u *UserSession) DetachAgent(agentID string) error {
 	defer u.mu.Unlock()
 
 	// Check if agent is attached to this session
-	_, ok := u.agents[agentID]
+	agent, ok := u.agents[agentID]
 	if !ok {
 		// Already detached - idempotent
+		// Audit: Successful idempotent detach
+		audit.LogAgentDetach(u.ID, agentID, true, nil)
 		return nil
+	}
+
+	// Close ACP bridge (Phase 3)
+	if agent.acpClient != nil {
+		_ = agent.acpClient.Close(context.Background())
 	}
 
 	// Release lease (idempotent operation)
 	if err := ReleaseLease(agentID); err != nil {
+		// Audit: Lease release failure
+		audit.LogAgentDetach(u.ID, agentID, false, err)
 		return err
 	}
 
 	// Remove from session's agent map
 	delete(u.agents, agentID)
 	u.lastActive = time.Now()
+
+	// Audit: Successful agent detachment
+	audit.LogAgentDetach(u.ID, agentID, true, nil)
 
 	// Note: Don't terminate the agent container, it continues running detached
 

@@ -224,7 +224,13 @@ func TestUserSession_AttachAgent(t *testing.T) {
 
 	// Test: Attach first agent
 	t.Run("AttachFirstAgent", func(t *testing.T) {
-		agent, err := session.AttachAgent("test-agent-1", "/workspace/agent1")
+		// Generate test token (Phase 4)
+		token1, err := generateTestAttachToken("test-agent-1")
+		if err != nil {
+			t.Fatalf("Failed to generate test token: %v", err)
+		}
+
+		agent, err := session.AttachAgent("test-agent-1", "/workspace/agent1", token1)
 		if err != nil {
 			t.Fatalf("Failed to attach agent: %v", err)
 		}
@@ -250,7 +256,10 @@ func TestUserSession_AttachAgent(t *testing.T) {
 
 	// Test: Idempotent attach (same session)
 	t.Run("IdempotentAttach", func(t *testing.T) {
-		agent, err := session.AttachAgent("test-agent-1", "/workspace/agent1")
+		// Reuse same token (token is still valid)
+		token1, _ := generateTestAttachToken("test-agent-1")
+
+		agent, err := session.AttachAgent("test-agent-1", "/workspace/agent1", token1)
 		if err != nil {
 			t.Fatalf("Failed idempotent attach: %v", err)
 		}
@@ -267,7 +276,13 @@ func TestUserSession_AttachAgent(t *testing.T) {
 
 	// Test: Attach second agent to same session
 	t.Run("AttachSecondAgent", func(t *testing.T) {
-		agent, err := session.AttachAgent("test-agent-2", "/workspace/agent2")
+		// Generate token for second agent (Phase 4)
+		token2, err := generateTestAttachToken("test-agent-2")
+		if err != nil {
+			t.Fatalf("Failed to generate test token: %v", err)
+		}
+
+		agent, err := session.AttachAgent("test-agent-2", "/workspace/agent2", token2)
 		if err != nil {
 			t.Fatalf("Failed to attach second agent: %v", err)
 		}
@@ -285,7 +300,10 @@ func TestUserSession_AttachAgent(t *testing.T) {
 	// Test: Conflict - agent already attached to different session
 	t.Run("ConflictAttach", func(t *testing.T) {
 		session2 := NewUserSession("test-session-id-2", &mockWebSocket{}, now)
-		_, err := session2.AttachAgent("test-agent-1", "/workspace/agent1")
+		// Token is valid but agent is already leased to session1
+		token1, _ := generateTestAttachToken("test-agent-1")
+
+		_, err := session2.AttachAgent("test-agent-1", "/workspace/agent1", token1)
 		if err != ErrAlreadyAttached {
 			t.Errorf("Expected ErrAlreadyAttached, got %v", err)
 		}
@@ -312,8 +330,14 @@ func TestUserSession_DetachAgent(t *testing.T) {
 	now := testTime()
 	session := NewUserSession("detach-test-session", &mockWebSocket{}, now)
 
+	// Generate token for detach test (Phase 4)
+	token, err := generateTestAttachToken("detach-test-agent")
+	if err != nil {
+		t.Fatalf("Failed to generate test token: %v", err)
+	}
+
 	// Attach agent first
-	agent, err := session.AttachAgent("detach-test-agent", "/workspace/test")
+	agent, err := session.AttachAgent("detach-test-agent", "/workspace/test", token)
 	if err != nil {
 		t.Fatalf("Failed to attach agent: %v", err)
 	}
@@ -375,7 +399,16 @@ func TestUserSession_AttachDetach_ConcurrentAccess(t *testing.T) {
 		go func(id int) {
 			agentID := fmt.Sprintf("concurrent-agent-%d", id)
 			workspace := fmt.Sprintf("/workspace/agent-%d", id)
-			_, err := session.AttachAgent(agentID, workspace)
+
+			// Generate token for this agent (Phase 4)
+			token, err := generateTestAttachToken(agentID)
+			if err != nil {
+				t.Logf("Failed to generate token for agent %s: %v", agentID, err)
+				done <- true
+				return
+			}
+
+			_, err = session.AttachAgent(agentID, workspace, token)
 			if err != nil {
 				t.Logf("Failed to attach agent %s: %v", agentID, err)
 			}

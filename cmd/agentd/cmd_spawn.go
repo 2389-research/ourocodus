@@ -3,9 +3,11 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/2389-research/ourocodus/pkg/agent/container"
@@ -93,8 +95,16 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("spawn failed: %w", err)
 	}
 
+	// Generate attach token (Phase 4: Security Hardening)
+	token, err := generateAttachToken(agentID)
+	if err != nil {
+		// Non-fatal: agent is running, just warn about token
+		_, _ = color.New(color.FgYellow).Printf("⚠️  Warning: Failed to generate attach token: %v\n", err)
+		_, _ = color.New(color.FgYellow).Println("   Agent is running but attachments will not be secured")
+	}
+
 	// Print success
-	printSpawnSuccess(handle)
+	printSpawnSuccess(handle, token)
 
 	return nil
 }
@@ -188,8 +198,36 @@ func hasCredentialFiles(credPath string) bool {
 	return false
 }
 
+// generateAttachToken generates a cryptographically secure 256-bit attach token.
+// The token is stored in .agentd/session/{agent-id}.token with 0600 permissions.
+// Returns the base64url-encoded token string.
+func generateAttachToken(agentID string) (string, error) {
+	// Generate 32 random bytes (256 bits)
+	tokenBytes := make([]byte, 32)
+	if _, err := rand.Read(tokenBytes); err != nil {
+		return "", fmt.Errorf("failed to generate random bytes: %w", err)
+	}
+
+	// Encode as base64url (URL-safe, no padding)
+	tokenStr := base64.URLEncoding.EncodeToString(tokenBytes)
+
+	// Ensure session directory exists with secure permissions
+	sessionDir := filepath.Join(".agentd", "session")
+	if err := os.MkdirAll(sessionDir, 0700); err != nil {
+		return "", fmt.Errorf("failed to create session directory: %w", err)
+	}
+
+	// Write token to file with 0600 permissions (owner read/write only)
+	tokenPath := filepath.Join(sessionDir, agentID+".token")
+	if err := os.WriteFile(tokenPath, []byte(tokenStr), 0600); err != nil {
+		return "", fmt.Errorf("failed to write token file: %w", err)
+	}
+
+	return tokenStr, nil
+}
+
 // printSpawnSuccess prints the successful spawn output with visual hierarchy
-func printSpawnSuccess(handle *container.AgentContainerHandle) {
+func printSpawnSuccess(handle *container.AgentContainerHandle, attachToken string) {
 	// Worktree
 	fmt.Print("🌳 ")
 	_, _ = infoColor.Printf("Worktree: ")
@@ -211,6 +249,17 @@ func printSpawnSuccess(handle *container.AgentContainerHandle) {
 		_, _ = color.New(color.FgHiBlack).Printf("(read-only)\n")
 	} else {
 		_, _ = color.New(color.FgHiBlack).Printf("(none)\n")
+	}
+
+	// Attach token (Phase 4: Security Hardening)
+	if attachToken != "" {
+		fmt.Println()
+		fmt.Print("🔐 ")
+		_, _ = color.New(color.FgCyan, color.Bold).Printf("Attach Token:\n")
+		fmt.Printf("   %s\n", attachToken)
+		fmt.Println()
+		_, _ = color.New(color.FgHiBlack).Println("   Use this token when attaching from PWA or relay:")
+		_, _ = color.New(color.FgHiBlack).Printf("   → agent:attach {\"agentId\": \"%s\", \"token\": \"<token>\"}\n", handle.AgentID())
 	}
 
 	fmt.Println()
