@@ -48,6 +48,7 @@ type ACPBridge struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	closed atomic.Bool
+	wg     sync.WaitGroup // Tracks background goroutines (readLoop, logStderr, demux)
 
 	// Optional: notifications channel for agent-initiated messages
 	notifCh chan []byte
@@ -108,14 +109,32 @@ func NewACPBridge(ctx context.Context, containerID, agentID string) (*ACPBridge,
 	bridge.stdoutR = prOut
 	bridge.stderrR = prErr
 
-	// Demux goroutine
+	// Demux goroutine with context-aware cancellation
+	bridge.wg.Add(1)
 	go func() {
+		defer bridge.wg.Done()
 		defer func() {
 			_ = pwOut.Close()
 			_ = pwErr.Close()
 		}()
-		// Ignore copy errors; readLoop will detect EOF
-		_, _ = stdcopy.StdCopy(pwOut, pwErr, attachResp.Reader)
+
+		// Run StdCopy in a separate goroutine to allow context cancellation
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			// Ignore copy errors; readLoop will detect EOF
+			_, _ = stdcopy.StdCopy(pwOut, pwErr, attachResp.Reader)
+		}()
+
+		// Wait for either completion or context cancellation
+		select {
+		case <-done:
+			// StdCopy finished normally
+		case <-bridgeCtx.Done():
+			// Context cancelled: force close to unblock StdCopy
+			attachResp.Close()
+			<-done // Wait for StdCopy to exit
+		}
 	}()
 
 	// Set up scanner with larger buffer for big payloads
@@ -125,9 +144,11 @@ func NewACPBridge(ctx context.Context, containerID, agentID string) (*ACPBridge,
 	bridge.scan = scanner
 
 	// Start stderr logger goroutine
+	bridge.wg.Add(1)
 	go bridge.logStderr()
 
 	// Start stdout reader goroutine
+	bridge.wg.Add(1)
 	go bridge.readLoop()
 
 	return bridge, nil
@@ -246,6 +267,10 @@ func (b *ACPBridge) sendRaw(ctx context.Context, raw []byte, id string) ([]byte,
 // readLoop continuously reads JSON-RPC responses from stdout and dispatches them
 // to the pending request waiter or the notifications channel.
 func (b *ACPBridge) readLoop() {
+	defer b.wg.Done()
+	// Goroutine owns channel lifetime - close when exiting
+	defer close(b.notifCh)
+
 	for {
 		select {
 		case <-b.ctx.Done():
@@ -298,6 +323,7 @@ func (b *ACPBridge) readLoop() {
 
 // logStderr reads and logs stderr output from the agent.
 func (b *ACPBridge) logStderr() {
+	defer b.wg.Done()
 	scanner := bufio.NewScanner(b.stderrR)
 	for scanner.Scan() {
 		// TODO: Use proper logger when available
@@ -317,14 +343,16 @@ func (b *ACPBridge) clearPendingOnError(pend *pendingReq) {
 
 // Close closes the ACP bridge and releases all resources.
 // This method is safe to call multiple times.
+// The provided context controls the grace period for goroutine shutdown.
 func (b *ACPBridge) Close(ctx context.Context) error {
 	if !b.closed.CompareAndSwap(false, true) {
 		return nil // Already closed
 	}
 
+	// Signal all goroutines to exit
 	b.cancel()
 
-	// Close hijacked connection
+	// Close hijacked connection to unblock I/O operations
 	if b.conn != nil {
 		_ = b.conn.Close()
 	}
@@ -338,8 +366,22 @@ func (b *ACPBridge) Close(ctx context.Context) error {
 	}
 	b.pendMu.Unlock()
 
-	// Close notifications channel
-	close(b.notifCh)
+	// Wait for all goroutines to exit with context timeout
+	done := make(chan struct{})
+	go func() {
+		b.wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Clean shutdown
+	case <-ctx.Done():
+		// Context timeout - goroutines will be leaked but we return
+		return fmt.Errorf("timeout waiting for goroutines to exit: %w", ctx.Err())
+	}
+
+	// Note: notifCh is closed by readLoop goroutine on exit (owns channel lifetime)
 
 	return nil
 }

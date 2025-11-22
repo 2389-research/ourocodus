@@ -20,7 +20,7 @@ import (
 //
 //	export DOCKER_HOST="unix:///Users/clint/.colima/default/docker.sock"  # Adjust for your system
 //	export ANTHROPIC_API_KEY="sk-test-dummy"
-//	bin/agentd spawn test-integration
+//	bin/agentd spawn test-phase3
 func TestACPBridge_Integration(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")
