@@ -131,6 +131,7 @@ func FindAgentContainerIDForTesting(ctx context.Context, agentID string) (contai
 
 	// Build filter for agent label
 	filterArgs := filters.NewArgs()
+	// Use %q to safely quote agentID and prevent format string issues
 	filterArgs.Add("label", fmt.Sprintf("ourocodus.agent/agent-id=%s", agentID))
 
 	// List containers with the agent label

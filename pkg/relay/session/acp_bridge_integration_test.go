@@ -1,3 +1,5 @@
+//go:build integration
+
 package session_test
 
 import (
@@ -43,7 +45,12 @@ func TestACPBridge_Integration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to find agent container: %v\nMake sure agent is spawned: bin/agentd spawn %s", err, agentID)
 	}
-	t.Logf("Found container: %s (workspace: %s)", containerID[:12], workspace)
+	// Safely format container ID (defensive against short IDs)
+	shortID := containerID
+	if len(containerID) > 12 {
+		shortID = containerID[:12]
+	}
+	t.Logf("Found container: %s (workspace: %s)", shortID, workspace)
 
 	// Step 2: Create ACP bridge
 	t.Log("Step 2: Creating ACP bridge...")
@@ -52,7 +59,10 @@ func TestACPBridge_Integration(t *testing.T) {
 		t.Fatalf("Failed to create ACP bridge: %v", err)
 	}
 	defer func() {
-		if err := bridge.Close(ctx); err != nil {
+		// Use fresh context for cleanup to avoid using cancelled/expired test context
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cleanupCancel()
+		if err := bridge.Close(cleanupCtx); err != nil {
 			t.Logf("Warning: Failed to close bridge: %v", err)
 		}
 	}()

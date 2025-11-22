@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"sync"
 	"sync/atomic"
 
@@ -70,6 +71,14 @@ type pendingReq struct {
 //
 // The bridge must be closed via Close() when done to release resources.
 func NewACPBridge(ctx context.Context, containerID, agentID string) (*ACPBridge, error) {
+	// Validate input parameters
+	if err := ValidateNonEmpty(containerID, fmt.Errorf("containerID cannot be empty")); err != nil {
+		return nil, err
+	}
+	if err := ValidateNonEmpty(agentID, fmt.Errorf("agentID cannot be empty")); err != nil {
+		return nil, err
+	}
+
 	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
 		return nil, fmt.Errorf("failed to create docker client: %w", err)
@@ -279,8 +288,27 @@ func (b *ACPBridge) readLoop() {
 		}
 
 		if !b.scan.Scan() {
-			// EOF or scanner error - close bridge and exit
-			_ = b.Close(context.Background())
+			// EOF or scanner error - check for scanner error first
+			if err := b.scan.Err(); err != nil {
+				// TODO: Use proper logger when available
+				fmt.Fprintf(os.Stderr, "[ACPBridge] Scanner error for agent %s: %v\n", b.agentID, err)
+			}
+
+			// Signal shutdown without waiting on wg to avoid self-deadlock
+			// Note: Cannot call Close() here as it waits on wg.Wait() which includes this goroutine
+			if b.closed.CompareAndSwap(false, true) {
+				b.cancel()
+				if b.conn != nil {
+					_ = b.conn.Close()
+				}
+				b.pendMu.Lock()
+				if b.pending != nil {
+					b.pending.canceled.Store(true)
+					close(b.pending.respCh)
+					b.pending = nil
+				}
+				b.pendMu.Unlock()
+			}
 			return
 		}
 
@@ -394,14 +422,27 @@ func (b *ACPBridge) Notifications() <-chan []byte {
 
 // extractJSONRPCID extracts the "id" field from a JSON-RPC response.
 // Returns empty string if id is not present or cannot be extracted.
+// Handles string, numeric, and null IDs per JSON-RPC 2.0 spec.
 func extractJSONRPCID(data []byte) string {
 	var partial struct {
-		ID string `json:"id"`
+		ID interface{} `json:"id"`
 	}
 	if err := json.Unmarshal(data, &partial); err != nil {
 		return ""
 	}
-	return partial.ID
+
+	switch id := partial.ID.(type) {
+	case string:
+		return id
+	case float64:
+		// JSON numbers are float64 by default
+		return fmt.Sprintf("%.0f", id)
+	case nil:
+		return ""
+	default:
+		// Fallback for other types
+		return fmt.Sprintf("%v", id)
+	}
 }
 
 // generateRequestID generates a unique request ID for JSON-RPC requests.
