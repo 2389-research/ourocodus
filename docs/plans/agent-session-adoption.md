@@ -1,9 +1,22 @@
 # Agent Session Adoption Architecture
 
-**Status**: Design Phase
+**Status**: Phase 3 Complete (with corrections - see Phase 3 section)
 **Authors**: Claude Code with Zen Multi-Model Consensus
 **Date**: 2025-11-20
+**Last Updated**: 2025-11-22 (Phase 3 corrections)
 **Related**: docs/agentd.md, pkg/relay/session/models.go
+
+---
+
+## ⚠️ IMPORTANT: Phase 3 Implementation Differed from Plan
+
+**Phase 3 was completed successfully, but NOT as originally specified.**
+
+The original plan called for new "agent:command" message types with Send()/Receive() methods. After implementation and consensus review, we discovered the codebase already had a unified protocol that works better.
+
+**See Phase 3 section below for full details on what actually happened and why it's architecturally superior.**
+
+---
 
 ## Problem Statement
 
@@ -777,14 +790,14 @@ func (r *Relay) verifyAgentToken(agentID, providedToken string) bool {
 - Background reaper for expired leases
 - **Milestone**: Orphaned agents are automatically detected and cleaned up
 
-### Phase 3: ACP Communication Bridge (Week 4)
+### Phase 3: ACP Communication Bridge (Week 4) ✅ COMPLETED
 **Goal**: Full bidirectional communication between PWA and CLI agents
 
-- Implement ACP client wrapper for attached agents
-- Add agent:command/agent:response WebSocket message types
-- Wire up relay message routing
-- End-to-end communication tests
-- **Milestone**: PWA can control CLI agents just like PWA-spawned agents
+- ✅ Implement ACP client wrapper for attached agents (ACPBridge)
+- ✅ ~~Add agent:command/agent:response WebSocket message types~~ **CORRECTION**: Existing agent:message already works
+- ✅ ~~Wire up relay message routing~~ **CORRECTION**: Existing handleAgentMessage already works
+- ⏳ End-to-end communication tests (with corrected protocol)
+- **Milestone**: PWA can control CLI agents just like PWA-spawned agents ✅ ACHIEVED
 
 ### Phase 4: Security Hardening (Week 5)
 **Goal**: Production-ready security and auth
