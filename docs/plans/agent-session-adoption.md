@@ -396,104 +396,91 @@ func (us *UserSession) connectToAgent(agentID string) (ACPClient, error) {
      │<──────────────────┤                     │
 ```
 
-### Agent Message Types
+### Agent Message Types (CORRECTED)
+
+**CORRECTION**: The original plan specified new "agent:command" message types. However, the codebase already has a unified message protocol that works for both PWA-spawned and CLI-spawned agents.
 
 ```go
+// EXISTING message types in pkg/relay/message.go (lines 324-339)
+// These ALREADY WORK for both PWA and CLI agents
+
 // WebSocket message from PWA
-type AgentCommand struct {
-    Type      string          `json:"type"` // "agent:command"
-    AgentID   string          `json:"agentId"`
-    CommandID string          `json:"commandId"`
-    Payload   json.RawMessage `json:"payload"`
+type AgentMessageRequest struct {
+    BaseMessage
+    UserSessionID string `json:"userSessionId"`
+    AgentID       string `json:"agentId"`
+    Content       string `json:"content"`  // NOT json.RawMessage - unified string content
 }
 
 // WebSocket message to PWA
-type AgentResponse struct {
-    Type      string          `json:"type"` // "agent:response"
-    AgentID   string          `json:"agentId"`
-    CommandID string          `json:"commandId"`
-    Payload   json.RawMessage `json:"payload"`
+type AgentMessageResponse struct {
+    BaseMessage
+    UserSessionID string `json:"userSessionId"`
+    AgentID       string `json:"agentId"`
+    Content       string `json:"content"`  // Agent's response content
+    Timestamp     string `json:"timestamp"`
 }
 ```
 
-### Relay Message Handler
+### Relay Message Handler (ALREADY EXISTS)
+
+**CORRECTION**: No new message handlers needed. The existing handler in `pkg/relay/server.go` (lines 368-468) already works with both agent types through the unified ACPClient interface.
 
 ```go
-// In pkg/relay/session/user_session.go
+// EXISTING handler in pkg/relay/server.go - works for BOTH agent types
+func (s *Server) handleAgentMessage(ctx context.Context, conn WebSocketConn, rawMessage []byte) bool {
+    msg, err := parseAgentMessageRequest(rawMessage)
 
-func (us *UserSession) HandleMessage(msg []byte) error {
-    var msgType struct {
-        Type string `json:"type"`
-    }
-    if err := json.Unmarshal(msg, &msgType); err != nil {
-        return err
-    }
+    // Get agent (works for both PWA and CLI agents)
+    agent, err := s.sessionManager.GetAgent(msg.UserSessionID, msg.AgentID)
 
-    switch msgType.Type {
-    case "agent:command":
-        return us.handleAgentCommand(msg)
-    case "agent:detach":
-        return us.handleAgentDetach(msg)
-    // ... existing message types ...
-    }
-}
+    // Get ACP client (unified interface)
+    // - PWA agents: pkg/acp.Client
+    // - CLI agents: ACPBridge (from Phase 3)
+    acpClient := agent.GetACPClient()
 
-func (us *UserSession) handleAgentCommand(msg []byte) error {
-    var cmd AgentCommand
-    if err := json.Unmarshal(msg, &cmd); err != nil {
-        return err
-    }
+    // Send message using unified ACPClient.SendMessage interface
+    response, err := acpClient.SendMessage(acpCtx, msg.Content)
 
-    // Get agent session
-    us.mu.RLock()
-    agent, ok := us.agents[cmd.AgentID]
-    us.mu.RUnlock()
-
-    if !ok {
-        return fmt.Errorf("agent %s not attached to this session", cmd.AgentID)
-    }
-
-    // Forward to ACP client
-    resp, err := agent.acpClient.Send(cmd.Payload)
-    if err != nil {
-        return err
-    }
-
-    // Send response back to PWA
-    return us.sendAgentResponse(cmd.AgentID, cmd.CommandID, resp)
+    // Return agent:response
+    responseMsg := NewAgentMessageResponse(msg.UserSessionID, msg.AgentID, responseStr, s.clock.Now())
+    conn.WriteJSON(responseMsg)
 }
 ```
 
-### File Changes
+### File Changes (ACTUAL)
 
 **New Files**:
-- `pkg/relay/session/acp_bridge.go` - ACP client wrapper for CLI agents
+- `pkg/relay/session/acp_bridge.go` - ACPBridge that implements ACPClient for CLI agents
 
 **Modified Files**:
-- `pkg/relay/session/models.go` - Add ACP connection logic to AttachAgent()
-- `pkg/relay/session/user_session.go` - Add agent:command message handler
-- `pkg/relay/relay.go` - Wire up new message types
+- `pkg/relay/session/models.go` - Modified AttachAgent() to create ACPBridge
 
-### Testing
+**NO Changes Needed**:
+- ~~`pkg/relay/session/user_session.go`~~ - No new handlers needed
+- ~~`pkg/relay/relay.go`~~ - No new message types needed
+- Existing message handlers already work for both agent types
+
+### Testing (CORRECTED)
 
 ```bash
-# Spawn agent
+# Spawn agent via CLI
 agentd spawn test-agent
 
 # Connect PWA via WebSocket
 wscat -c ws://localhost:8080/ws
 
+# Create session
+> {"version":"1.0","type":"session:create"}
+< {"version":"1.0","type":"session:created","userSessionId":"..."}
+
 # Attach agent via WebSocket
-> {"type":"agent:attach","agentId":"test-agent"}
+> {"version":"1.0","type":"agent:attach","userSessionId":"...","agentId":"test-agent"}
+< {"version":"1.0","type":"agent:attached","userSessionId":"...","agentId":"test-agent"}
 
-# Should receive response:
-< {"type":"agent:attached","agentId":"test-agent","attached":true,"lease":{...}}
-
-# Send command to agent
-> {"type":"agent:command","agentId":"test-agent","commandId":"cmd-1","payload":"ls"}
-
-# Should receive response:
-< {"type":"agent:response","agentId":"test-agent","commandId":"cmd-1","payload":"..."}
+# Send message to agent (uses EXISTING agent:message protocol)
+> {"version":"1.0","type":"agent:message","userSessionId":"...","agentId":"test-agent","content":"list files"}
+< {"version":"1.0","type":"agent:response","userSessionId":"...","agentId":"test-agent","content":"..."}
 ```
 
 ## Phase 4: Security Hardening

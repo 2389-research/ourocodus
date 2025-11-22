@@ -1426,6 +1426,35 @@ ls .agentd/session/test-agent.lease
 **Goal**: Full bidirectional communication between PWA and CLI agents
 **Milestone**: PWA can control CLI agents just like PWA-spawned agents
 
+---
+
+### ⚠️ IMPORTANT CORRECTION (2025-11-22)
+
+**The original plan specified creating a new "agent:command" message type. This was incorrect.**
+
+After implementation and multi-model consensus review, we determined:
+
+1. **The codebase already has a unified message protocol** - `agent:message` works for both PWA and CLI agents
+2. **ACPClient interface already exists** - Uses `SendMessage(ctx, string)` not `Send(json.RawMessage)` / `Receive()`
+3. **ACPBridge correctly implements existing interface** - No new message types or handlers needed
+4. **Task 3.3 was unnecessary** - Existing `handleAgentMessage()` works for both agent types
+
+**What Actually Happened:**
+- ✅ Task 3.1: ACPBridge implemented with correct ACPClient interface
+- ✅ Task 3.2: ACPBridge wired into AttachAgent()
+- ✅ Task 3.3: Verified existing handlers work (no new code needed)
+- ⏳ Task 3.4: End-to-end testing remains (with corrected protocol)
+
+**Why This Is Better:**
+- Single unified protocol for all agents (no PWA/CLI distinction)
+- No interface refactoring needed
+- Industry best practice (unified envelope, not divergent handlers)
+- Lower maintenance burden
+
+**See consensus analysis:** Both GPT-5 models (arguing FOR and AGAINST) unanimously concluded NOT to implement agent:command with 8/10 confidence each.
+
+---
+
 ### Task 3.1: Implement ACP Client Wrapper
 
 **Estimated Time**: 6 hours
@@ -1626,150 +1655,82 @@ func (us *UserSession) DetachAgent(agentID string) error {
 
 ---
 
-### Task 3.3: Add WebSocket Message Types
+### Task 3.3: Verify WebSocket Message Routing (CORRECTED)
 
-**Estimated Time**: 4 hours
+**Estimated Time**: 1 hour (verification only)
 
-**Files to Create**:
-- `pkg/relay/protocol/agent_messages.go`
+**Files to Review**:
+- `pkg/relay/message.go` (existing message types)
+- `pkg/relay/server.go` (existing message handlers)
+- `pkg/relay/session/acp_bridge.go` (ACPBridge implementation)
 
-**Files to Modify**:
-- `pkg/relay/session/user_session.go` (add message handlers)
+**What Was Actually Needed**:
+
+The planning document originally specified creating a NEW "agent:command" message type with a different interface (Send/Receive methods). However, investigation revealed:
+
+1. **Existing agent:message already works** - The codebase has a unified message protocol
+2. **ACPClient interface is already unified** - Uses `SendMessage(ctx, string)` for both PWA and CLI agents
+3. **ACPBridge correctly implements ACPClient** - No new interface needed
+
+**Architecture Reality Check**:
+
+```go
+// pkg/relay/session/models.go:135-138 (ACTUAL interface)
+type ACPClient interface {
+    SendMessage(ctx context.Context, content string) (interface{}, error) // Returns *acp.AgentMessage
+    Close(ctx context.Context) error
+}
+
+// Both implementations use the SAME interface:
+// - PWA-spawned agents: pkg/acp.Client implements ACPClient
+// - CLI-spawned agents: ACPBridge implements ACPClient (Task 3.1)
+```
+
+**Existing Message Flow (pkg/relay/server.go:368-468)**:
+
+```go
+// handleAgentMessage already works for BOTH agent types
+func (s *Server) handleAgentMessage(ctx context.Context, conn WebSocketConn, rawMessage []byte) bool {
+    // Parse agent:message request
+    msg, err := parseAgentMessageRequest(rawMessage)
+
+    // Get agent (works for both PWA and CLI agents)
+    agent, err := s.sessionManager.GetAgent(msg.UserSessionID, msg.AgentID)
+
+    // Get ACP client (ACPBridge for CLI, pkg/acp.Client for PWA)
+    acpClient := agent.GetACPClient()
+
+    // Send message using unified interface
+    response, err := acpClient.SendMessage(acpCtx, msg.Content)
+
+    // Return agent:response to PWA
+    responseMsg := NewAgentMessageResponse(msg.UserSessionID, msg.AgentID, responseStr, s.clock.Now())
+    conn.WriteJSON(responseMsg)
+}
+```
 
 **What to Do**:
-1. Define agent:command and agent:response message types
-2. Add message handlers to UserSession
-3. Route messages to/from ACP bridge
-
-**Code Structure**:
-```go
-// pkg/relay/protocol/agent_messages.go
-package protocol
-
-type AgentCommand struct {
-    Type      string          `json:"type"` // "agent:command"
-    AgentID   string          `json:"agentId"`
-    CommandID string          `json:"commandId"`
-    Payload   json.RawMessage `json:"payload"`
-}
-
-type AgentResponse struct {
-    Type      string          `json:"type"` // "agent:response"
-    AgentID   string          `json:"agentId"`
-    CommandID string          `json:"commandId"`
-    Payload   json.RawMessage `json:"payload"`
-    Error     string          `json:"error,omitempty"`
-}
-
-type AgentDetachRequest struct {
-    Type    string `json:"type"` // "agent:detach"
-    AgentID string `json:"agentId"`
-}
-```
-
-**Message Handler**:
-```go
-// In pkg/relay/session/user_session.go
-
-func (us *UserSession) HandleMessage(msg []byte) error {
-    var msgType struct {
-        Type string `json:"type"`
-    }
-    if err := json.Unmarshal(msg, &msgType); err != nil {
-        return err
-    }
-
-    switch msgType.Type {
-    case "agent:command":
-        return us.handleAgentCommand(msg)
-    case "agent:detach":
-        return us.handleAgentDetachRequest(msg)
-    // ... existing message types ...
-    default:
-        return fmt.Errorf("unknown message type: %s", msgType.Type)
-    }
-}
-
-func (us *UserSession) handleAgentCommand(msg []byte) error {
-    var cmd protocol.AgentCommand
-    if err := json.Unmarshal(msg, &cmd); err != nil {
-        return err
-    }
-
-    // Get agent session
-    us.mu.RLock()
-    agent, ok := us.agents[cmd.AgentID]
-    us.mu.RUnlock()
-
-    if !ok {
-        return us.sendAgentError(cmd.AgentID, cmd.CommandID, "agent not attached")
-    }
-
-    // Forward to ACP client
-    if err := agent.acpClient.Send(cmd.Payload); err != nil {
-        return us.sendAgentError(cmd.AgentID, cmd.CommandID, err.Error())
-    }
-
-    // Read response (blocking - consider goroutine for async)
-    resp, err := agent.acpClient.Receive()
-    if err != nil {
-        return us.sendAgentError(cmd.AgentID, cmd.CommandID, err.Error())
-    }
-
-    return us.sendAgentResponse(cmd.AgentID, cmd.CommandID, resp)
-}
-
-func (us *UserSession) sendAgentResponse(agentID, commandID string, payload json.RawMessage) error {
-    resp := protocol.AgentResponse{
-        Type:      "agent:response",
-        AgentID:   agentID,
-        CommandID: commandID,
-        Payload:   payload,
-    }
-
-    data, err := json.Marshal(resp)
-    if err != nil {
-        return err
-    }
-
-    return us.webSocket.WriteMessage(websocket.TextMessage, data)
-}
-
-func (us *UserSession) sendAgentError(agentID, commandID, errMsg string) error {
-    resp := protocol.AgentResponse{
-        Type:      "agent:response",
-        AgentID:   agentID,
-        CommandID: commandID,
-        Error:     errMsg,
-    }
-
-    data, err := json.Marshal(resp)
-    if err != nil {
-        return err
-    }
-
-    return us.webSocket.WriteMessage(websocket.TextMessage, data)
-}
-
-func (us *UserSession) handleAgentDetachRequest(msg []byte) error {
-    var req protocol.AgentDetachRequest
-    if err := json.Unmarshal(msg, &req); err != nil {
-        return err
-    }
-
-    return us.DetachAgent(req.AgentID)
-}
-```
+1. ✅ **ALREADY DONE**: ACPBridge implements ACPClient (Task 3.1)
+2. ✅ **ALREADY DONE**: ACPBridge wired into AttachAgent() (Task 3.2)
+3. ✅ **ALREADY DONE**: handleAgentMessage works for both agent types (existing code)
+4. ⏳ **REMAINING**: Verify message routing with end-to-end test (Task 3.4)
 
 **Acceptance Criteria**:
-- [ ] agent:command messages route to attached agent's ACP bridge
-- [ ] agent:response messages return to PWA with matching commandID
-- [ ] Errors are returned as agent:response with error field
-- [ ] agent:detach messages trigger DetachAgent()
+- [x] CLI agents use existing agent:message protocol (same as PWA agents)
+- [x] ACPBridge implements ACPClient.SendMessage interface
+- [x] handleAgentMessage routes to both PWA and CLI agents transparently
+- [ ] End-to-end test verifies message flow (see Task 3.4)
+
+**Why This Is Better Than The Plan**:
+- ✅ No protocol fragmentation (single message type for all agents)
+- ✅ No PWA changes needed (doesn't distinguish agent types)
+- ✅ No interface refactoring (ACPBridge uses existing interface)
+- ✅ Industry best practice (unified envelope with typed semantics)
+- ✅ Lower maintenance burden (single code path, single test matrix)
 
 ---
 
-### Task 3.4: End-to-End Communication Tests
+### Task 3.4: End-to-End Communication Tests (CORRECTED)
 
 **Estimated Time**: 4 hours
 
@@ -1779,11 +1740,11 @@ func (us *UserSession) handleAgentDetachRequest(msg []byte) error {
 **What to Do**:
 1. Spawn agent via CLI
 2. Attach via API
-3. Send command via WebSocket
-4. Verify response received
+3. Send message via WebSocket using **agent:message** (not agent:command)
+4. Verify response received as **agent:response**
 5. Detach and verify agent still running
 
-**Test Script**:
+**Test Script** (CORRECTED):
 ```bash
 #!/bin/bash
 # scripts/test-agent-communication.sh
@@ -1793,6 +1754,7 @@ set -e
 RELAY_URL="http://localhost:8080"
 WS_URL="ws://localhost:8080/ws"
 AGENT_ID="test-comm-$(date +%s)"
+SESSION_ID=""
 
 echo "=== Agent Communication Integration Test ==="
 
@@ -1802,33 +1764,61 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# 1. Spawn agent
+# 1. Spawn agent via CLI
 echo "1. Spawning agent..."
 agentd spawn "$AGENT_ID"
 sleep 2
 
-# 2. Attach agent
-echo "2. Attaching agent..."
-curl -X POST "$RELAY_URL/api/agents/attach" \
-    -d "{\"agentId\": \"$AGENT_ID\"}" | jq
+# 2. Create WebSocket session
+echo "2. Creating WebSocket session..."
+SESSION_ID=$(websocat "$WS_URL" <<EOF | jq -r '.userSessionId'
+{"version":"1.0","type":"session:create"}
+EOF
+)
+echo "   Session ID: $SESSION_ID"
 
-# 3. Send command via WebSocket (using wscat or similar)
-echo "3. Sending command to agent..."
-# This requires WebSocket client - wscat, websocat, or custom script
-echo '{"type":"agent:command","agentId":"'$AGENT_ID'","commandId":"cmd-1","payload":"ls"}' | \
-    websocat "$WS_URL" --one-message
+# 3. Attach agent to session
+echo "3. Attaching agent to session..."
+websocat "$WS_URL" <<EOF
+{"version":"1.0","type":"agent:attach","userSessionId":"$SESSION_ID","agentId":"$AGENT_ID"}
+EOF
+
+# 4. Send message to agent (using existing agent:message protocol)
+echo "4. Sending message to agent..."
+# NOTE: Uses agent:message (NOT agent:command) - unified protocol for all agents
+websocat "$WS_URL" --one-message <<EOF
+{"version":"1.0","type":"agent:message","userSessionId":"$SESSION_ID","agentId":"$AGENT_ID","content":"list files in current directory"}
+EOF
 
 # Expected response:
-# {"type":"agent:response","agentId":"test-comm-...","commandId":"cmd-1","payload":"..."}
+# {"version":"1.0","type":"agent:response","userSessionId":"...","agentId":"test-comm-...","content":"..."}
+
+# 5. Detach agent
+echo "5. Detaching agent..."
+websocat "$WS_URL" <<EOF
+{"version":"1.0","type":"agent:detach","userSessionId":"$SESSION_ID","agentId":"$AGENT_ID"}
+EOF
+
+# 6. Verify agent still running
+echo "6. Verifying agent still running..."
+agentd list | grep "$AGENT_ID"
 
 echo "✨ Communication test passed!"
 ```
 
+**Key Changes from Original Plan**:
+- ✅ Uses **agent:message** (existing unified protocol) instead of agent:command
+- ✅ Sends string content, not raw JSON payload (matches ACPClient interface)
+- ✅ Creates WebSocket session first (required for protocol)
+- ✅ Uses version 1.0 protocol messages (matches pkg/relay/message.go)
+- ✅ Detaches via agent:detach message (existing protocol)
+
 **Acceptance Criteria**:
-- [ ] Commands sent via WebSocket reach agent
-- [ ] Responses return via WebSocket with correct commandID
-- [ ] Multiple commands can be sent sequentially
-- [ ] Detaching stops communication but doesn't kill agent
+- [ ] Messages sent via agent:message reach CLI agent through ACPBridge
+- [ ] Responses return via agent:response with agent output
+- [ ] Multiple messages can be sent sequentially to same agent
+- [ ] Detaching stops communication but doesn't kill agent process
+- [ ] Both PWA-spawned and CLI-spawned agents use identical protocol
 
 ---
 
