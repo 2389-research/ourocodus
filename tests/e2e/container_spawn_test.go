@@ -220,7 +220,7 @@ func TestContainerSpawn_EchoAgent(t *testing.T) {
 	// Verify labels
 	require.NotNil(t, inspect.Config.Labels, "Container labels should not be nil")
 	require.Equal(t, "true", inspect.Config.Labels["ourocodus.agent"], "Expected ourocodus.agent label to be true")
-	require.Equal(t, agentID, inspect.Config.Labels["agent-id"], "Expected agent-id label to match")
+	require.Equal(t, agentID, inspect.Config.Labels["ourocodus.agent/agent-id"], "Expected ourocodus.agent/agent-id label to match")
 	t.Log("Container labels verified")
 
 	// Verify workspace mount

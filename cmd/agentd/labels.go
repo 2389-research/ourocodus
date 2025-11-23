@@ -5,9 +5,13 @@ const (
 	// This matches the label set by pkg/agent/container/launcher.go
 	LabelNamespace = "ourocodus.agent"
 
-	// LabelAgentID stores the agent identifier
-	// This matches the label set by pkg/agent/container/launcher.go
-	LabelAgentID = "agent-id"
+	// LabelAgentID stores the agent identifier (fully qualified label name)
+	// CRITICAL: This must match pkg/agent/container/launcher.go and pkg/relay/session/helpers.go
+	LabelAgentID = "ourocodus.agent/agent-id"
+
+	// LabelWorkspace stores the workspace path (fully qualified label name)
+	// CRITICAL: This must match pkg/agent/container/launcher.go and pkg/relay/session/helpers.go
+	LabelWorkspace = "ourocodus.agent/workspace"
 
 	// LabelSpawnSource indicates how the agent was spawned (cli, relay, etc.)
 	// This matches the label set by pkg/agent/container/launcher.go

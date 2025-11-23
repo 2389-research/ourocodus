@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/2389-research/ourocodus/pkg/containersession"
+	"github.com/2389-research/ourocodus/pkg/labels"
 	"github.com/2389-research/ourocodus/pkg/runtime"
 	"github.com/2389-research/ourocodus/pkg/worktree"
 	"github.com/docker/docker/api/types/mount"
@@ -215,15 +216,19 @@ func (l *AgentContainerLauncher) createContainerWithMounts(
 		})
 	}
 
-	// Build labels for container (merge custom labels with defaults)
-	// Start with custom labels
-	labels := make(map[string]string)
+	// Build labels for container using centralized label builder
+	// Start with standard Ourocodus agent labels
+	labelBuilder := labels.NewBuilder().
+		WithNamespace().
+		WithAgentID(config.AgentID).
+		WithWorkspace(wt.Path())
+
+	// Add custom labels from config
 	for k, v := range config.Labels {
-		labels[k] = v
+		labelBuilder = labelBuilder.WithCustom(k, v)
 	}
-	// Override with reserved labels to prevent tampering
-	labels["ourocodus.agent"] = "true"
-	labels["agent-id"] = config.AgentID
+
+	containerLabels := labelBuilder.Build()
 
 	// Check if we're using container attach mode (where ACP runs as main process)
 	// In this mode, we skip the manager's output logging to avoid competing for stdio streams
@@ -238,7 +243,7 @@ func (l *AgentContainerLauncher) createContainerWithMounts(
 		WorkspaceDir:      wt.Path(),  // Use the AgentWorktree path
 		CustomMounts:      credMounts, // Add credential mounts (includes .creds if present)
 		Env:               config.Env,
-		Labels:            labels,
+		Labels:            containerLabels,   // Use labels from builder
 		SkipOutputLogging: skipOutputLogging, // Skip if using container attach mode
 	})
 	if err != nil {

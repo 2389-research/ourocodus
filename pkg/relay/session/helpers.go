@@ -6,6 +6,10 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/2389-research/ourocodus/pkg/labels"
+	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/client"
 )
 
 // ValidateNonEmpty validates that a string is not empty or whitespace-only.
@@ -105,4 +109,59 @@ func StopContainerAndCleanupLauncher(
 	}
 
 	return failed
+}
+
+// FindAgentContainerIDForTesting discovers a CLI-spawned agent container by agent ID using Docker labels.
+// This function is exported for testing purposes and used by integration tests.
+//
+// It queries the Docker daemon for containers with the label "ourocodus.agent/agent-id"
+// matching the provided agentID, and extracts the container ID and workspace path.
+//
+// Returns:
+//   - containerID: The Docker container ID
+//   - workspace: The workspace path extracted from container labels
+//   - error: If container not found, not running, or Docker API errors
+func FindAgentContainerIDForTesting(ctx context.Context, agentID string) (containerID, workspace string, err error) {
+	// Create Docker client
+	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	if err != nil {
+		return "", "", fmt.Errorf("failed to create docker client: %w", err)
+	}
+	defer func() { _ = cli.Close() }()
+
+	// Build filter using centralized label builder to ensure consistency
+	filterArgs := labels.FindAgentFilter(agentID)
+
+	// List containers with the agent label
+	containers, err := cli.ContainerList(ctx, container.ListOptions{
+		Filters: filterArgs,
+		All:     false, // Only running containers
+	})
+	if err != nil {
+		return "", "", fmt.Errorf("failed to list containers: %w", err)
+	}
+
+	if len(containers) == 0 {
+		return "", "", fmt.Errorf("no running container found for agent ID: %s", agentID)
+	}
+
+	if len(containers) > 1 {
+		return "", "", fmt.Errorf("multiple containers found for agent ID %s (found %d)", agentID, len(containers))
+	}
+
+	// Extract container ID and workspace from labels using centralized constants
+	ctr := containers[0]
+	containerID = ctr.ID
+	workspace = ctr.Labels[labels.Workspace]
+
+	if workspace == "" {
+		// Defensive: format container ID safely for error message
+		shortID := containerID
+		if len(containerID) > 12 {
+			shortID = containerID[:12]
+		}
+		return "", "", fmt.Errorf("container %s missing workspace label", shortID)
+	}
+
+	return containerID, workspace, nil
 }
