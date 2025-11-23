@@ -111,6 +111,71 @@ func StopContainerAndCleanupLauncher(
 	return failed
 }
 
+// StopCLISpawnedContainer stops a CLI-spawned container using Docker API directly.
+// This is used for attached agents that weren't spawned by the relay (no launcher entry).
+// Returns true if the operation failed (for error tracking).
+func StopCLISpawnedContainer(
+	ctx context.Context,
+	agentID string,
+	logger Logger,
+) bool {
+	// Create Docker client
+	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	if err != nil {
+		logger.Printf("WARN: Failed to create Docker client for stopping CLI agent %s: %v", agentID, err)
+		return true
+	}
+	defer func() { _ = cli.Close() }()
+
+	// Find container by agent-id label
+	containerID, _, err := FindAgentContainerIDForTesting(ctx, agentID)
+	if err != nil {
+		logger.Printf("WARN: Failed to find CLI agent container %s: %v", agentID, err)
+		return true
+	}
+
+	if containerID == "" {
+		// Container not found - may have already been stopped
+		logger.Printf("CLI agent container %s not found (may be already stopped)", agentID)
+		return false
+	}
+
+	// Stop the container with grace period (same as agentd stop)
+	timeout := 30
+	if err := cli.ContainerStop(ctx, containerID, container.StopOptions{
+		Timeout: &timeout,
+	}); err != nil {
+		// Treat "not running" and "not found" as success for idempotence
+		if !strings.Contains(err.Error(), "is not running") && !strings.Contains(err.Error(), "No such container") {
+			logger.Printf("WARN: Failed to stop CLI agent container %s: %v", agentID, err)
+			return true
+		}
+	}
+
+	// Remove the container to clean up artifacts (idempotent)
+	if err := cli.ContainerRemove(ctx, containerID, container.RemoveOptions{
+		Force:         true,
+		RemoveVolumes: true,
+	}); err != nil {
+		// Ignore NotFound errors for idempotence
+		if !strings.Contains(err.Error(), "No such container") {
+			logger.Printf("WARN: Failed to remove CLI agent container %s: %v", agentID, err)
+			return true
+		}
+	}
+
+	logger.Printf("Stopped and removed CLI agent container: agent=%s container=%s", agentID, formatContainerID(containerID))
+	return false
+}
+
+// formatContainerID truncates container ID to first 12 characters for logging
+func formatContainerID(containerID string) string {
+	if len(containerID) > 12 {
+		return containerID[:12]
+	}
+	return containerID
+}
+
 // FindAgentContainerIDForTesting discovers a CLI-spawned agent container by agent ID using Docker labels.
 // This function is exported for testing purposes and used by integration tests.
 //
