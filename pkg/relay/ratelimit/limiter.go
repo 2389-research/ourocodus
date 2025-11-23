@@ -28,9 +28,9 @@ type Limiter struct {
 
 // bucket represents a token bucket for a single user session
 type bucket struct {
-	tokens       int
-	lastRefill   time.Time
-	mu           sync.Mutex
+	tokens     int
+	lastRefill time.Time
+	mu         sync.Mutex
 }
 
 // NewLimiter creates a new rate limiter
