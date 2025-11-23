@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -111,14 +112,17 @@ func StopContainerAndCleanupLauncher(
 	return failed
 }
 
-// StopCLISpawnedContainer stops a CLI-spawned container using Docker API directly.
+// StopCLISpawnedContainer stops a CLI-spawned container and cleans up all associated resources.
 // This is used for attached agents that weren't spawned by the relay (no launcher entry).
+// Cleanup includes: Docker container, git worktree, branch, lease file, and token file.
 // Returns true if the operation failed (for error tracking).
 func StopCLISpawnedContainer(
 	ctx context.Context,
 	agentID string,
 	logger Logger,
 ) bool {
+	failed := false
+
 	// Create Docker client
 	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
@@ -128,7 +132,7 @@ func StopCLISpawnedContainer(
 	defer func() { _ = cli.Close() }()
 
 	// Find container by agent-id label
-	containerID, _, err := FindAgentContainerIDForTesting(ctx, agentID)
+	containerID, workspacePath, err := FindAgentContainerIDForTesting(ctx, agentID)
 	if err != nil {
 		logger.Printf("WARN: Failed to find CLI agent container %s: %v", agentID, err)
 		return true
@@ -137,35 +141,60 @@ func StopCLISpawnedContainer(
 	if containerID == "" {
 		// Container not found - may have already been stopped
 		logger.Printf("CLI agent container %s not found (may be already stopped)", agentID)
-		return false
+		// Continue with cleanup of other resources even if container is gone
+	} else {
+		// Stop the container with grace period (same as agentd stop)
+		timeout := 30
+		if err := cli.ContainerStop(ctx, containerID, container.StopOptions{
+			Timeout: &timeout,
+		}); err != nil {
+			// Treat "not running" and "not found" as success for idempotence
+			if !strings.Contains(err.Error(), "is not running") && !strings.Contains(err.Error(), "No such container") {
+				logger.Printf("WARN: Failed to stop CLI agent container %s: %v", agentID, err)
+				failed = true
+			}
+		}
+
+		// Remove the container to clean up artifacts (idempotent)
+		if err := cli.ContainerRemove(ctx, containerID, container.RemoveOptions{
+			Force:         true,
+			RemoveVolumes: true,
+		}); err != nil {
+			// Ignore NotFound errors for idempotence
+			if !strings.Contains(err.Error(), "No such container") {
+				logger.Printf("WARN: Failed to remove CLI agent container %s: %v", agentID, err)
+				failed = true
+			}
+		}
+
+		logger.Printf("Stopped and removed CLI agent container: agent=%s container=%s", agentID, formatContainerID(containerID))
 	}
 
-	// Stop the container with grace period (same as agentd stop)
-	timeout := 30
-	if err := cli.ContainerStop(ctx, containerID, container.StopOptions{
-		Timeout: &timeout,
-	}); err != nil {
-		// Treat "not running" and "not found" as success for idempotence
-		if !strings.Contains(err.Error(), "is not running") && !strings.Contains(err.Error(), "No such container") {
-			logger.Printf("WARN: Failed to stop CLI agent container %s: %v", agentID, err)
-			return true
+	// Clean up worktree if workspace path is known
+	if workspacePath != "" {
+		if err := cleanupWorktree(ctx, workspacePath, logger); err != nil {
+			logger.Printf("WARN: Failed to cleanup worktree for agent %s: %v", agentID, err)
+			// Don't mark as failed - worktree cleanup is best-effort
 		}
 	}
 
-	// Remove the container to clean up artifacts (idempotent)
-	if err := cli.ContainerRemove(ctx, containerID, container.RemoveOptions{
-		Force:         true,
-		RemoveVolumes: true,
-	}); err != nil {
-		// Ignore NotFound errors for idempotence
-		if !strings.Contains(err.Error(), "No such container") {
-			logger.Printf("WARN: Failed to remove CLI agent container %s: %v", agentID, err)
-			return true
-		}
+	// Release lease file (.agentd/session/{agent-id}.lease)
+	if err := ReleaseLease(agentID); err != nil {
+		logger.Printf("WARN: Failed to release lease for agent %s: %v", agentID, err)
+		// Don't mark as failed - lease cleanup is best-effort
+	} else {
+		logger.Printf("Released lease for agent %s", agentID)
 	}
 
-	logger.Printf("Stopped and removed CLI agent container: agent=%s container=%s", agentID, formatContainerID(containerID))
-	return false
+	// Delete attach token file (.agentd/session/{agent-id}.token)
+	if err := deleteAttachToken(agentID); err != nil {
+		logger.Printf("WARN: Failed to delete attach token for agent %s: %v", agentID, err)
+		// Don't mark as failed - token cleanup is best-effort
+	} else {
+		logger.Printf("Deleted attach token for agent %s", agentID)
+	}
+
+	return failed
 }
 
 // formatContainerID truncates container ID to first 12 characters for logging
@@ -229,4 +258,98 @@ func FindAgentContainerIDForTesting(ctx context.Context, agentID string) (contai
 	}
 
 	return containerID, workspace, nil
+}
+
+// cleanupWorktree removes a git worktree and its associated branch.
+// This is best-effort cleanup that logs warnings but doesn't fail the overall termination.
+func cleanupWorktree(ctx context.Context, workspacePath string, logger Logger) error {
+	// Get the branch name before removing the worktree
+	branchName, err := getWorktreeBranch(ctx, workspacePath)
+	if err != nil {
+		logger.Printf("WARN: Failed to get worktree branch for %s: %v", workspacePath, err)
+		// Continue with worktree removal even if we can't get the branch
+	}
+
+	// Remove the worktree
+	cmd := exec.CommandContext(ctx, "git", "worktree", "remove", workspacePath, "--force")
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to remove worktree: %w", err)
+	}
+
+	logger.Printf("Removed worktree: %s", workspacePath)
+
+	// Delete the branch if we found one
+	if branchName != "" {
+		cmd := exec.CommandContext(ctx, "git", "branch", "-D", branchName)
+		if err := cmd.Run(); err != nil {
+			logger.Printf("WARN: Failed to delete branch %s: %v", branchName, err)
+			// Don't return error - branch deletion is best-effort
+		} else {
+			logger.Printf("Deleted branch: %s", branchName)
+		}
+	}
+
+	return nil
+}
+
+// getWorktreeBranch extracts the branch name for a given worktree path.
+func getWorktreeBranch(ctx context.Context, workspacePath string) (string, error) {
+	// Run git worktree list --porcelain
+	cmd := exec.CommandContext(ctx, "git", "worktree", "list", "--porcelain")
+	output, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("failed to list worktrees: %w", err)
+	}
+
+	// Parse the porcelain output to find the branch for this workspace
+	return parseBranchFromWorktreeList(string(output), workspacePath)
+}
+
+// parseBranchFromWorktreeList parses git worktree list --porcelain output to find the branch for a workspace.
+// Format:
+//   worktree /path/to/worktree
+//   HEAD <commit-hash>
+//   branch refs/heads/branch-name
+//   <blank line>
+func parseBranchFromWorktreeList(output, workspacePath string) (string, error) {
+	lines := strings.Split(output, "\n")
+	foundWorktree := false
+
+	for i := 0; i < len(lines); i++ {
+		line := strings.TrimSpace(lines[i])
+
+		// Look for the worktree line matching our path
+		if strings.HasPrefix(line, "worktree ") {
+			worktreePath := strings.TrimPrefix(line, "worktree ")
+			if worktreePath == workspacePath {
+				foundWorktree = true
+			} else {
+				foundWorktree = false
+			}
+			continue
+		}
+
+		// If we found the matching worktree, look for the branch line
+		if foundWorktree && strings.HasPrefix(line, "branch ") {
+			branchRef := strings.TrimPrefix(line, "branch ")
+			// Extract branch name from refs/heads/branch-name
+			branchName := strings.TrimPrefix(branchRef, "refs/heads/")
+			return branchName, nil
+		}
+	}
+
+	return "", fmt.Errorf("worktree not found or has no branch: %s", workspacePath)
+}
+
+// deleteAttachToken removes the attach token file for an agent.
+// This is idempotent - returns nil if the file doesn't exist.
+func deleteAttachToken(agentID string) error {
+	tokenPath := fmt.Sprintf(".agentd/session/%s.token", agentID)
+	if err := os.Remove(tokenPath); err != nil {
+		if os.IsNotExist(err) {
+			return nil // Already deleted, idempotent
+		}
+		return fmt.Errorf("failed to remove token file: %w", err)
+	}
+	return nil
 }

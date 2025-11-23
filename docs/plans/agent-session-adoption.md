@@ -336,6 +336,128 @@ func (r *Relay) reapExpiredLeases(ctx context.Context) {
 
 ## Phase 3: ACP Communication Bridge
 
+### Phase 3 PWA UX Improvements (2025-11-23)
+
+After Phase 3 completion, we identified and fixed three UX issues with agent attachment:
+
+#### Issue 1: Success Notifications Styled as Errors
+**Problem**: Success toast notifications were displaying with red error styling (`.notification.error` class) instead of green success styling.
+
+**Root Cause**: The `NotificationService` only had a `showError()` method. Success messages were being routed through error styling.
+
+**Fix**:
+- Added `.notification.success` CSS class with green border (`var(--accent-primary)`)
+- Created separate `showSuccess()` method in `NotificationService`
+- Added `onShowSuccess` callback to `RelayConnection` class
+- Updated `handleAgentAttached()` and `handleAgentDetached()` to use success callback
+- Success messages now auto-dismiss after 5s (vs 10s for errors)
+
+**Files Changed**:
+- `internal/webapp/src/services/notification-service.ts` - Added `showSuccess()` method
+- `internal/webapp/web/styles.css` - Added `.notification.success` class
+- `internal/webapp/src/connection.ts` - Added `onShowSuccess` callback
+- `internal/webapp/src/ui/state.ts` - Wired success callback to notification service
+
+#### Issue 2: Attached Agents Not Appearing in Agent List
+**Problem**: After successfully attaching to a CLI-spawned agent, the agent did not appear in the agent cards list like PWA-spawned agents.
+
+**Root Cause**: The `handleAgentAttached()` method only updated the `discoveredAgents` Map but didn't add the agent to the `agents` Map that drives the agent cards display.
+
+**Fix**:
+- Modified `handleAgentAttached()` to add agent to `this.agents` Map (same as spawned agents)
+- Added welcome message to agent's message history
+- Called `renderAgentCards()` to display the agent card
+- Modified `handleAgentDetached()` to remove agent from Map and re-render
+
+**Files Changed**:
+- `internal/webapp/src/connection.ts` - Updated `handleAgentAttached()` and `handleAgentDetached()`
+
+**Code**:
+```typescript
+// Add attached agent to the agents Map (same as spawned agents)
+this.agents.set(agentId, {
+    role: agentId,
+    status: 'ready',
+    messages: [],
+    workspace: agentInfo.workspace
+});
+
+// Add welcome message
+const agent = this.agents.get(agentId);
+if (agent) {
+    agent.messages.push({
+        sender: 'agent',
+        content: `Hi! I'm ${agentId}. You've successfully attached to this CLI-spawned agent.`,
+        timestamp: new Date()
+    });
+}
+
+// Render agent cards (same as spawned agents)
+this.renderAgentCards();
+```
+
+#### Issue 3: Session Termination Not Terminating Attached Agents
+**Problem**: When terminating a UserSession, CLI-spawned (attached) agents were not being terminated. Only PWA-spawned agents (with launcher entries) were stopped.
+
+**Root Cause**: The relay's container termination logic only worked for agents with `launcher` entries. CLI-spawned agents attached via Phase 3 don't have launcher entries.
+
+**Architecture Insight**: The user clarified that relay DOES have Docker API access and host filesystem access (relay runs on host). Attached agents should be treated identically to spawned agents during termination.
+
+**Fix - Container Termination**:
+- Added detection logic to check if agent has launcher entry
+- If no launcher (CLI-spawned): route to `StopCLISpawnedContainer()`
+- `StopCLISpawnedContainer()` uses Docker API directly to stop and remove container
+- Added `FindAgentContainerIDForTesting()` to discover container by agent-id label
+
+**Fix - Complete Filesystem Cleanup**:
+- Extended cleanup to include git worktree, lease file, and token file
+- Added `cleanupWorktree()` helper function (removes worktree and deletes branch)
+- Added `deleteAttachToken()` helper function (removes `.agentd/session/{agent-id}.token`)
+- Uses existing `ReleaseLease()` for lease file cleanup
+- All cleanup operations are idempotent and best-effort (log warnings but don't fail termination)
+
+**Files Changed**:
+- `pkg/relay/session/helpers.go` - Added `StopCLISpawnedContainer()`, `cleanupWorktree()`, `deleteAttachToken()`
+- `pkg/relay/session/manager.go` - Modified `TerminateAgent()` and `TerminateUserSession()` to detect and route CLI agents
+
+**Code**:
+```go
+// In TerminateAgent() and TerminateUserSession()
+if m.isContainerModeEnabled() {
+    key := launcherKey(userSessionID, agentID)
+    m.launchersMu.RLock()
+    hasLauncher := m.launchers[key] != nil
+    m.launchersMu.RUnlock()
+
+    if hasLauncher {
+        // Relay-spawned agent: use launcher to stop
+        if StopContainerAndCleanupLauncher(ctx, m, userSessionID, agentID, m.logger) {
+            m.logger.Printf("WARN: Failed to stop container and cleanup launcher")
+        }
+    } else {
+        // CLI-spawned (attached) agent: stop container directly via Docker API
+        m.logger.Printf("[SESSION] Agent %s is CLI-spawned (no launcher) - stopping via Docker API", agentID)
+        if StopCLISpawnedContainer(ctx, agentID, m.logger) {
+            m.logger.Printf("WARN: Failed to stop CLI-spawned container: agentID=%s", agentID)
+        }
+    }
+}
+
+// StopCLISpawnedContainer performs complete cleanup
+func StopCLISpawnedContainer(ctx context.Context, agentID string, logger Logger) bool {
+    // 1. Stop and remove Docker container
+    // 2. Clean up git worktree and branch
+    // 3. Release lease file (.agentd/session/{agent-id}.lease)
+    // 4. Delete attach token (.agentd/session/{agent-id}.token)
+}
+```
+
+**Why This Matters**:
+- Attached agents now behave identically to spawned agents
+- Session termination properly cleans up ALL agents (not just PWA-spawned)
+- Prevents resource leaks (containers, worktrees, files)
+- Maintains filesystem hygiene (no orphaned lease/token files)
+
 ### Goal
 
 Enable PWA to send commands to and receive responses from attached agents via the existing ACP protocol.
