@@ -177,6 +177,9 @@ export class App {
                 } : undefined
             });
         };
+        this.connection.onShowSuccess = (message: string) => {
+            this.notifications.showSuccess(message);
+        };
 
         // Wire theme toggle button
         const themeToggleBtn = document.getElementById('themeToggle');

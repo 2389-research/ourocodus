@@ -26,6 +26,7 @@ export class RelayConnection {
     public onAgentReady?: () => void;
     public onError?: () => void;
     public onShowError?: (message: string, recoverable: boolean, retryCallback?: () => void) => void;
+    public onShowSuccess?: (message: string) => void;
 
     // Map-based state for multiple agents: role → { role, status, messages, workspace }
     public agents: Map<string, AgentState>;
@@ -1337,8 +1338,9 @@ export class RelayConnection {
      */
     handleAgentAttached(message: any): void {
         const modal = document.getElementById('attachAgentModal');
+        const agentId = message.agentId;
 
-        this.logger.info('Successfully attached to agent:', message.agentId);
+        this.logger.info('Successfully attached to agent:', agentId);
 
         // Close modal
         if (modal) {
@@ -1346,16 +1348,37 @@ export class RelayConnection {
         }
 
         // Show success notification
-        if (this.onShowError) {
+        if (this.onShowSuccess) {
             const expiresAt = message.expiresAt ? new Date(message.expiresAt).toLocaleString() : 'unknown';
-            this.onShowError(`✓ Successfully attached to agent: ${message.agentId} (expires: ${expiresAt})`, false);
+            this.onShowSuccess(`✓ Successfully attached to agent: ${agentId} (expires: ${expiresAt})`);
         }
 
-        // Update client-side state
-        const agentInfo = this.discoveredAgents.get(message.agentId);
+        // Update client-side discovered agent state
+        const agentInfo = this.discoveredAgents.get(agentId);
         if (agentInfo) {
             agentInfo.status = 'attached';
             agentInfo.attachedTo = message.sessionId;
+
+            // Add attached agent to the agents Map (same as spawned agents)
+            this.agents.set(agentId, {
+                role: agentId,
+                status: 'ready',
+                messages: [],
+                workspace: agentInfo.workspace
+            });
+
+            // Add welcome message to agent's messages
+            const agent = this.agents.get(agentId);
+            if (agent) {
+                agent.messages.push({
+                    sender: 'agent',
+                    content: `Hi! I'm ${agentId}. You've successfully attached to this CLI-spawned agent. Send me a message to get started!`,
+                    timestamp: new Date()
+                });
+            }
+
+            // Render agent cards (same as spawned agents)
+            this.renderAgentCards();
         }
 
         // Refresh discovery list to show updated status
@@ -1368,19 +1391,26 @@ export class RelayConnection {
      * Errors are sent as separate 'error' messages
      */
     handleAgentDetached(message: any): void {
-        this.logger.info('Successfully detached from agent:', message.agentId);
+        const agentId = message.agentId;
+        this.logger.info('Successfully detached from agent:', agentId);
 
         // Show success notification
-        if (this.onShowError) {
-            this.onShowError(`✓ Successfully detached from agent: ${message.agentId}`, false);
+        if (this.onShowSuccess) {
+            this.onShowSuccess(`✓ Successfully detached from agent: ${agentId}`);
         }
 
-        // Update client-side state
-        const agentInfo = this.discoveredAgents.get(message.agentId);
+        // Update client-side discovered agent state
+        const agentInfo = this.discoveredAgents.get(agentId);
         if (agentInfo) {
             agentInfo.status = 'detached';
             agentInfo.attachedTo = undefined;
         }
+
+        // Remove agent from agents Map (same as terminated agents)
+        this.agents.delete(agentId);
+
+        // Re-render agent cards to remove the detached agent
+        this.renderAgentCards();
 
         // Refresh discovery list to show updated status
         this.discoverAgents();
