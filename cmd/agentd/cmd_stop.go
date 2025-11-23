@@ -77,7 +77,33 @@ func stopAgent(ctx context.Context, _ interface{}, agentID string) error {
 
 	if containerID == "" {
 		// Agent doesn't exist - this is okay (idempotent)
+		// But still clean up leases/tokens in case they're stale
 		printSuccess(fmt.Sprintf("Agent '%s' not found (already stopped)", agentID))
+
+		// Clean up worktree if workspace path is known
+		if workspacePath != "" {
+			if err := removeWorktree(ctx, workspacePath); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to cleanup worktree: %v\n", err)
+			} else {
+				printSuccess("Cleaned up worktree")
+			}
+		}
+
+		// Attempt lease release (idempotent)
+		if err := session.ReleaseLease(agentID); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to release lease: %v\n", err)
+		} else {
+			printSuccess("Released agent lease")
+		}
+
+		// Attempt token deletion (idempotent)
+		if err := deleteAttachToken(agentID); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to delete attach token: %v\n", err)
+		} else {
+			printSuccess("Deleted attach token")
+		}
+
+		printSuccess("Cleaned up agent resources")
 		return nil
 	}
 

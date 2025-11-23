@@ -117,6 +117,8 @@ func StopContainerAndCleanupLauncher(
 // This is used for attached agents that weren't spawned by the relay (no launcher entry).
 // Cleanup includes: Docker container, git worktree, branch, lease file, and token file.
 // Returns true if the operation failed (for error tracking).
+//
+//nolint:gocyclo // Complexity justified: cleanup requires error handling for each resource (container, worktree, lease, token)
 func StopCLISpawnedContainer(
 	ctx context.Context,
 	agentID string,
@@ -135,15 +137,51 @@ func StopCLISpawnedContainer(
 	// Find container by agent-id label
 	containerID, workspacePath, err := FindAgentContainerIDForTesting(ctx, agentID)
 	if err != nil {
+		// Treat "no running container found" as idempotent success (already stopped)
+		if strings.Contains(err.Error(), "no running container found for agent ID") {
+			logger.Printf("CLI agent container %s not found (may be already stopped)", agentID)
+			// Container is gone, but still clean up leases/tokens
+			failed := false
+
+			// Clean up worktree if workspace path is known
+			if workspacePath != "" {
+				if err := cleanupWorktree(ctx, workspacePath, logger); err != nil {
+					logger.Printf("WARN: Failed to cleanup worktree for agent %s: %v", agentID, err)
+					// Don't mark as failed - worktree cleanup is best-effort
+				}
+			}
+
+			// Release lease file
+			if err := ReleaseLease(agentID); err != nil {
+				logger.Printf("WARN: Failed to release lease for agent %s: %v", agentID, err)
+				// Don't mark as failed - lease cleanup is best-effort
+			} else {
+				logger.Printf("Released lease for agent %s", agentID)
+			}
+
+			// Delete attach token file
+			if err := deleteAttachToken(agentID); err != nil {
+				logger.Printf("WARN: Failed to delete attach token for agent %s: %v", agentID, err)
+				// Don't mark as failed - token cleanup is best-effort
+			} else {
+				logger.Printf("Deleted attach token for agent %s", agentID)
+			}
+
+			return failed
+		}
+		// Real lookup error (not "not found")
 		logger.Printf("WARN: Failed to find CLI agent container %s: %v", agentID, err)
 		return true
 	}
 
 	if containerID == "" {
-		// Container not found - may have already been stopped
+		// Defensive: This should be unreachable now, but keep for safety
 		logger.Printf("CLI agent container %s not found (may be already stopped)", agentID)
-		// Continue with cleanup of other resources even if container is gone
-	} else {
+		return false
+	}
+
+	// Normal path: container found, stop and remove it
+	{
 		// Stop the container with grace period (same as agentd stop)
 		timeout := 30
 		if err := cli.ContainerStop(ctx, containerID, container.StopOptions{
