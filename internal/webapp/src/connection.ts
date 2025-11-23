@@ -3,7 +3,7 @@
  */
 
 import { Logger } from './logger';
-import type { AgentState, SessionCreatedMessage, AgentReadyMessage, AgentResponseMessage, ErrorMessage } from './types';
+import type { AgentState, AgentInfo, SessionCreatedMessage, AgentReadyMessage, AgentResponseMessage, ErrorMessage } from './types';
 
 const SPAWN_BUTTON_DEFAULT = '<span class="btn-icon">🤖</span> Spawn Agent';
 
@@ -30,6 +30,9 @@ export class RelayConnection {
     // Map-based state for multiple agents: role → { role, status, messages, workspace }
     public agents: Map<string, AgentState>;
 
+    // Phase 3: Map for discovered CLI-spawned agents: agentId → AgentInfo
+    private discoveredAgents: Map<string, AgentInfo>;
+
     constructor() {
         this.logger = new Logger('RelayConnection');
         this.ws = null;
@@ -48,6 +51,9 @@ export class RelayConnection {
 
         // Map-based state for multiple agents
         this.agents = new Map<string, AgentState>();
+
+        // Phase 3: Map for discovered CLI-spawned agents
+        this.discoveredAgents = new Map<string, AgentInfo>();
 
         // Get WebSocket URL (same host as HTTP)
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -163,6 +169,22 @@ export class RelayConnection {
                 case 'error':
                     this.logger.error('Server error:', message);
                     this.handleError(message);
+                    break;
+
+                // Phase 3: Agent discovery and attachment
+                case 'agent:discovered':
+                    this.logger.info('Agents discovered:', message);
+                    this.handleAgentDiscovered(message);
+                    break;
+
+                case 'agent:attached':
+                    this.logger.info('Agent attached:', message);
+                    this.handleAgentAttached(message);
+                    break;
+
+                case 'agent:detached':
+                    this.logger.info('Agent detached:', message);
+                    this.handleAgentDetached(message);
                     break;
 
                 default:
@@ -1082,5 +1104,285 @@ export class RelayConnection {
 
         spawnAgentBtn.innerHTML = SPAWN_BUTTON_DEFAULT;
         spawnAgentBtn.disabled = !this.userSessionId;
+    }
+
+    /**
+     * Phase 3: Discover CLI-spawned agents
+     */
+    discoverAgents(): boolean {
+        if (!this.userSessionId || !this.ws || this.ws.readyState !== WebSocket.OPEN) {
+            this.logger.error('Cannot discover agents: not connected or no session');
+            return false;
+        }
+
+        const message = {
+            type: 'agent:discover',
+            version: '1.0',
+            userSessionId: this.userSessionId
+        };
+
+        this.logger.info('Discovering agents:', message);
+        this.ws.send(JSON.stringify(message));
+        return true;
+    }
+
+    /**
+     * Phase 3: Attach to CLI-spawned agent
+     */
+    attachAgent(agentId: string, token: string): boolean {
+        if (!this.userSessionId || !this.ws || this.ws.readyState !== WebSocket.OPEN) {
+            this.logger.error('Cannot attach agent: not connected or no session');
+            return false;
+        }
+
+        const message = {
+            type: 'agent:attach',
+            version: '1.0',
+            userSessionId: this.userSessionId,
+            agentId: agentId,
+            token: token
+        };
+
+        this.logger.info('Attaching to agent:', { agentId, tokenLength: token.length });
+        this.ws.send(JSON.stringify(message));
+        return true;
+    }
+
+    /**
+     * Phase 3: Detach from CLI-spawned agent
+     */
+    detachAgent(agentId: string): boolean {
+        if (!this.userSessionId || !this.ws || this.ws.readyState !== WebSocket.OPEN) {
+            this.logger.error('Cannot detach agent: not connected or no session');
+            return false;
+        }
+
+        const message = {
+            type: 'agent:detach',
+            version: '1.0',
+            userSessionId: this.userSessionId,
+            agentId: agentId
+        };
+
+        this.logger.info('Detaching from agent:', { agentId });
+        this.ws.send(JSON.stringify(message));
+        return true;
+    }
+
+    /**
+     * Phase 3: Handle agent:discovered response
+     */
+    handleAgentDiscovered(message: any): void {
+        const discoveredList = document.getElementById('discoveredAgentsList');
+        if (!discoveredList) {
+            this.logger.error('Discovered agents list element not found');
+            return;
+        }
+
+        // Update client-side state
+        if (message.agents && Array.isArray(message.agents)) {
+            message.agents.forEach((agent: AgentInfo) => {
+                this.discoveredAgents.set(agent.agentId, agent);
+            });
+        }
+
+        // Clear existing list
+        while (discoveredList.firstChild) {
+            discoveredList.removeChild(discoveredList.firstChild);
+        }
+
+        if (!message.agents || message.agents.length === 0) {
+            const emptyMsg = document.createElement('p');
+            emptyMsg.className = 'info-text';
+            emptyMsg.textContent = 'No CLI-spawned agents found. Run ';
+
+            const codeEl = document.createElement('code');
+            codeEl.textContent = 'agentd spawn <agent-id>';
+            emptyMsg.appendChild(codeEl);
+            emptyMsg.appendChild(document.createTextNode(' to create one.'));
+
+            discoveredList.appendChild(emptyMsg);
+            discoveredList.style.display = 'block';
+            return;
+        }
+
+        // Use template for safe rendering
+        const template = document.getElementById('agent-card-template') as HTMLTemplateElement;
+        if (!template) {
+            this.logger.error('Agent card template not found');
+            return;
+        }
+
+        // Use DocumentFragment for batch DOM updates
+        const fragment = document.createDocumentFragment();
+
+        message.agents.forEach((agent: AgentInfo) => {
+            const clone = template.content.cloneNode(true) as DocumentFragment;
+            const card = clone.querySelector('.discovered-agent-card') as HTMLElement;
+
+            if (!card) {
+                this.logger.error('Agent card structure not found in template');
+                return;
+            }
+
+            // Set agent ID using textContent (safe)
+            const agentIdEl = clone.querySelector('.agent-id');
+            if (agentIdEl) {
+                agentIdEl.textContent = agent.agentId;
+            }
+
+            // Set workspace using textContent (safe)
+            const workspaceEl = clone.querySelector('.agent-workspace');
+            if (workspaceEl) {
+                workspaceEl.textContent = agent.workspace || '-';
+            }
+
+            // Set source using textContent (safe)
+            const sourceEl = clone.querySelector('.agent-source');
+            if (sourceEl) {
+                sourceEl.textContent = agent.spawnSource || 'cli';
+            }
+
+            // Set created date using textContent (safe)
+            const createdEl = clone.querySelector('.agent-created');
+            if (createdEl) {
+                try {
+                    createdEl.textContent = new Date(agent.createdAt).toLocaleString();
+                } catch (e) {
+                    createdEl.textContent = agent.createdAt || '-';
+                }
+            }
+
+            // Set button state and data attribute
+            const attachBtn = clone.querySelector('[data-action="attach"]') as HTMLButtonElement;
+            if (attachBtn) {
+                attachBtn.dataset.agentId = agent.agentId;
+
+                if (agent.status === 'attached') {
+                    attachBtn.disabled = true;
+                    attachBtn.textContent = 'Already Attached';
+                }
+            }
+
+            fragment.appendChild(clone);
+        });
+
+        discoveredList.appendChild(fragment);
+        discoveredList.style.display = 'block';
+
+        // Set up event delegation on the list container (do this once)
+        this.setupDiscoveredListEventDelegation(discoveredList);
+    }
+
+    /**
+     * Phase 3: Set up event delegation for discovered agents list
+     */
+    private setupDiscoveredListEventDelegation(listContainer: HTMLElement): void {
+        // Remove existing listener if any
+        const existingHandler = (listContainer as any)._attachHandler;
+        if (existingHandler) {
+            listContainer.removeEventListener('click', existingHandler);
+        }
+
+        // Create new handler
+        const handler = (event: Event) => {
+            const target = event.target as HTMLElement;
+            const button = target.closest('[data-action="attach"]') as HTMLButtonElement;
+
+            if (button && !button.disabled) {
+                event.preventDefault();
+                const agentId = button.dataset.agentId;
+
+                if (agentId) {
+                    this.showAttachModal(agentId);
+                }
+            }
+        };
+
+        // Store handler reference for cleanup
+        (listContainer as any)._attachHandler = handler;
+        listContainer.addEventListener('click', handler);
+    }
+
+    /**
+     * Phase 3: Show attachment modal for given agent ID
+     */
+    private showAttachModal(agentId: string): void {
+        const modal = document.getElementById('attachAgentModal');
+        const agentIdEl = document.getElementById('attachAgentId');
+        const tokenInput = document.getElementById('attachTokenInput') as HTMLInputElement;
+        const errorEl = document.getElementById('attachError');
+
+        if (!modal || !agentIdEl || !tokenInput || !errorEl) {
+            this.logger.error('Attachment modal elements not found');
+            return;
+        }
+
+        agentIdEl.textContent = agentId;
+        tokenInput.value = '';
+        errorEl.style.display = 'none';
+        modal.style.display = 'flex';
+
+        // Store agent ID for confirmation handler
+        (modal as any)._pendingAgentId = agentId;
+
+        // Focus the token input
+        setTimeout(() => tokenInput.focus(), 100);
+    }
+
+    /**
+     * Phase 3: Handle agent:attached response
+     */
+    handleAgentAttached(message: any): void {
+        const modal = document.getElementById('attachAgentModal');
+        const errorEl = document.getElementById('attachError');
+
+        if (message.attached) {
+            this.logger.info('Successfully attached to agent:', message.agentId);
+
+            // Close modal
+            if (modal) {
+                modal.style.display = 'none';
+            }
+
+            // Show success notification
+            if (this.onShowError) {
+                this.onShowError(`✓ Successfully attached to agent: ${message.agentId}`, false);
+            }
+
+            // Refresh discovery list
+            this.discoverAgents();
+        } else {
+            this.logger.error('Failed to attach to agent:', message.error);
+
+            // Show error in modal
+            if (errorEl) {
+                errorEl.textContent = `⚠️ ${message.error || 'Failed to attach agent'}`;
+                errorEl.style.display = 'block';
+            }
+        }
+    }
+
+    /**
+     * Phase 3: Handle agent:detached response
+     */
+    handleAgentDetached(message: any): void {
+        if (message.detached) {
+            this.logger.info('Successfully detached from agent:', message.agentId);
+
+            // Show success notification
+            if (this.onShowError) {
+                this.onShowError(`✓ Successfully detached from agent: ${message.agentId}`, false);
+            }
+
+            // Refresh discovery list
+            this.discoverAgents();
+        } else {
+            this.logger.error('Failed to detach from agent:', message.error);
+
+            if (this.onShowError) {
+                this.onShowError(`Failed to detach: ${message.error}`, false);
+            }
+        }
     }
 }

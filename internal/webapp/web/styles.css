@@ -363,6 +363,88 @@ body {
     opacity: 0.8;
 }
 
+/* Phase 3: Agent Discovery Section */
+.agent-discovery-section {
+    margin-top: 1.5rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--border);
+}
+
+.agent-discovery-section h3 {
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 0.5rem;
+}
+
+.agent-discovery-section .info-text {
+    color: var(--text-secondary);
+    font-size: 0.875rem;
+    margin-bottom: 1rem;
+}
+
+.agent-discovery-section .info-text code {
+    background: var(--bg-tertiary);
+    padding: 0.125rem 0.375rem;
+    border-radius: 0.25rem;
+    font-family: 'Courier New', monospace;
+    font-size: 0.875rem;
+}
+
+.discovered-agents-list {
+    margin-top: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.discovered-agent-card {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    border-radius: 0.5rem;
+    padding: 1rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 1rem;
+    transition: border-color 0.2s ease;
+}
+
+.discovered-agent-card:hover {
+    border-color: var(--accent-primary);
+}
+
+.agent-info-text {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.agent-info-text .agent-id {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--accent-primary);
+}
+
+.agent-info-text small {
+    color: var(--text-secondary);
+    font-size: 0.875rem;
+    line-height: 1.6;
+}
+
+.agent-info-text small strong {
+    color: var(--text-primary);
+}
+
+.agent-info-text small .agent-workspace,
+.agent-info-text small .agent-source,
+.agent-info-text small .agent-created {
+    color: var(--text-secondary);
+    font-family: 'Courier New', monospace;
+    font-size: 0.8125rem;
+}
+
 /* Chat Container */
 .chat-container {
     background: var(--bg-secondary);
