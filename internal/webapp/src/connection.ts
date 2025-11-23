@@ -1332,57 +1332,57 @@ export class RelayConnection {
 
     /**
      * Phase 3: Handle agent:attached response
+     * Server sends this message on successful attachment
+     * Errors are sent as separate 'error' messages
      */
     handleAgentAttached(message: any): void {
         const modal = document.getElementById('attachAgentModal');
-        const errorEl = document.getElementById('attachError');
 
-        if (message.attached) {
-            this.logger.info('Successfully attached to agent:', message.agentId);
+        this.logger.info('Successfully attached to agent:', message.agentId);
 
-            // Close modal
-            if (modal) {
-                modal.style.display = 'none';
-            }
-
-            // Show success notification
-            if (this.onShowError) {
-                this.onShowError(`✓ Successfully attached to agent: ${message.agentId}`, false);
-            }
-
-            // Refresh discovery list
-            this.discoverAgents();
-        } else {
-            this.logger.error('Failed to attach to agent:', message.error);
-
-            // Show error in modal
-            if (errorEl) {
-                errorEl.textContent = `⚠️ ${message.error || 'Failed to attach agent'}`;
-                errorEl.style.display = 'block';
-            }
+        // Close modal
+        if (modal) {
+            modal.style.display = 'none';
         }
+
+        // Show success notification
+        if (this.onShowError) {
+            const expiresAt = message.expiresAt ? new Date(message.expiresAt).toLocaleString() : 'unknown';
+            this.onShowError(`✓ Successfully attached to agent: ${message.agentId} (expires: ${expiresAt})`, false);
+        }
+
+        // Update client-side state
+        const agentInfo = this.discoveredAgents.get(message.agentId);
+        if (agentInfo) {
+            agentInfo.status = 'attached';
+            agentInfo.attachedTo = message.sessionId;
+        }
+
+        // Refresh discovery list to show updated status
+        this.discoverAgents();
     }
 
     /**
      * Phase 3: Handle agent:detached response
+     * Server sends this message on successful detachment
+     * Errors are sent as separate 'error' messages
      */
     handleAgentDetached(message: any): void {
-        if (message.detached) {
-            this.logger.info('Successfully detached from agent:', message.agentId);
+        this.logger.info('Successfully detached from agent:', message.agentId);
 
-            // Show success notification
-            if (this.onShowError) {
-                this.onShowError(`✓ Successfully detached from agent: ${message.agentId}`, false);
-            }
-
-            // Refresh discovery list
-            this.discoverAgents();
-        } else {
-            this.logger.error('Failed to detach from agent:', message.error);
-
-            if (this.onShowError) {
-                this.onShowError(`Failed to detach: ${message.error}`, false);
-            }
+        // Show success notification
+        if (this.onShowError) {
+            this.onShowError(`✓ Successfully detached from agent: ${message.agentId}`, false);
         }
+
+        // Update client-side state
+        const agentInfo = this.discoveredAgents.get(message.agentId);
+        if (agentInfo) {
+            agentInfo.status = 'detached';
+            agentInfo.attachedTo = undefined;
+        }
+
+        // Refresh discovery list to show updated status
+        this.discoverAgents();
     }
 }

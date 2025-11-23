@@ -87,8 +87,8 @@ export interface AgentAttachMessage extends BaseMessage {
 export interface AgentAttachedMessage extends BaseMessage {
     type: 'agent:attached';
     agentId: string;
-    attached: boolean;
-    error?: string;
+    sessionId: string;
+    expiresAt: string;
 }
 
 export interface AgentDetachMessage extends BaseMessage {
@@ -100,8 +100,6 @@ export interface AgentDetachMessage extends BaseMessage {
 export interface AgentDetachedMessage extends BaseMessage {
     type: 'agent:detached';
     agentId: string;
-    detached: boolean;
-    error?: string;
 }
 
 export interface ConnectionEstablishedMessage extends BaseMessage {
