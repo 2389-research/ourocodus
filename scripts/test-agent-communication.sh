@@ -6,8 +6,14 @@
 
 set -e
 
+# Dependency validation
+for cmd in websocat jq; do
+  command -v "$cmd" > /dev/null || { echo "ERROR: $cmd not found"; exit 1; }
+done
+[ -x bin/agentd ] || { echo "ERROR: bin/agentd not found or not executable"; exit 1; }
+
 # Environment setup for Docker and Anthropic API
-export DOCKER_HOST="unix:///Users/clint/.colima/default/docker.sock"
+export DOCKER_HOST="${DOCKER_HOST:-unix:///var/run/docker.sock}"
 export ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-sk-test-dummy-key-for-testing}"
 
 WS_URL="ws://localhost:8080/ws"
@@ -15,6 +21,7 @@ AGENT_ID="test-comm-$(date +%s)"
 SESSION_ID=""
 
 echo "=== Agent Communication Integration Test ==="
+echo "Using DOCKER_HOST: $DOCKER_HOST"
 
 cleanup() {
     echo "Cleaning up..."

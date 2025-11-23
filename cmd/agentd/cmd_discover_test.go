@@ -10,15 +10,7 @@ func TestDiscoverCommand_FlagsRegistered(t *testing.T) {
 	// Test that all expected flags are registered
 	formatFlag := discoverCmd.Flags().Lookup("format")
 	assert.NotNil(t, formatFlag, "Expected --format flag to be registered")
-	assert.Equal(t, "auto", formatFlag.DefValue, "Expected --format to default to 'auto'")
-
-	plainFlag := discoverCmd.Flags().Lookup("plain")
-	assert.NotNil(t, plainFlag, "Expected --plain flag to be registered")
-	assert.Equal(t, "false", plainFlag.DefValue, "Expected --plain to default to false")
-
-	themeFlag := discoverCmd.Flags().Lookup("theme")
-	assert.NotNil(t, themeFlag, "Expected --theme flag to be registered")
-	assert.Equal(t, "cga", themeFlag.DefValue, "Expected --theme to default to 'cga'")
+	assert.Equal(t, "table", formatFlag.DefValue, "Expected --format to default to 'table'")
 
 	watchFlag := discoverCmd.Flags().Lookup("watch")
 	assert.NotNil(t, watchFlag, "Expected --watch flag to be registered")
@@ -27,16 +19,14 @@ func TestDiscoverCommand_FlagsRegistered(t *testing.T) {
 
 func TestDiscoverCommand_HelpText(t *testing.T) {
 	help := discoverCmd.Long
-	assert.Contains(t, help, "watch", "Expected help text to mention watch mode")
-	assert.Contains(t, help, "auto-refresh", "Expected help text to mention auto-refresh")
-	assert.Contains(t, help, "2 seconds", "Expected help text to specify refresh interval")
+	assert.Contains(t, help, "adoption status", "Expected help text to mention adoption status")
+	assert.Contains(t, help, "Docker", "Expected help text to mention Docker")
+	assert.Contains(t, help, "lease", "Expected help text to mention lease status")
 }
 
 func TestDiscoverCommand_Examples(t *testing.T) {
 	examples := discoverCmd.Example
 	assert.Contains(t, examples, "--watch", "Expected examples to show --watch flag")
-	assert.Contains(t, examples, "--theme", "Expected examples to show --theme flag")
-	assert.Contains(t, examples, "--plain", "Expected examples to show --plain flag")
 	assert.Contains(t, examples, "--format json", "Expected examples to show JSON format")
 }
 
