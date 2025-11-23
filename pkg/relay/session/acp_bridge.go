@@ -14,6 +14,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/2389-research/ourocodus/pkg/acp"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/stdcopy"
@@ -202,8 +203,8 @@ func (b *ACPBridge) SendMessage(ctx context.Context, content string) (interface{
 		Data    interface{} `json:"data,omitempty"` // Additional error context from agent
 	}
 	var resp struct {
-		Result interface{} `json:"result"`
-		Error  *rpcError   `json:"error"`
+		Result json.RawMessage `json:"result"`
+		Error  *rpcError       `json:"error"`
 	}
 
 	if err := json.Unmarshal(respBytes, &resp); err != nil {
@@ -218,7 +219,14 @@ func (b *ACPBridge) SendMessage(ctx context.Context, content string) (interface{
 		return nil, fmt.Errorf("agent error %d: %s", resp.Error.Code, resp.Error.Message)
 	}
 
-	return resp.Result, nil
+	// Unmarshal result into acp.AgentMessage to match the interface contract
+	// The ACPClient interface returns interface{} but server expects *acp.AgentMessage
+	var agentMsg acp.AgentMessage
+	if err := json.Unmarshal(resp.Result, &agentMsg); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal agent message: %w", err)
+	}
+
+	return &agentMsg, nil
 }
 
 // sendRaw sends a raw JSON-RPC request and waits for the response.

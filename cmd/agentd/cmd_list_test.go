@@ -3,74 +3,11 @@ package main
 import (
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
 )
 
 // Test pure formatting functions
-func TestFormatStateString(t *testing.T) {
-	tests := []struct {
-		name  string
-		state string
-		want  string // We check that output contains the state word
-	}{
-		{
-			name:  "running",
-			state: "running",
-			want:  "running",
-		},
-		{
-			name:  "exited",
-			state: "exited",
-			want:  "stopped",
-		},
-		{
-			name:  "stopped",
-			state: "stopped",
-			want:  "stopped",
-		},
-		{
-			name:  "dead",
-			state: "dead",
-			want:  "failed",
-		},
-		{
-			name:  "removing",
-			state: "removing",
-			want:  "failed",
-		},
-		{
-			name:  "created",
-			state: "created",
-			want:  "pending",
-		},
-		{
-			name:  "restarting",
-			state: "restarting",
-			want:  "pending",
-		},
-		{
-			name:  "paused",
-			state: "paused",
-			want:  "paused",
-		},
-		{
-			name:  "unknown",
-			state: "unknown-state",
-			want:  "unknown-state",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := formatStateString(tt.state)
-			// The output contains ANSI color codes, so we just check the string is not empty
-			// and the actual state verification is done visually
-			if len(got) == 0 {
-				t.Errorf("formatStateString(%q) returned empty string", tt.state)
-			}
-		})
-	}
-}
-
 func TestFormatWorkspace(t *testing.T) {
 	tests := []struct {
 		name string
@@ -195,4 +132,27 @@ func TestFormatDuration(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestListCommand_FlagsRegistered verifies that the list command has expected flags
+func TestListCommand_FlagsRegistered(t *testing.T) {
+	// Check for --format flag
+	formatFlag := listCmd.Flags().Lookup("format")
+	assert.NotNil(t, formatFlag, "Expected --format flag to be registered")
+	assert.Equal(t, "auto", formatFlag.DefValue, "Expected --format to default to 'auto'")
+
+	// Check for --plain flag
+	plainFlag := listCmd.Flags().Lookup("plain")
+	assert.NotNil(t, plainFlag, "Expected --plain flag to be registered")
+	assert.Equal(t, "false", plainFlag.DefValue, "Expected --plain to default to false")
+
+	// Check for --theme flag
+	themeFlag := listCmd.Flags().Lookup("theme")
+	assert.NotNil(t, themeFlag, "Expected --theme flag to be registered")
+	assert.Equal(t, "cga", themeFlag.DefValue, "Expected --theme to default to 'cga'")
+
+	// Check for --watch flag (newly added)
+	watchFlag := listCmd.Flags().Lookup("watch")
+	assert.NotNil(t, watchFlag, "Expected --watch flag to be registered")
+	assert.Equal(t, "false", watchFlag.DefValue, "Expected --watch to default to false")
 }
