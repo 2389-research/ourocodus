@@ -7,35 +7,34 @@ import (
 
 // TestWatchCommand_Flags verifies that the watch command has the required flags
 func TestWatchCommand_Flags(t *testing.T) {
-	// Check for --theme flag
-	themeFlag := watchCmd.Flags().Lookup("theme")
-	if themeFlag == nil {
-		t.Error("--theme flag not found")
+	// Check for --raw flag
+	rawFlag := watchCmd.Flags().Lookup("raw")
+	if rawFlag == nil {
+		t.Error("--raw flag not found")
 	}
 
-	// Check for --plain flag
-	plainFlag := watchCmd.Flags().Lookup("plain")
-	if plainFlag == nil {
-		t.Error("--plain flag not found")
-	}
-
-	// Check for --json flag
-	jsonFlag := watchCmd.Flags().Lookup("json")
-	if jsonFlag == nil {
-		t.Error("--json flag not found")
+	// Check for --nats flag
+	natsFlag := watchCmd.Flags().Lookup("nats")
+	if natsFlag == nil {
+		t.Error("--nats flag not found")
 	}
 
 	// Verify flag types
-	if themeFlag != nil && themeFlag.Value.Type() != "string" {
-		t.Errorf("--theme flag should be string, got %s", themeFlag.Value.Type())
+	if rawFlag != nil && rawFlag.Value.Type() != "bool" {
+		t.Errorf("--raw flag should be bool, got %s", rawFlag.Value.Type())
 	}
 
-	if plainFlag != nil && plainFlag.Value.Type() != "bool" {
-		t.Errorf("--plain flag should be bool, got %s", plainFlag.Value.Type())
+	if natsFlag != nil && natsFlag.Value.Type() != "string" {
+		t.Errorf("--nats flag should be string, got %s", natsFlag.Value.Type())
 	}
 
-	if jsonFlag != nil && jsonFlag.Value.Type() != "bool" {
-		t.Errorf("--json flag should be bool, got %s", jsonFlag.Value.Type())
+	// Verify default values
+	if natsFlag != nil && natsFlag.DefValue != "nats://localhost:4222" {
+		t.Errorf("--nats should default to 'nats://localhost:4222', got %s", natsFlag.DefValue)
+	}
+
+	if rawFlag != nil && rawFlag.DefValue != "false" {
+		t.Errorf("--raw should default to false, got %s", rawFlag.DefValue)
 	}
 }
 
@@ -66,7 +65,7 @@ func TestWatchCommand_Arguments(t *testing.T) {
 	}
 }
 
-// TestWatchCommand_Help verifies that the help text mentions keyboard shortcuts
+// TestWatchCommand_Help verifies that the help text is descriptive
 func TestWatchCommand_Help(t *testing.T) {
 	// Get the long description
 	helpText := watchCmd.Long
@@ -74,26 +73,27 @@ func TestWatchCommand_Help(t *testing.T) {
 		helpText = watchCmd.Short
 	}
 
-	// Check for keyboard shortcut mentions
-	// The help should mention common shortcuts like q, r, ?
-	shortcuts := []string{"q", "r", "?"}
-	foundAny := false
+	// Check for mentions of key features
+	keywords := []string{"heartbeat", "nats", "real-time", "agent"}
+	foundCount := 0
 
-	for _, shortcut := range shortcuts {
-		if strings.Contains(strings.ToLower(helpText), shortcut) {
-			foundAny = true
-			break
+	for _, keyword := range keywords {
+		if strings.Contains(strings.ToLower(helpText), keyword) {
+			foundCount++
 		}
 	}
 
-	if !foundAny {
-		t.Errorf("watch command help text should mention keyboard shortcuts (q, r, ?), got: %s", helpText)
+	if foundCount < 2 {
+		t.Errorf("watch command help text should mention at least 2 of: %v, got: %s", keywords, helpText)
 	}
 
-	// Verify it mentions interactive/TUI mode
-	if !strings.Contains(strings.ToLower(helpText), "interactive") &&
-		!strings.Contains(strings.ToLower(helpText), "tui") &&
-		!strings.Contains(strings.ToLower(helpText), "rich") {
-		t.Error("watch command help text should mention interactive/TUI/rich mode")
+	// Verify examples are present
+	if watchCmd.Example == "" {
+		t.Error("watch command should have example usage")
+	}
+
+	// Check that examples mention the --raw flag
+	if !strings.Contains(watchCmd.Example, "--raw") {
+		t.Error("watch command examples should show --raw flag usage")
 	}
 }
