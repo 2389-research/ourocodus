@@ -10,7 +10,6 @@ set -e
 export DOCKER_HOST="unix:///Users/clint/.colima/default/docker.sock"
 export ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-sk-test-dummy-key-for-testing}"
 
-RELAY_URL="http://localhost:8080"
 WS_URL="ws://localhost:8080/ws"
 AGENT_ID="test-comm-$(date +%s)"
 SESSION_ID=""
