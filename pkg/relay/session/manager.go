@@ -425,10 +425,26 @@ func (m *Manager) TerminateAgent(ctx context.Context, userSessionID, agentID str
 
 	m.logger.Printf("[SESSION] Terminating agent: session=%s agentID=%s", userSessionID, agentID)
 
-	// Stop container and cleanup launcher (container mode only)
-	// Uses atomic take-and-delete pattern to prevent double-stop race (Issue #210)
-	if StopContainerAndCleanupLauncher(ctx, m, userSessionID, agentID, m.logger) {
-		m.logger.Printf("WARN: Failed to stop container and cleanup launcher: session=%s agentID=%s", userSessionID, agentID)
+	// Stop container - check if it's a relay-spawned or CLI-spawned agent
+	if m.isContainerModeEnabled() {
+		// First check if this agent has a launcher (relay-spawned)
+		key := launcherKey(userSessionID, agentID)
+		m.launchersMu.RLock()
+		hasLauncher := m.launchers[key] != nil
+		m.launchersMu.RUnlock()
+
+		if hasLauncher {
+			// Relay-spawned agent: use launcher to stop
+			if StopContainerAndCleanupLauncher(ctx, m, userSessionID, agentID, m.logger) {
+				m.logger.Printf("WARN: Failed to stop container and cleanup launcher: session=%s agentID=%s", userSessionID, agentID)
+			}
+		} else {
+			// CLI-spawned (attached) agent: stop container directly via Docker API
+			m.logger.Printf("[SESSION] Agent %s is CLI-spawned (no launcher) - stopping via Docker API", agentID)
+			if StopCLISpawnedContainer(ctx, agentID, m.logger) {
+				m.logger.Printf("WARN: Failed to stop CLI-spawned container: agentID=%s", agentID)
+			}
+		}
 	}
 
 	// Close ACP client safely with context (fixes Issue #212)
@@ -499,10 +515,26 @@ func (m *Manager) TerminateUserSession(ctx context.Context, userSessionID string
 					failed = true
 				}
 
-				// Stop container and cleanup launcher (container mode only)
-				// Uses atomic take-and-delete pattern to prevent double-stop race (Issue #210)
-				if StopContainerAndCleanupLauncher(shutdownCtx, m, userSessionID, id, m.logger) {
-					failed = true
+				// Stop container - check if it's a relay-spawned or CLI-spawned agent
+				if m.isContainerModeEnabled() {
+					// First check if this agent has a launcher (relay-spawned)
+					key := launcherKey(userSessionID, id)
+					m.launchersMu.RLock()
+					hasLauncher := m.launchers[key] != nil
+					m.launchersMu.RUnlock()
+
+					if hasLauncher {
+						// Relay-spawned agent: use launcher to stop
+						if StopContainerAndCleanupLauncher(shutdownCtx, m, userSessionID, id, m.logger) {
+							failed = true
+						}
+					} else {
+						// CLI-spawned (attached) agent: stop container directly via Docker API
+						m.logger.Printf("[SESSION] Agent %s is CLI-spawned (no launcher) - stopping via Docker API", id)
+						if StopCLISpawnedContainer(shutdownCtx, id, m.logger) {
+							failed = true
+						}
+					}
 				}
 
 				if failed {

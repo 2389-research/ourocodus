@@ -33,11 +33,25 @@ export class NotificationService {
      * Show error notification with optional retry
      */
     public showError(message: string, options?: NotificationOptions): void {
+        this.showNotification(message, 'error', options);
+    }
+
+    /**
+     * Show success notification
+     */
+    public showSuccess(message: string, options?: NotificationOptions): void {
+        this.showNotification(message, 'success', options);
+    }
+
+    /**
+     * Show notification with specified type
+     */
+    private showNotification(message: string, type: 'error' | 'success', options?: NotificationOptions): void {
         this.ensureContainer();
         const id = `notification-${this.notificationId++}`;
 
         const notification = document.createElement('div');
-        notification.className = 'notification error';
+        notification.className = `notification ${type}`;
         notification.id = id;
 
         const content = document.createElement('div');
@@ -51,8 +65,8 @@ export class NotificationService {
         const actions = document.createElement('div');
         actions.className = 'notification-actions';
 
-        // Add retry button if recoverable
-        if (options?.recoverable && options?.retryCallback) {
+        // Add retry button if recoverable (errors only)
+        if (type === 'error' && options?.recoverable && options?.retryCallback) {
             const retryBtn = document.createElement('button');
             retryBtn.className = 'btn btn-small btn-retry';
             retryBtn.textContent = 'Retry';
@@ -84,9 +98,11 @@ export class NotificationService {
 
         this.container?.appendChild(notification);
 
-        // Auto-dismiss after configured timeout if not recoverable
-        if (!options?.recoverable) {
-            const timeout = options?.autoDismissMs ?? 10000;
+        // Auto-dismiss after configured timeout
+        // Success messages auto-dismiss by default, errors only if not recoverable
+        const shouldAutoDismiss = type === 'success' || !options?.recoverable;
+        if (shouldAutoDismiss) {
+            const timeout = options?.autoDismissMs ?? (type === 'success' ? 5000 : 10000);
             setTimeout(() => this.dismiss(id), timeout);
         }
     }

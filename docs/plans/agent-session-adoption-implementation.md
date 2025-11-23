@@ -1421,14 +1421,16 @@ ls .agentd/session/test-agent.lease
 
 ---
 
-## Phase 3: ACP Communication Bridge (Week 4)
+## Phase 3: ACP Communication Bridge (Week 4) ✅ COMPLETED
 
 **Goal**: Full bidirectional communication between PWA and CLI agents
-**Milestone**: PWA can control CLI agents just like PWA-spawned agents
+**Milestone**: PWA can control CLI agents just like PWA-spawned agents ✅ ACHIEVED
 
 ---
 
-### ⚠️ IMPORTANT CORRECTION (2025-11-22)
+### ⚠️ IMPORTANT CORRECTIONS
+
+#### Correction 1: Unified Message Protocol (2025-11-22)
 
 **The original plan specified creating a new "agent:command" message type. This was incorrect.**
 
@@ -1452,6 +1454,33 @@ After implementation and multi-model consensus review, we determined:
 - Lower maintenance burden
 
 **See consensus analysis:** Both GPT-5 models (arguing FOR and AGAINST) unanimously concluded NOT to implement agent:command with 8/10 confidence each.
+
+#### Correction 2: PWA UX and Cleanup Fixes (2025-11-23)
+
+After Phase 3 completion, three UX/termination issues were identified and fixed:
+
+**Issue 1: Success Notifications Styled as Errors**
+- **Problem**: Success toasts displayed with red error border
+- **Fix**: Added `.notification.success` CSS class and `showSuccess()` method
+- **Files**: `internal/webapp/src/services/notification-service.ts`, `internal/webapp/web/styles.css`, `internal/webapp/src/connection.ts`, `internal/webapp/src/ui/state.ts`
+
+**Issue 2: Attached Agents Not Appearing in Agent List**
+- **Problem**: Attached agents didn't appear in agent cards like spawned agents
+- **Fix**: Modified `handleAgentAttached()` to add agent to `agents` Map and render cards
+- **Files**: `internal/webapp/src/connection.ts`
+
+**Issue 3: Session Termination Not Terminating Attached Agents**
+- **Problem**: CLI-spawned agents (no launcher entry) weren't terminated with session
+- **Architecture Clarification**: Relay DOES have Docker API and filesystem access (runs on host)
+- **Fix - Container**: Added `StopCLISpawnedContainer()` to stop containers via Docker API directly
+- **Fix - Filesystem**: Extended cleanup to include git worktree, lease file, and token file
+- **Helper Functions**: Added `cleanupWorktree()`, `deleteAttachToken()`, uses existing `ReleaseLease()`
+- **Files**: `pkg/relay/session/helpers.go`, `pkg/relay/session/manager.go`
+
+**Why This Matters**:
+- Attached agents now behave identically to spawned agents in all respects
+- Complete resource cleanup prevents leaks (containers, worktrees, lease/token files)
+- PWA provides consistent visual feedback for all operations
 
 ---
 

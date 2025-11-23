@@ -29,7 +29,7 @@ func verifyAttachToken(agentID, providedToken string) error {
 		return ErrMissingAttachToken
 	}
 	// Validate agentID to prevent path traversal attacks (P0 security issue)
-	if err := validateAgentID(agentID); err != nil {
+	if err := ValidateAgentID(agentID); err != nil {
 		return fmt.Errorf("invalid agent ID: %w", err)
 	}
 

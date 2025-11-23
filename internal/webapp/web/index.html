@@ -10,8 +10,8 @@
     <link rel="manifest" href="/manifest.webmanifest">
     <link rel="apple-touch-icon" href="/icon-192.png">
     <title>Ourocodus</title>
-    <link rel="stylesheet" href="styles.min.bda7c401.css">
-    <link rel="stylesheet" href="tailwind.23371a39.css">
+    <link rel="stylesheet" href="styles.min.07ba15c4.css">
+    <link rel="stylesheet" href="tailwind.8c19d015.css">
 </head>
 <body>
     <div class="container">
@@ -58,6 +58,19 @@
                     <div class="info-item">
                         <span class="info-label">Status:</span>
                         <span class="info-value" id="sessionStatus">Initializing...</span>
+                    </div>
+                </div>
+
+                <!-- Agent Discovery Section (Phase 3) -->
+                <div class="agent-discovery-section" id="agentDiscoverySection">
+                    <h3>CLI-Spawned Agents</h3>
+                    <p class="info-text">Discover and attach to agents spawned via <code>agentd spawn</code></p>
+                    <button class="btn btn-secondary" id="discoverAgentsBtn">
+                        <span class="btn-icon">🔍</span>
+                        Discover Agents
+                    </button>
+                    <div id="discoveredAgentsList" class="discovered-agents-list" style="display: none;">
+                        <!-- Discovered agents will be listed here -->
                     </div>
                 </div>
 
@@ -192,7 +205,54 @@
         </div>
     </div>
 
+    <!-- Agent Attachment Modal (Phase 3) -->
+    <div class="modal" id="attachAgentModal" style="display: none;">
+        <div class="modal-overlay" aria-hidden="true"></div>
+        <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="attachAgentModalTitle" aria-describedby="attachAgentModalDesc">
+            <h3 id="attachAgentModalTitle">Attach to Agent</h3>
+            <div id="attachAgentModalDesc">
+                <p>Attach to CLI-spawned agent: <strong id="attachAgentId">-</strong></p>
+                <p class="modal-info">🔐 Enter the attach token displayed when you ran <code>agentd spawn</code></p>
+                <div class="form-group">
+                    <label for="attachTokenInput">Attach Token:</label>
+                    <div style="position: relative;">
+                        <input type="password" id="attachTokenInput" placeholder="Paste token from agentd spawn output" style="font-family: monospace; width: 100%; padding-right: 3rem;" autocomplete="off" spellcheck="false" autocapitalize="off">
+                        <button type="button" id="toggleTokenVisibility" class="btn btn-small" style="position: absolute; right: 0.5rem; top: 50%; transform: translateY(-50%);" title="Show/hide token" aria-label="Toggle token visibility">
+                            <span id="toggleTokenIcon" aria-hidden="true">👁️</span>
+                        </button>
+                    </div>
+                </div>
+                <div id="attachError" class="modal-warning" style="display: none;"></div>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" id="cancelAttachAgent" aria-label="Cancel attach agent">Cancel</button>
+                <button class="btn btn-primary" id="confirmAttachAgent" aria-label="Confirm attach agent">
+                    <span class="btn-icon" aria-hidden="true">🔗</span>
+                    Attach
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Agent Card Template (Phase 3) -->
+    <template id="agent-card-template">
+        <div class="discovered-agent-card">
+            <div class="agent-info-text">
+                <strong class="agent-id"></strong>
+                <small>
+                    <strong>Workspace:</strong> <span class="agent-workspace"></span><br>
+                    <strong>Source:</strong> <span class="agent-source"></span><br>
+                    <strong>Created:</strong> <span class="agent-created"></span>
+                </small>
+            </div>
+            <button class="btn btn-primary btn-small" data-action="attach">
+                <span class="btn-icon">🔗</span>
+                Attach
+            </button>
+        </div>
+    </template>
+
     <script src="logger.e107c653.js"></script>
-    <script src="app.698c7abc.js"></script>
+    <script src="app.5f8a4aaf.js"></script>
 </body>
 </html>

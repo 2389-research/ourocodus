@@ -21,7 +21,7 @@ import (
 //   - error: If container not found, multiple found, or Docker API errors
 func findAgentContainerID(ctx context.Context, agentID string) (string, string, error) {
 	// Validate agent ID to prevent path traversal attacks
-	if err := validateAgentID(agentID); err != nil {
+	if err := ValidateAgentID(agentID); err != nil {
 		return "", "", fmt.Errorf("invalid agent ID: %w", err)
 	}
 

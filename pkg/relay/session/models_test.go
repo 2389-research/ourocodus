@@ -8,6 +8,7 @@ import (
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
+	"github.com/docker/docker/errdefs"
 )
 
 // TestUserSession_GetWebSocket tests the WebSocket accessor
@@ -526,10 +527,19 @@ func createTestContainer(t *testing.T, agentID, workspace string) string {
 
 	// Register cleanup
 	t.Cleanup(func() {
-		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 2*time.Second)
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cleanupCancel()
-		// Force kill instead of graceful stop to speed up cleanup
-		_ = cli.ContainerRemove(cleanupCtx, resp.ID, container.RemoveOptions{Force: true})
+
+		// Force remove atomically stops and removes (prevents double-stop hangs)
+		if err := cli.ContainerRemove(cleanupCtx, resp.ID, container.RemoveOptions{
+			Force:         true,
+			RemoveVolumes: true,
+		}); err != nil {
+			//nolint:staticcheck // errdefs is Docker SDK's official error handling
+			if !errdefs.IsNotFound(err) {
+				t.Logf("cleanup warning: remove %s: %v", resp.ID[:12], err)
+			}
+		}
 	})
 
 	return resp.ID

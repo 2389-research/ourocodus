@@ -213,13 +213,13 @@ func generateAttachToken(agentID string) (string, error) {
 
 	// Ensure session directory exists with secure permissions
 	sessionDir := filepath.Join(".agentd", "session")
-	if err := os.MkdirAll(sessionDir, 0700); err != nil {
+	if err := os.MkdirAll(sessionDir, 0o700); err != nil {
 		return "", fmt.Errorf("failed to create session directory: %w", err)
 	}
 
 	// Write token to file with 0600 permissions (owner read/write only)
 	tokenPath := filepath.Join(sessionDir, agentID+".token")
-	if err := os.WriteFile(tokenPath, []byte(tokenStr), 0600); err != nil {
+	if err := os.WriteFile(tokenPath, []byte(tokenStr), 0o600); err != nil {
 		return "", fmt.Errorf("failed to write token file: %w", err)
 	}
 
