@@ -4,7 +4,8 @@
 // bidirectional communication with CLI-spawned agents via Docker attach.
 //
 // Usage:
-//   go run cmd/demo-phase3/main.go
+//
+//	go run cmd/demo-phase3/main.go
 //
 // Prerequisites:
 //   - Docker daemon running
@@ -161,7 +162,9 @@ func checkPrerequisites() error {
 func spawnAgent(ctx context.Context, agentID string) error {
 	// Set dummy API key if not set
 	if os.Getenv("ANTHROPIC_API_KEY") == "" {
-		os.Setenv("ANTHROPIC_API_KEY", "sk-test-dummy")
+		if err := os.Setenv("ANTHROPIC_API_KEY", "sk-test-dummy"); err != nil {
+			return fmt.Errorf("failed to set ANTHROPIC_API_KEY: %w", err)
+		}
 	}
 
 	cmd := exec.CommandContext(ctx, "./bin/agentd", "spawn", agentID)

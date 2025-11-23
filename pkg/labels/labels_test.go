@@ -47,9 +47,9 @@ func TestConstants(t *testing.T) {
 func TestConstants_NoPartialNames(t *testing.T) {
 	// These are the WRONG formats that must never be used
 	forbiddenPartials := []string{
-		"agent-id",      // Must be "ourocodus.agent/agent-id"
-		"workspace",     // Must be "ourocodus.agent/workspace"
-		"spawn-source",  // Must be "ourocodus.agent/spawn-source"
+		"agent-id",     // Must be "ourocodus.agent/agent-id"
+		"workspace",    // Must be "ourocodus.agent/workspace"
+		"spawn-source", // Must be "ourocodus.agent/spawn-source"
 	}
 
 	allConstants := []string{

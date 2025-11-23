@@ -240,8 +240,8 @@ func (l *AgentContainerLauncher) createContainerWithMounts(
 		ImageName:         config.ImageName,
 		Command:           config.Command,
 		Entrypoint:        config.Entrypoint,
-		WorkspaceDir:      wt.Path(),         // Use the AgentWorktree path
-		CustomMounts:      credMounts,        // Add credential mounts (includes .creds if present)
+		WorkspaceDir:      wt.Path(),  // Use the AgentWorktree path
+		CustomMounts:      credMounts, // Add credential mounts (includes .creds if present)
 		Env:               config.Env,
 		Labels:            containerLabels,   // Use labels from builder
 		SkipOutputLogging: skipOutputLogging, // Skip if using container attach mode
