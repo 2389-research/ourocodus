@@ -14,6 +14,9 @@ import (
 	"github.com/docker/docker/errdefs"
 )
 
+// WorktreeDir is the base directory for agent worktrees
+var WorktreeDir = ".agentd/worktrees"
+
 // ValidateNonEmpty validates that a string is not empty or whitespace-only.
 // Returns the provided error if validation fails, nil otherwise.
 func ValidateNonEmpty(value string, err error) error {
@@ -141,7 +144,7 @@ func StopCLISpawnedContainer(
 		if strings.Contains(err.Error(), "no running container found for agent ID") {
 			logger.Printf("CLI agent container %s not found (may be already stopped)", agentID)
 			// Container is gone, but still clean up leases/tokens
-			failed := false
+			// Note: 'failed' from line 127 tracks cleanup errors
 
 			// Clean up worktree if workspace path is known
 			if workspacePath != "" {
@@ -313,16 +316,15 @@ func cleanupWorktree(ctx context.Context, workspacePath string, logger Logger) e
 		return nil // Best-effort: don't fail on invalid input
 	}
 
-	// Validate workspacePath is under expected base directory (.agentd/worktrees)
+	// Validate workspacePath is under expected base directory
 	// This provides defense-in-depth against path traversal
 	cleanPath := filepath.Clean(workspacePath)
-	expectedBase := ".agentd/worktrees"
-	absExpectedBase, err := filepath.Abs(expectedBase)
+	absExpectedBase, err := filepath.Abs(WorktreeDir)
 	if err != nil {
 		logger.Printf("WARN: Failed to resolve workspace base directory, skipping validation: %v", err)
 		// Continue anyway - base validation is defense-in-depth, not critical
 	} else if !strings.HasPrefix(cleanPath, absExpectedBase+string(os.PathSeparator)) {
-		logger.Printf("WARN: Worktree path not under expected base %s, skipping cleanup: %s", expectedBase, cleanPath)
+		logger.Printf("WARN: Worktree path not under expected base %s, skipping cleanup: %s", WorktreeDir, cleanPath)
 		return nil // Best-effort: reject paths outside expected location
 	}
 
@@ -333,18 +335,12 @@ func cleanupWorktree(ctx context.Context, workspacePath string, logger Logger) e
 	}
 
 	// Get repository root from the worktree
-	// If this fails (e.g., worktree deleted but not properly deregistered), try to infer root
+	// If this fails (e.g., worktree deleted but not properly deregistered), skip git operations
 	root, err := getRepoRoot(ctx, cleanPath)
 	if err != nil {
 		logger.Printf("WARN: Failed to get repo root for %s: %v", cleanPath, err)
-		// Try to infer repo root from parent directories or use current working directory
-		cwd, cwdErr := os.Getwd()
-		if cwdErr != nil {
-			logger.Printf("WARN: Cannot infer repo root, skipping git cleanup: %v", cwdErr)
-			return nil // Best-effort: skip git operations if we can't find repo
-		}
-		root = cwd
-		logger.Printf("Using current directory as fallback repo root: %s", root)
+		// Cannot determine repo root - skip git operations to avoid wrong-repo cleanup
+		return nil // Best-effort: skip git cleanup when repo root cannot be determined
 	}
 
 	// Get the branch name before removing the worktree
@@ -445,11 +441,11 @@ func parseBranchFromWorktreeList(output, workspacePath string) (string, error) {
 // This is idempotent - returns nil if the file doesn't exist.
 func deleteAttachToken(agentID string) error {
 	// Validate agentID to prevent path traversal
-	if err := validateAgentID(agentID); err != nil {
+	if err := ValidateAgentID(agentID); err != nil {
 		return err
 	}
 
-	tokenPath := filepath.Join(".agentd/session", agentID+".token")
+	tokenPath := filepath.Join(LeaseDir, agentID+".token")
 	if err := os.Remove(tokenPath); err != nil {
 		if os.IsNotExist(err) {
 			return nil // Already deleted, idempotent

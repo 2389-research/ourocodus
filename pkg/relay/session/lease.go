@@ -97,9 +97,9 @@ type Lease struct {
 	HeartbeatInterval string    `json:"heartbeatInterval"`
 }
 
-// validateAgentID checks if agentID is safe to use in file paths
+// ValidateAgentID checks if agentID is safe to use in file paths
 // Rejects: empty strings, path traversal attempts, absolute paths, special characters
-func validateAgentID(agentID string) error {
+func ValidateAgentID(agentID string) error {
 	if agentID == "" {
 		return ErrInvalidAgentID
 	}
@@ -132,7 +132,7 @@ func AcquireLease(agentID, userSessionID string) (*Lease, error) {
 // acquireLeaseWithRetry is the internal implementation with retry counting
 func acquireLeaseWithRetry(agentID, userSessionID string, retryCount int) (*Lease, error) {
 	// Validate agentID to prevent path traversal
-	if err := validateAgentID(agentID); err != nil {
+	if err := ValidateAgentID(agentID); err != nil {
 		return nil, err
 	}
 
@@ -208,7 +208,7 @@ func acquireLeaseWithRetry(agentID, userSessionID string, retryCount int) (*Leas
 // This operation is idempotent - it succeeds even if the lease doesn't exist.
 func ReleaseLease(agentID string) error {
 	// Validate agentID to prevent path traversal
-	if err := validateAgentID(agentID); err != nil {
+	if err := ValidateAgentID(agentID); err != nil {
 		return err
 	}
 
@@ -225,7 +225,7 @@ func ReleaseLease(agentID string) error {
 // ReadLease reads the lease file for the given agent.
 func ReadLease(agentID string) (*Lease, error) {
 	// Validate agentID to prevent path traversal
-	if err := validateAgentID(agentID); err != nil {
+	if err := ValidateAgentID(agentID); err != nil {
 		return nil, err
 	}
 
@@ -250,7 +250,7 @@ func ReadLease(agentID string) (*Lease, error) {
 // RenewLease extends the expiry time of an existing lease.
 func RenewLease(agentID string) error {
 	// Validate agentID to prevent path traversal
-	if err := validateAgentID(agentID); err != nil {
+	if err := ValidateAgentID(agentID); err != nil {
 		return err
 	}
 

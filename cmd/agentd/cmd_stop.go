@@ -298,6 +298,11 @@ func deleteBranch(ctx context.Context, branchName string) error {
 // deleteAttachToken deletes the attach token file for an agent
 // Token files are stored in .agentd/session/{agent-id}.token
 func deleteAttachToken(agentID string) error {
+	// Validate agentID to prevent path traversal
+	if err := session.ValidateAgentID(agentID); err != nil {
+		return fmt.Errorf("invalid agent ID: %w", err)
+	}
+
 	tokenPath := fmt.Sprintf(".agentd/session/%s.token", agentID)
 	if err := os.Remove(tokenPath); err != nil {
 		if os.IsNotExist(err) {
