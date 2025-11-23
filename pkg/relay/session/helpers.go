@@ -326,10 +326,11 @@ func getWorktreeBranch(ctx context.Context, repoRoot, workspacePath string) (str
 
 // parseBranchFromWorktreeList parses git worktree list --porcelain output to find the branch for a workspace.
 // Format:
-//   worktree /path/to/worktree
-//   HEAD <commit-hash>
-//   branch refs/heads/branch-name
-//   <blank line>
+//
+//	worktree /path/to/worktree
+//	HEAD <commit-hash>
+//	branch refs/heads/branch-name
+//	<blank line>
 func parseBranchFromWorktreeList(output, workspacePath string) (string, error) {
 	lines := strings.Split(output, "\n")
 	foundWorktree := false
