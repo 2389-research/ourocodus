@@ -1022,6 +1022,10 @@ body {
     border-left: 4px solid var(--error);
 }
 
+.notification.success {
+    border-left: 4px solid var(--accent-primary);
+}
+
 .notification-content {
     display: flex;
     align-items: flex-start;
