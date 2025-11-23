@@ -13,6 +13,8 @@ import (
 	"github.com/docker/docker/client"
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
+
+	"github.com/2389-research/ourocodus/pkg/relay/session"
 )
 
 var stopCmd = &cobra.Command{
@@ -21,6 +23,8 @@ var stopCmd = &cobra.Command{
 	Long: `Stop gracefully shuts down agents and cleans up all resources:
   - Stops Docker container (30s graceful timeout)
   - Removes git worktree and branch
+  - Releases agent lease (detaches from any attached session)
+  - Deletes attach token
   - Cleans up credential files
 
 This command is idempotent - safe to call multiple times.`,
@@ -93,6 +97,22 @@ func stopAgent(ctx context.Context, _ interface{}, agentID string) error {
 		} else {
 			printSuccess(fmt.Sprintf("Removed worktree %s", formatWorkspace(workspacePath)))
 		}
+	}
+
+	// Release lease if it exists (Phase 3: cleanup agent attachment state)
+	if err := session.ReleaseLease(agentID); err != nil {
+		// Log warning but don't fail - lease might not exist
+		fmt.Fprintf(os.Stderr, "Warning: failed to release lease: %v\n", err)
+	} else {
+		printSuccess("Released agent lease")
+	}
+
+	// Remove attach token if it exists (Phase 4: cleanup security token)
+	if err := deleteAttachToken(agentID); err != nil {
+		// Log warning but don't fail - token might not exist
+		fmt.Fprintf(os.Stderr, "Warning: failed to delete attach token: %v\n", err)
+	} else {
+		printSuccess("Deleted attach token")
 	}
 
 	printSuccess("Cleaned up agent resources")
@@ -247,4 +267,17 @@ func parseBranchFromWorktreeList(output, workspacePath string) (string, error) {
 func deleteBranch(ctx context.Context, branchName string) error {
 	cmd := exec.CommandContext(ctx, "git", "branch", "-D", branchName)
 	return cmd.Run()
+}
+
+// deleteAttachToken deletes the attach token file for an agent
+// Token files are stored in .agentd/session/{agent-id}.token
+func deleteAttachToken(agentID string) error {
+	tokenPath := fmt.Sprintf(".agentd/session/%s.token", agentID)
+	if err := os.Remove(tokenPath); err != nil {
+		if os.IsNotExist(err) {
+			return nil // Already deleted, idempotent
+		}
+		return fmt.Errorf("failed to remove token file: %w", err)
+	}
+	return nil
 }
