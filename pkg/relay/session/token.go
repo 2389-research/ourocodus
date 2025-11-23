@@ -28,13 +28,15 @@ func verifyAttachToken(agentID, providedToken string) error {
 	if strings.TrimSpace(providedToken) == "" {
 		return ErrMissingAttachToken
 	}
-	if strings.TrimSpace(agentID) == "" {
-		return fmt.Errorf("agentID cannot be empty")
+	// Validate agentID to prevent path traversal attacks (P0 security issue)
+	if err := validateAgentID(agentID); err != nil {
+		return fmt.Errorf("invalid agent ID: %w", err)
 	}
 
 	// Read expected token from file
+	// Safe from path traversal because agentID is validated above
 	tokenPath := filepath.Join(".agentd", "session", agentID+".token")
-	expectedToken, err := os.ReadFile(tokenPath)
+	expectedToken, err := os.ReadFile(tokenPath) // #nosec G304 - agentID validated above
 	if err != nil {
 		if os.IsNotExist(err) {
 			return ErrTokenFileNotFound
