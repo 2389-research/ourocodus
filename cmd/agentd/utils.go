@@ -10,11 +10,6 @@ func formatDuration(d time.Duration) string {
 	return formatDurationWithSuffix(d, " ago")
 }
 
-// formatDurationWithoutSuffix formats time.Duration as human-readable string without suffix
-func formatDurationWithoutSuffix(d time.Duration) string {
-	return formatDurationWithSuffix(d, "")
-}
-
 // formatDurationWithSuffix formats time.Duration as human-readable string with custom suffix
 func formatDurationWithSuffix(d time.Duration, suffix string) string {
 	if d < time.Minute {

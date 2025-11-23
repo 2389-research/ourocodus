@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/2389-research/ourocodus/cmd/agentd/internal/detect"
@@ -14,6 +16,7 @@ import (
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/client"
+	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 )
 
@@ -21,6 +24,7 @@ var (
 	listFormat    string
 	listPlainFlag bool
 	listTheme     string
+	listWatch     bool
 )
 
 var listCmd = &cobra.Command{
@@ -29,6 +33,9 @@ var listCmd = &cobra.Command{
 	Long:  "Shows all active agents with their status, workspace, and container information.",
 	Example: `  # List all running agents (auto-detect mode)
   agentd list
+
+  # Watch agents with live updates
+  agentd list --watch
 
   # Force plain text output
   agentd list --plain
@@ -45,10 +52,20 @@ func init() {
 	listCmd.Flags().StringVar(&listFormat, "format", "auto", "Output format (auto|rich|plain|json)")
 	listCmd.Flags().BoolVar(&listPlainFlag, "plain", false, "Force plain text output (alias for --format plain)")
 	listCmd.Flags().StringVar(&listTheme, "theme", "cga", "Color theme for rich mode (cga|amber|green|c64)")
+	listCmd.Flags().BoolVar(&listWatch, "watch", false, "Watch for changes and update every 2 seconds")
 }
 
 func runList(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
+
+	// Setup signal handling for clean exit on Ctrl+C
+	ctx, cancel := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+
+	// If watch mode, enter watch loop
+	if listWatch {
+		return watchList(ctx)
+	}
 
 	// Step 1: Detect output mode
 	jsonFlag := listFormat == "json"
@@ -220,34 +237,91 @@ func formatWorkspace(path string) string {
 	return path
 }
 
-// formatSpawnSource formats the spawn source label (kept for compatibility with cmd_discover.go)
-func formatSpawnSource(source string) string {
-	switch source {
-	case "cli":
-		return "cli"
-	case "relay":
-		return "relay"
-	case "unknown":
-		return "unknown"
-	default:
-		return source
+// watchList continuously polls and displays agent status
+func watchList(ctx context.Context) error {
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	// Detect output mode (same logic as non-watch mode)
+	jsonFlag := listFormat == "json"
+	plainFlag := listPlainFlag || listFormat == "plain"
+	shouldPlain := detect.ShouldUsePlainMode(jsonFlag, plainFlag, os.Environ)
+
+	mode := output.ModeRich
+	if listFormat != "auto" {
+		// Explicit format flag takes precedence
+		parsedMode, valid := output.ParseMode(listFormat)
+		if valid {
+			mode = parsedMode
+		}
+	} else {
+		// Auto-detect mode
+		mode = output.DetectMode(jsonFlag, plainFlag, shouldPlain)
+	}
+
+	// Create theme if rich mode
+	var th *theme.RetroTheme
+	if mode.IsRich() {
+		palette, valid := theme.ParsePaletteName(listTheme)
+		if !valid {
+			palette = theme.PaletteCGA
+		}
+		th = theme.NewRetroTheme(palette)
+	}
+
+	// Clear screen and show initial state
+	clearScreen()
+	if err := displayListOnce(ctx, mode, th); err != nil {
+		return err
+	}
+
+	// Print watch footer
+	fmt.Println(color.New(color.FgHiBlack).Sprint("Press Ctrl+C to stop watching..."))
+
+	for {
+		select {
+		case <-ctx.Done():
+			fmt.Println() // Add newline before exit
+			return nil
+		case <-ticker.C:
+			clearScreen()
+
+			if err := displayListOnce(ctx, mode, th); err != nil {
+				fmt.Printf("Error: %v\n", err)
+				continue
+			}
+
+			// Print watch footer
+			fmt.Println(color.New(color.FgHiBlack).Sprint("Press Ctrl+C to stop watching..."))
+		}
 	}
 }
 
-// formatStateString converts Docker state string to human-readable string (kept for tests)
-func formatStateString(state string) string {
-	switch state {
-	case "running":
-		return "running"
-	case "exited", "stopped":
-		return "stopped"
-	case "dead", "removing":
-		return "failed"
-	case "created", "restarting":
-		return "pending"
-	case "paused":
-		return "paused"
-	default:
-		return state
+// displayListOnce displays agents once (used by watch loop)
+func displayListOnce(ctx context.Context, mode output.Mode, th *theme.RetroTheme) error {
+	agents, err := listAgentsFromDocker(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to list agents: %w", err)
 	}
+
+	// Convert to render.AgentInfo format
+	renderAgents := make([]render.AgentInfo, len(agents))
+	for i, agent := range agents {
+		renderAgents[i] = render.AgentInfo{
+			AgentID:     agent.AgentID,
+			ContainerID: agent.ContainerID,
+			Status:      agent.Status,
+			Workspace:   agent.Workspace,
+			SpawnSource: agent.SpawnSource,
+			AttachedTo:  agent.AttachedTo,
+			CreatedAt:   agent.CreatedAt,
+		}
+	}
+
+	return render.RenderAgentList(os.Stdout, renderAgents, mode, th)
+}
+
+// clearScreen clears the terminal screen
+func clearScreen() {
+	fmt.Print("\033[2J\033[H")
 }

@@ -525,9 +525,9 @@ func createTestContainer(t *testing.T, agentID, workspace string) string {
 		t.Fatalf("Failed to start test container: %v", err)
 	}
 
-	// Register cleanup
+	// Register cleanup with longer timeout for concurrent test scenarios
 	t.Cleanup(func() {
-		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cleanupCancel()
 
 		// Force remove atomically stops and removes (prevents double-stop hangs)
