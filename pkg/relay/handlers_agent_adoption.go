@@ -6,17 +6,13 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/2389-research/ourocodus/pkg/labels"
 	"github.com/2389-research/ourocodus/pkg/relay/session"
 	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/client"
 )
 
-const (
-	LabelNamespace   = "ourocodus.agent"
-	LabelAgentID     = "agent-id"
-	LabelSpawnSource = "ourocodus.agent/spawn-source"
-)
+// Label constants removed - now using centralized pkg/labels package
 
 // AgentStatus represents the attachment status of an agent
 type AgentStatus string
@@ -124,9 +120,8 @@ func (s *Server) discoverAgents(ctx context.Context) ([]AgentInfo, error) {
 	}
 	defer func() { _ = cli.Close() }()
 
-	// Filter for agent containers
-	filterArgs := filters.NewArgs()
-	filterArgs.Add("label", fmt.Sprintf("%s=true", LabelNamespace))
+	// Use Phase 3 labels package to list all agent containers
+	filterArgs := labels.ListAgentsFilter()
 
 	containers, err := cli.ContainerList(ctx, container.ListOptions{
 		All:     false, // Only running containers
@@ -152,17 +147,22 @@ func (s *Server) discoverAgents(ctx context.Context) ([]AgentInfo, error) {
 
 	agents := make([]AgentInfo, 0, len(containers))
 	for _, c := range containers {
-		agentID := c.Labels[LabelAgentID]
+		// Use Phase 3 labels package constants
+		agentID := c.Labels[labels.AgentID]
 		if agentID == "" {
 			continue // Skip containers without agent-id label
 		}
 
-		// Extract workspace from mounts
-		workspace := ""
-		for _, mnt := range c.Mounts {
-			if mnt.Destination == "/workspace" {
-				workspace = mnt.Source
-				break
+		// Try to get workspace from Phase 3 label first
+		workspace := c.Labels[labels.Workspace]
+
+		// Fallback: Extract workspace from mounts if label not present
+		if workspace == "" {
+			for _, mnt := range c.Mounts {
+				if mnt.Destination == "/workspace" {
+					workspace = mnt.Source
+					break
+				}
 			}
 		}
 
@@ -179,7 +179,7 @@ func (s *Server) discoverAgents(ctx context.Context) ([]AgentInfo, error) {
 			ContainerID: c.ID,
 			Workspace:   workspace,
 			Status:      status,
-			SpawnSource: c.Labels[LabelSpawnSource],
+			SpawnSource: c.Labels[labels.SpawnSource],
 			AttachedTo:  attachedTo,
 			CreatedAt:   time.Unix(c.Created, 0),
 		})
@@ -474,10 +474,8 @@ func (s *Server) getAgentWorkspace(ctx context.Context, agentID string) (string,
 	}
 	defer func() { _ = cli.Close() }()
 
-	// Filter for the specific agent
-	filterArgs := filters.NewArgs()
-	filterArgs.Add("label", fmt.Sprintf("%s=true", LabelNamespace))
-	filterArgs.Add("label", fmt.Sprintf("%s=%s", LabelAgentID, agentID))
+	// Use Phase 3 labels package for consistent querying
+	filterArgs := labels.FindAgentFilter(agentID)
 
 	containers, err := cli.ContainerList(ctx, container.ListOptions{
 		All:     false, // Only running containers
@@ -491,12 +489,23 @@ func (s *Server) getAgentWorkspace(ctx context.Context, agentID string) (string,
 		return "", fmt.Errorf("agent container not found")
 	}
 
-	// Extract workspace from mounts
-	for _, mnt := range containers[0].Mounts {
-		if mnt.Destination == "/workspace" {
-			return mnt.Source, nil
+	// Try to get workspace from Phase 3 label first
+	ctr := containers[0]
+	workspace := ctr.Labels[labels.Workspace]
+
+	// Fallback: Extract workspace from mounts if label not present
+	if workspace == "" {
+		for _, mnt := range ctr.Mounts {
+			if mnt.Destination == "/workspace" {
+				workspace = mnt.Source
+				break
+			}
 		}
 	}
 
-	return "", fmt.Errorf("workspace mount not found")
+	if workspace == "" {
+		return "", fmt.Errorf("workspace not found (no label or mount)")
+	}
+
+	return workspace, nil
 }

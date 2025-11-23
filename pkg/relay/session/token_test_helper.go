@@ -7,12 +7,12 @@ import (
 	"path/filepath"
 )
 
-// generateTestAttachToken generates a test attach token for the given agent ID.
+// GenerateTestAttachToken generates a test attach token for the given agent ID.
 // This is a test-only helper that creates a token file in .agentd/session/
 // so that AttachAgent() can verify it.
 //
 // Returns the generated token string.
-func generateTestAttachToken(agentID string) (string, error) {
+func GenerateTestAttachToken(agentID string) (string, error) {
 	// Generate 32 random bytes (256 bits)
 	tokenBytes := make([]byte, 32)
 	if _, err := rand.Read(tokenBytes); err != nil {
@@ -24,13 +24,13 @@ func generateTestAttachToken(agentID string) (string, error) {
 
 	// Ensure session directory exists
 	sessionDir := filepath.Join(".agentd", "session")
-	if err := os.MkdirAll(sessionDir, 0700); err != nil {
+	if err := os.MkdirAll(sessionDir, 0o700); err != nil {
 		return "", err
 	}
 
 	// Write token to file
 	tokenPath := filepath.Join(sessionDir, agentID+".token")
-	if err := os.WriteFile(tokenPath, []byte(tokenStr), 0600); err != nil {
+	if err := os.WriteFile(tokenPath, []byte(tokenStr), 0o600); err != nil {
 		return "", err
 	}
 

@@ -6,10 +6,8 @@ import (
 	"time"
 )
 
-var (
-	// ErrRateLimitExceeded is returned when a rate limit is exceeded
-	ErrRateLimitExceeded = errors.New("rate limit exceeded")
-)
+// ErrRateLimitExceeded is returned when a rate limit is exceeded
+var ErrRateLimitExceeded = errors.New("rate limit exceeded")
 
 // Limiter implements a token bucket rate limiter
 // Thread-safe for concurrent use

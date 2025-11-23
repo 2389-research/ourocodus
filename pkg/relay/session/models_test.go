@@ -225,7 +225,7 @@ func TestUserSession_AttachAgent(t *testing.T) {
 	// Test: Attach first agent
 	t.Run("AttachFirstAgent", func(t *testing.T) {
 		// Generate test token (Phase 4)
-		token1, err := generateTestAttachToken("test-agent-1")
+		token1, err := GenerateTestAttachToken("test-agent-1")
 		if err != nil {
 			t.Fatalf("Failed to generate test token: %v", err)
 		}
@@ -257,7 +257,7 @@ func TestUserSession_AttachAgent(t *testing.T) {
 	// Test: Idempotent attach (same session)
 	t.Run("IdempotentAttach", func(t *testing.T) {
 		// Reuse same token (token is still valid)
-		token1, _ := generateTestAttachToken("test-agent-1")
+		token1, _ := GenerateTestAttachToken("test-agent-1")
 
 		agent, err := session.AttachAgent("test-agent-1", "/workspace/agent1", token1)
 		if err != nil {
@@ -277,7 +277,7 @@ func TestUserSession_AttachAgent(t *testing.T) {
 	// Test: Attach second agent to same session
 	t.Run("AttachSecondAgent", func(t *testing.T) {
 		// Generate token for second agent (Phase 4)
-		token2, err := generateTestAttachToken("test-agent-2")
+		token2, err := GenerateTestAttachToken("test-agent-2")
 		if err != nil {
 			t.Fatalf("Failed to generate test token: %v", err)
 		}
@@ -301,7 +301,7 @@ func TestUserSession_AttachAgent(t *testing.T) {
 	t.Run("ConflictAttach", func(t *testing.T) {
 		session2 := NewUserSession("test-session-id-2", &mockWebSocket{}, now)
 		// Token is valid but agent is already leased to session1
-		token1, _ := generateTestAttachToken("test-agent-1")
+		token1, _ := GenerateTestAttachToken("test-agent-1")
 
 		_, err := session2.AttachAgent("test-agent-1", "/workspace/agent1", token1)
 		if err != ErrAlreadyAttached {
@@ -331,7 +331,7 @@ func TestUserSession_DetachAgent(t *testing.T) {
 	session := NewUserSession("detach-test-session", &mockWebSocket{}, now)
 
 	// Generate token for detach test (Phase 4)
-	token, err := generateTestAttachToken("detach-test-agent")
+	token, err := GenerateTestAttachToken("detach-test-agent")
 	if err != nil {
 		t.Fatalf("Failed to generate test token: %v", err)
 	}
@@ -401,7 +401,7 @@ func TestUserSession_AttachDetach_ConcurrentAccess(t *testing.T) {
 			workspace := fmt.Sprintf("/workspace/agent-%d", id)
 
 			// Generate token for this agent (Phase 4)
-			token, err := generateTestAttachToken(agentID)
+			token, err := GenerateTestAttachToken(agentID)
 			if err != nil {
 				t.Logf("Failed to generate token for agent %s: %v", agentID, err)
 				done <- true
