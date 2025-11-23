@@ -71,11 +71,18 @@ func TestAgentAttachDetach_HappyPath(t *testing.T) {
 	}
 	userSessionID := userSession.GetID()
 
+	// Generate attach token for test
+	token, err := session.GenerateTestAttachToken(agentID)
+	if err != nil {
+		t.Fatalf("Failed to generate test token: %v", err)
+	}
+
 	// Test 1: Attach to agent
 	attachReq := AgentAttachRequest{
 		Type:          "agent:attach",
 		AgentID:       agentID,
 		UserSessionID: userSessionID,
+		Token:         token,
 	}
 	attachMsg, _ := json.Marshal(attachReq)
 
@@ -204,11 +211,18 @@ func TestAgentAttach_NonExistentAgent(t *testing.T) {
 		messages: make([]interface{}, 0),
 	}
 
+	// Generate token even for non-existent agent (token check happens before container discovery)
+	token, err := session.GenerateTestAttachToken("non-existent-agent-123")
+	if err != nil {
+		t.Fatalf("Failed to generate test token: %v", err)
+	}
+
 	// Try to attach to non-existent agent
 	attachReq := AgentAttachRequest{
 		Type:          "agent:attach",
 		AgentID:       "non-existent-agent-123",
 		UserSessionID: "test-session-456",
+		Token:         token,
 	}
 	attachMsg, _ := json.Marshal(attachReq)
 
@@ -296,11 +310,18 @@ func TestAgentAttach_AlreadyAttached(t *testing.T) {
 	}
 	secondSessionID := secondSession.GetID()
 
+	// Generate attach token for test
+	token, err := session.GenerateTestAttachToken(agentID)
+	if err != nil {
+		t.Fatalf("Failed to generate test token: %v", err)
+	}
+
 	// First session attaches
 	attachReq1 := AgentAttachRequest{
 		Type:          "agent:attach",
 		AgentID:       agentID,
 		UserSessionID: firstSessionID,
+		Token:         token,
 	}
 	attachMsg1, _ := json.Marshal(attachReq1)
 
@@ -320,6 +341,7 @@ func TestAgentAttach_AlreadyAttached(t *testing.T) {
 		Type:          "agent:attach",
 		AgentID:       agentID,
 		UserSessionID: secondSessionID,
+		Token:         token, // Use same token (it should still be valid)
 	}
 	attachMsg2, _ := json.Marshal(attachReq2)
 
@@ -407,11 +429,18 @@ func TestAgentDetach_NotAttachedToYou(t *testing.T) {
 	}
 	session2ID := session2.GetID()
 
+	// Generate attach token for test
+	token, err := session.GenerateTestAttachToken(agentID)
+	if err != nil {
+		t.Fatalf("Failed to generate test token: %v", err)
+	}
+
 	// Session 1 attaches
 	attachReq := AgentAttachRequest{
 		Type:          "agent:attach",
 		AgentID:       agentID,
 		UserSessionID: session1ID,
+		Token:         token,
 	}
 	attachMsg, _ := json.Marshal(attachReq)
 
@@ -513,11 +542,18 @@ func TestAgentAttachDetach_Idempotent(t *testing.T) {
 	}
 	userSessionID := userSession.GetID()
 
+	// Generate attach token for test
+	token, err := session.GenerateTestAttachToken(agentID)
+	if err != nil {
+		t.Fatalf("Failed to generate test token: %v", err)
+	}
+
 	// Test 1: Attach twice (idempotent attach)
 	attachReq := AgentAttachRequest{
 		Type:          "agent:attach",
 		AgentID:       agentID,
 		UserSessionID: userSessionID,
+		Token:         token,
 	}
 	attachMsg, _ := json.Marshal(attachReq)
 
@@ -650,14 +686,18 @@ func createTestAgentContainer(t *testing.T, cli *client.Client, agentID string) 
 		t.Fatalf("Failed to create temp workspace: %v", err)
 	}
 
-	// Create a minimal container with agent labels and workspace mount
+	// Create a minimal container with Phase 3 namespaced labels
+	labels := map[string]string{
+		"ourocodus.agent":              "true",
+		"ourocodus.agent/agent-id":     agentID,
+		"ourocodus.agent/workspace":    tmpDir,
+		"ourocodus.agent/spawn-source": "test",
+	}
+
 	resp, err := cli.ContainerCreate(ctx, &container.Config{
-		Image: "alpine:latest",
-		Cmd:   []string{"sleep", "3600"},
-		Labels: map[string]string{
-			LabelNamespace: "true",
-			LabelAgentID:   agentID,
-		},
+		Image:  "alpine:latest",
+		Cmd:    []string{"sleep", "3600"},
+		Labels: labels,
 	}, &container.HostConfig{
 		Binds: []string{
 			tmpDir + ":/workspace:rw",

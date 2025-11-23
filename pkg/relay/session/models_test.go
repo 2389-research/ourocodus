@@ -1,9 +1,13 @@
 package session
 
 import (
+	"context"
 	"fmt"
 	"testing"
 	"time"
+
+	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/client"
 )
 
 // TestUserSession_GetWebSocket tests the WebSocket accessor
@@ -213,6 +217,9 @@ func TestAgentSession_ConcurrentReadWrite(t *testing.T) {
 
 // TestUserSession_AttachAgent tests attaching agents to a user session
 func TestUserSession_AttachAgent(t *testing.T) {
+	// Ensure Docker is available (will fail test if not)
+	isDockerAvailable(t)
+
 	// Clean up any existing leases before test
 	t.Cleanup(func() {
 		_ = ReleaseLease("test-agent-1")
@@ -224,7 +231,16 @@ func TestUserSession_AttachAgent(t *testing.T) {
 
 	// Test: Attach first agent
 	t.Run("AttachFirstAgent", func(t *testing.T) {
-		agent, err := session.AttachAgent("test-agent-1", "/workspace/agent1")
+		// Create test container for agent-1
+		createTestContainer(t, "test-agent-1", "/workspace/agent1")
+
+		// Generate test token (Phase 4)
+		token1, err := GenerateTestAttachToken("test-agent-1")
+		if err != nil {
+			t.Fatalf("Failed to generate test token: %v", err)
+		}
+
+		agent, err := session.AttachAgent("test-agent-1", "/workspace/agent1", token1)
 		if err != nil {
 			t.Fatalf("Failed to attach agent: %v", err)
 		}
@@ -250,7 +266,10 @@ func TestUserSession_AttachAgent(t *testing.T) {
 
 	// Test: Idempotent attach (same session)
 	t.Run("IdempotentAttach", func(t *testing.T) {
-		agent, err := session.AttachAgent("test-agent-1", "/workspace/agent1")
+		// Reuse same token (token is still valid)
+		token1, _ := GenerateTestAttachToken("test-agent-1")
+
+		agent, err := session.AttachAgent("test-agent-1", "/workspace/agent1", token1)
 		if err != nil {
 			t.Fatalf("Failed idempotent attach: %v", err)
 		}
@@ -267,7 +286,16 @@ func TestUserSession_AttachAgent(t *testing.T) {
 
 	// Test: Attach second agent to same session
 	t.Run("AttachSecondAgent", func(t *testing.T) {
-		agent, err := session.AttachAgent("test-agent-2", "/workspace/agent2")
+		// Create test container for agent-2
+		createTestContainer(t, "test-agent-2", "/workspace/agent2")
+
+		// Generate token for second agent (Phase 4)
+		token2, err := GenerateTestAttachToken("test-agent-2")
+		if err != nil {
+			t.Fatalf("Failed to generate test token: %v", err)
+		}
+
+		agent, err := session.AttachAgent("test-agent-2", "/workspace/agent2", token2)
 		if err != nil {
 			t.Fatalf("Failed to attach second agent: %v", err)
 		}
@@ -285,7 +313,10 @@ func TestUserSession_AttachAgent(t *testing.T) {
 	// Test: Conflict - agent already attached to different session
 	t.Run("ConflictAttach", func(t *testing.T) {
 		session2 := NewUserSession("test-session-id-2", &mockWebSocket{}, now)
-		_, err := session2.AttachAgent("test-agent-1", "/workspace/agent1")
+		// Token is valid but agent is already leased to session1
+		token1, _ := GenerateTestAttachToken("test-agent-1")
+
+		_, err := session2.AttachAgent("test-agent-1", "/workspace/agent1", token1)
 		if err != ErrAlreadyAttached {
 			t.Errorf("Expected ErrAlreadyAttached, got %v", err)
 		}
@@ -304,6 +335,9 @@ func TestUserSession_AttachAgent(t *testing.T) {
 
 // TestUserSession_DetachAgent tests detaching agents from a user session
 func TestUserSession_DetachAgent(t *testing.T) {
+	// Ensure Docker is available (will fail test if not)
+	isDockerAvailable(t)
+
 	// Clean up any existing leases before test
 	t.Cleanup(func() {
 		_ = ReleaseLease("detach-test-agent")
@@ -312,8 +346,17 @@ func TestUserSession_DetachAgent(t *testing.T) {
 	now := testTime()
 	session := NewUserSession("detach-test-session", &mockWebSocket{}, now)
 
+	// Create test container for detach test
+	createTestContainer(t, "detach-test-agent", "/workspace/test")
+
+	// Generate token for detach test (Phase 4)
+	token, err := GenerateTestAttachToken("detach-test-agent")
+	if err != nil {
+		t.Fatalf("Failed to generate test token: %v", err)
+	}
+
 	// Attach agent first
-	agent, err := session.AttachAgent("detach-test-agent", "/workspace/test")
+	agent, err := session.AttachAgent("detach-test-agent", "/workspace/test", token)
 	if err != nil {
 		t.Fatalf("Failed to attach agent: %v", err)
 	}
@@ -358,6 +401,9 @@ func TestUserSession_DetachAgent(t *testing.T) {
 
 // TestUserSession_AttachDetach_ConcurrentAccess tests thread-safety
 func TestUserSession_AttachDetach_ConcurrentAccess(t *testing.T) {
+	// Ensure Docker is available (will fail test if not)
+	isDockerAvailable(t)
+
 	// Clean up any existing leases before test
 	t.Cleanup(func() {
 		for i := 0; i < 10; i++ {
@@ -368,6 +414,13 @@ func TestUserSession_AttachDetach_ConcurrentAccess(t *testing.T) {
 	now := testTime()
 	session := NewUserSession("concurrent-test-session", &mockWebSocket{}, now)
 
+	// Create test containers before concurrent access
+	for i := 0; i < 10; i++ {
+		agentID := fmt.Sprintf("concurrent-agent-%d", i)
+		workspace := fmt.Sprintf("/workspace/agent-%d", i)
+		createTestContainer(t, agentID, workspace)
+	}
+
 	done := make(chan bool, 20)
 
 	// Concurrent attaches
@@ -375,7 +428,16 @@ func TestUserSession_AttachDetach_ConcurrentAccess(t *testing.T) {
 		go func(id int) {
 			agentID := fmt.Sprintf("concurrent-agent-%d", id)
 			workspace := fmt.Sprintf("/workspace/agent-%d", id)
-			_, err := session.AttachAgent(agentID, workspace)
+
+			// Generate token for this agent (Phase 4)
+			token, err := GenerateTestAttachToken(agentID)
+			if err != nil {
+				t.Logf("Failed to generate token for agent %s: %v", agentID, err)
+				done <- true
+				return
+			}
+
+			_, err = session.AttachAgent(agentID, workspace, token)
 			if err != nil {
 				t.Logf("Failed to attach agent %s: %v", agentID, err)
 			}
@@ -405,4 +467,70 @@ func TestUserSession_AttachDetach_ConcurrentAccess(t *testing.T) {
 	for id := range agents {
 		_ = session.DetachAgent(id)
 	}
+}
+
+// isDockerAvailable checks if Docker is available and fails the test if not
+func isDockerAvailable(t *testing.T) bool {
+	t.Helper()
+	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	if err != nil {
+		t.Fatalf("Docker client creation failed: %v. Docker must be available to run these tests.", err)
+		return false
+	}
+	defer func() { _ = cli.Close() }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	_, err = cli.Ping(ctx)
+	if err != nil {
+		t.Fatalf("Docker ping failed: %v. Docker daemon must be running to run these tests.", err)
+		return false
+	}
+
+	return true
+}
+
+// createTestContainer creates a test agent container for unit tests
+func createTestContainer(t *testing.T, agentID, workspace string) string {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	if err != nil {
+		t.Fatalf("Failed to create Docker client: %v", err)
+	}
+	defer func() { _ = cli.Close() }()
+
+	// Create minimal test container with Phase 3 labels
+	resp, err := cli.ContainerCreate(ctx, &container.Config{
+		Image: "alpine:latest",
+		Cmd:   []string{"sleep", "3600"},
+		Labels: map[string]string{
+			"ourocodus.agent":              "true",
+			"ourocodus.agent/agent-id":     agentID,
+			"ourocodus.agent/workspace":    workspace,
+			"ourocodus.agent/spawn-source": "test",
+		},
+	}, &container.HostConfig{}, nil, nil, "")
+	if err != nil {
+		t.Fatalf("Failed to create test container: %v", err)
+	}
+
+	// Start container
+	if err := cli.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
+		_ = cli.ContainerRemove(ctx, resp.ID, container.RemoveOptions{Force: true})
+		t.Fatalf("Failed to start test container: %v", err)
+	}
+
+	// Register cleanup
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cleanupCancel()
+		// Force kill instead of graceful stop to speed up cleanup
+		_ = cli.ContainerRemove(cleanupCtx, resp.ID, container.RemoveOptions{Force: true})
+	})
+
+	return resp.ID
 }

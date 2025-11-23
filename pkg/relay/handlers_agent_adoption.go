@@ -6,17 +6,13 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/2389-research/ourocodus/pkg/labels"
 	"github.com/2389-research/ourocodus/pkg/relay/session"
 	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/client"
 )
 
-const (
-	LabelNamespace   = "ourocodus.agent"
-	LabelAgentID     = "agent-id"
-	LabelSpawnSource = "ourocodus.agent/spawn-source"
-)
+// Label constants removed - now using centralized pkg/labels package
 
 // AgentStatus represents the attachment status of an agent
 type AgentStatus string
@@ -53,6 +49,7 @@ type AgentAttachRequest struct {
 	Type          string `json:"type"` // "agent:attach"
 	AgentID       string `json:"agentId"`
 	UserSessionID string `json:"userSessionId"`
+	Token         string `json:"token"` // Phase 4: Required attach token for security
 }
 
 // AgentAttachResponse represents the agent:attached message
@@ -123,9 +120,8 @@ func (s *Server) discoverAgents(ctx context.Context) ([]AgentInfo, error) {
 	}
 	defer func() { _ = cli.Close() }()
 
-	// Filter for agent containers
-	filterArgs := filters.NewArgs()
-	filterArgs.Add("label", fmt.Sprintf("%s=true", LabelNamespace))
+	// Use Phase 3 labels package to list all agent containers
+	filterArgs := labels.ListAgentsFilter()
 
 	containers, err := cli.ContainerList(ctx, container.ListOptions{
 		All:     false, // Only running containers
@@ -151,17 +147,22 @@ func (s *Server) discoverAgents(ctx context.Context) ([]AgentInfo, error) {
 
 	agents := make([]AgentInfo, 0, len(containers))
 	for _, c := range containers {
-		agentID := c.Labels[LabelAgentID]
+		// Use Phase 3 labels package constants
+		agentID := c.Labels[labels.AgentID]
 		if agentID == "" {
 			continue // Skip containers without agent-id label
 		}
 
-		// Extract workspace from mounts
-		workspace := ""
-		for _, mnt := range c.Mounts {
-			if mnt.Destination == "/workspace" {
-				workspace = mnt.Source
-				break
+		// Try to get workspace from Phase 3 label first
+		workspace := c.Labels[labels.Workspace]
+
+		// Fallback: Extract workspace from mounts if label not present
+		if workspace == "" {
+			for _, mnt := range c.Mounts {
+				if mnt.Destination == "/workspace" {
+					workspace = mnt.Source
+					break
+				}
 			}
 		}
 
@@ -178,7 +179,7 @@ func (s *Server) discoverAgents(ctx context.Context) ([]AgentInfo, error) {
 			ContainerID: c.ID,
 			Workspace:   workspace,
 			Status:      status,
-			SpawnSource: c.Labels[LabelSpawnSource],
+			SpawnSource: c.Labels[labels.SpawnSource],
 			AttachedTo:  attachedTo,
 			CreatedAt:   time.Unix(c.Created, 0),
 		})
@@ -239,6 +240,35 @@ func (s *Server) handleAlreadyAttachedError(conn WebSocketConn, req *AgentAttach
 	return false
 }
 
+// handleAttachError handles various attach errors and returns true if connection should close
+func (s *Server) handleAttachError(conn WebSocketConn, req *AgentAttachRequest, err error) bool {
+	// Handle specific error types
+	if err == session.ErrAlreadyAttached {
+		return s.handleAlreadyAttachedError(conn, req)
+	}
+	if err == session.ErrMissingAttachToken {
+		s.logger.Printf("Attach token missing for agent %s", req.AgentID)
+		return s.sendErrorResponse(conn, "MISSING_TOKEN", "Attach token is required")
+	}
+	if err == session.ErrInvalidAttachToken {
+		s.logger.Printf("Invalid attach token for agent %s", req.AgentID)
+		return s.sendErrorResponse(conn, "INVALID_TOKEN", "Invalid attach token")
+	}
+	// Generic attach failure
+	s.logger.Printf("Failed to attach agent %s to session %s: %v", req.AgentID, req.UserSessionID, err)
+	return s.sendErrorResponse(conn, "ATTACH_FAILED", fmt.Sprintf("Failed to attach agent: %v", err))
+}
+
+// sendErrorResponse sends a recoverable error message and returns true if connection should close
+func (s *Server) sendErrorResponse(conn WebSocketConn, code, message string) bool {
+	errorMsg := NewErrorMessage(code, message, true)
+	if err := conn.WriteJSON(errorMsg); err != nil {
+		s.logger.Printf("Failed to send error response: %v", err)
+		return true
+	}
+	return false
+}
+
 // handleAgentAttach handles agent:attach messages
 // Returns true if connection should be closed
 func (s *Server) handleAgentAttach(ctx context.Context, conn WebSocketConn, rawMessage []byte) bool {
@@ -257,43 +287,30 @@ func (s *Server) handleAgentAttach(ctx context.Context, conn WebSocketConn, rawM
 		return shouldClose
 	}
 
+	// Phase 4: Rate limiting for attach operations
+	if !s.rateLimiter.Allow(req.UserSessionID) {
+		s.logger.Printf("Rate limit exceeded for user session %s on agent:attach", req.UserSessionID)
+		return s.sendErrorResponse(conn, "RATE_LIMIT_EXCEEDED", "Too many attach requests. Please wait before trying again.")
+	}
+
 	// Get workspace path from Docker
 	workspace, err := s.getAgentWorkspace(ctx, req.AgentID)
 	if err != nil {
 		s.logger.Printf("Failed to get workspace for agent %s: %v", req.AgentID, err)
-		errorMsg := NewErrorMessage("AGENT_NOT_FOUND", fmt.Sprintf("Agent %s not found or workspace unavailable", req.AgentID), true)
-		if err := conn.WriteJSON(errorMsg); err != nil {
-			s.logger.Printf("Failed to send error response: %v", err)
-			return true
-		}
-		return false
+		return s.sendErrorResponse(conn, "AGENT_NOT_FOUND", fmt.Sprintf("Agent %s not found or workspace unavailable", req.AgentID))
 	}
 
 	// Get UserSession from session manager
 	userSession := s.sessionManager.Get(req.UserSessionID)
 	if userSession == nil {
 		s.logger.Printf("User session not found: %s", req.UserSessionID)
-		errorMsg := NewErrorMessage("SESSION_NOT_FOUND", fmt.Sprintf("User session %s not found", req.UserSessionID), true)
-		if err := conn.WriteJSON(errorMsg); err != nil {
-			s.logger.Printf("Failed to send error response: %v", err)
-			return true
-		}
-		return false
+		return s.sendErrorResponse(conn, "SESSION_NOT_FOUND", fmt.Sprintf("User session %s not found", req.UserSessionID))
 	}
 
-	// Attach agent to user session
-	agentSession, err := userSession.AttachAgent(req.AgentID, workspace)
+	// Attach agent to user session (Phase 4: with token verification)
+	agentSession, err := userSession.AttachAgent(req.AgentID, workspace, req.Token)
 	if err != nil {
-		if err == session.ErrAlreadyAttached {
-			return s.handleAlreadyAttachedError(conn, &req)
-		}
-		s.logger.Printf("Failed to attach agent %s to session %s: %v", req.AgentID, req.UserSessionID, err)
-		errorMsg := NewErrorMessage("ATTACH_FAILED", fmt.Sprintf("Failed to attach agent: %v", err), true)
-		if err := conn.WriteJSON(errorMsg); err != nil {
-			s.logger.Printf("Failed to send error response: %v", err)
-			return true
-		}
-		return false
+		return s.handleAttachError(conn, &req, err)
 	}
 
 	// Send success response
@@ -438,10 +455,8 @@ func (s *Server) getAgentWorkspace(ctx context.Context, agentID string) (string,
 	}
 	defer func() { _ = cli.Close() }()
 
-	// Filter for the specific agent
-	filterArgs := filters.NewArgs()
-	filterArgs.Add("label", fmt.Sprintf("%s=true", LabelNamespace))
-	filterArgs.Add("label", fmt.Sprintf("%s=%s", LabelAgentID, agentID))
+	// Use Phase 3 labels package for consistent querying
+	filterArgs := labels.FindAgentFilter(agentID)
 
 	containers, err := cli.ContainerList(ctx, container.ListOptions{
 		All:     false, // Only running containers
@@ -455,12 +470,23 @@ func (s *Server) getAgentWorkspace(ctx context.Context, agentID string) (string,
 		return "", fmt.Errorf("agent container not found")
 	}
 
-	// Extract workspace from mounts
-	for _, mnt := range containers[0].Mounts {
-		if mnt.Destination == "/workspace" {
-			return mnt.Source, nil
+	// Try to get workspace from Phase 3 label first
+	ctr := containers[0]
+	workspace := ctr.Labels[labels.Workspace]
+
+	// Fallback: Extract workspace from mounts if label not present
+	if workspace == "" {
+		for _, mnt := range ctr.Mounts {
+			if mnt.Destination == "/workspace" {
+				workspace = mnt.Source
+				break
+			}
 		}
 	}
 
-	return "", fmt.Errorf("workspace mount not found")
+	if workspace == "" {
+		return "", fmt.Errorf("workspace not found (no label or mount)")
+	}
+
+	return workspace, nil
 }
