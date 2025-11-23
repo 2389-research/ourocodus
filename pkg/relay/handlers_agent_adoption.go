@@ -240,6 +240,35 @@ func (s *Server) handleAlreadyAttachedError(conn WebSocketConn, req *AgentAttach
 	return false
 }
 
+// handleAttachError handles various attach errors and returns true if connection should close
+func (s *Server) handleAttachError(conn WebSocketConn, req *AgentAttachRequest, err error) bool {
+	// Handle specific error types
+	if err == session.ErrAlreadyAttached {
+		return s.handleAlreadyAttachedError(conn, req)
+	}
+	if err == session.ErrMissingAttachToken {
+		s.logger.Printf("Attach token missing for agent %s", req.AgentID)
+		return s.sendErrorResponse(conn, "MISSING_TOKEN", "Attach token is required")
+	}
+	if err == session.ErrInvalidAttachToken {
+		s.logger.Printf("Invalid attach token for agent %s", req.AgentID)
+		return s.sendErrorResponse(conn, "INVALID_TOKEN", "Invalid attach token")
+	}
+	// Generic attach failure
+	s.logger.Printf("Failed to attach agent %s to session %s: %v", req.AgentID, req.UserSessionID, err)
+	return s.sendErrorResponse(conn, "ATTACH_FAILED", fmt.Sprintf("Failed to attach agent: %v", err))
+}
+
+// sendErrorResponse sends a recoverable error message and returns true if connection should close
+func (s *Server) sendErrorResponse(conn WebSocketConn, code, message string) bool {
+	errorMsg := NewErrorMessage(code, message, true)
+	if err := conn.WriteJSON(errorMsg); err != nil {
+		s.logger.Printf("Failed to send error response: %v", err)
+		return true
+	}
+	return false
+}
+
 // handleAgentAttach handles agent:attach messages
 // Returns true if connection should be closed
 func (s *Server) handleAgentAttach(ctx context.Context, conn WebSocketConn, rawMessage []byte) bool {
@@ -259,77 +288,29 @@ func (s *Server) handleAgentAttach(ctx context.Context, conn WebSocketConn, rawM
 	}
 
 	// Phase 4: Rate limiting for attach operations
-	// Check if this user session has exceeded attach rate limit
 	if !s.rateLimiter.Allow(req.UserSessionID) {
 		s.logger.Printf("Rate limit exceeded for user session %s on agent:attach", req.UserSessionID)
-		errorMsg := NewErrorMessage(
-			"RATE_LIMIT_EXCEEDED",
-			"Too many attach requests. Please wait before trying again.",
-			true, // Recoverable - client can retry after waiting
-		)
-		if err := conn.WriteJSON(errorMsg); err != nil {
-			s.logger.Printf("Failed to send rate limit error: %v", err)
-			return true
-		}
-		return false // Keep connection open, client can retry later
+		return s.sendErrorResponse(conn, "RATE_LIMIT_EXCEEDED", "Too many attach requests. Please wait before trying again.")
 	}
 
 	// Get workspace path from Docker
 	workspace, err := s.getAgentWorkspace(ctx, req.AgentID)
 	if err != nil {
 		s.logger.Printf("Failed to get workspace for agent %s: %v", req.AgentID, err)
-		errorMsg := NewErrorMessage("AGENT_NOT_FOUND", fmt.Sprintf("Agent %s not found or workspace unavailable", req.AgentID), true)
-		if err := conn.WriteJSON(errorMsg); err != nil {
-			s.logger.Printf("Failed to send error response: %v", err)
-			return true
-		}
-		return false
+		return s.sendErrorResponse(conn, "AGENT_NOT_FOUND", fmt.Sprintf("Agent %s not found or workspace unavailable", req.AgentID))
 	}
 
 	// Get UserSession from session manager
 	userSession := s.sessionManager.Get(req.UserSessionID)
 	if userSession == nil {
 		s.logger.Printf("User session not found: %s", req.UserSessionID)
-		errorMsg := NewErrorMessage("SESSION_NOT_FOUND", fmt.Sprintf("User session %s not found", req.UserSessionID), true)
-		if err := conn.WriteJSON(errorMsg); err != nil {
-			s.logger.Printf("Failed to send error response: %v", err)
-			return true
-		}
-		return false
+		return s.sendErrorResponse(conn, "SESSION_NOT_FOUND", fmt.Sprintf("User session %s not found", req.UserSessionID))
 	}
 
 	// Attach agent to user session (Phase 4: with token verification)
 	agentSession, err := userSession.AttachAgent(req.AgentID, workspace, req.Token)
 	if err != nil {
-		// Handle specific error types
-		if err == session.ErrAlreadyAttached {
-			return s.handleAlreadyAttachedError(conn, &req)
-		}
-		if err == session.ErrMissingAttachToken {
-			s.logger.Printf("Attach token missing for agent %s", req.AgentID)
-			errorMsg := NewErrorMessage("MISSING_TOKEN", "Attach token is required", true)
-			if err := conn.WriteJSON(errorMsg); err != nil {
-				s.logger.Printf("Failed to send error response: %v", err)
-				return true
-			}
-			return false
-		}
-		if err == session.ErrInvalidAttachToken {
-			s.logger.Printf("Invalid attach token for agent %s", req.AgentID)
-			errorMsg := NewErrorMessage("INVALID_TOKEN", "Invalid attach token", true)
-			if err := conn.WriteJSON(errorMsg); err != nil {
-				s.logger.Printf("Failed to send error response: %v", err)
-				return true
-			}
-			return false
-		}
-		s.logger.Printf("Failed to attach agent %s to session %s: %v", req.AgentID, req.UserSessionID, err)
-		errorMsg := NewErrorMessage("ATTACH_FAILED", fmt.Sprintf("Failed to attach agent: %v", err), true)
-		if err := conn.WriteJSON(errorMsg); err != nil {
-			s.logger.Printf("Failed to send error response: %v", err)
-			return true
-		}
-		return false
+		return s.handleAttachError(conn, &req, err)
 	}
 
 	// Send success response
