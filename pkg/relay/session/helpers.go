@@ -302,30 +302,67 @@ func FindAgentContainerIDForTesting(ctx context.Context, agentID string) (contai
 }
 
 // cleanupWorktree removes a git worktree and its associated branch.
-// This is best-effort cleanup that logs warnings but doesn't fail the overall termination.
+// This is truly best-effort cleanup that always returns nil - all errors are logged but not returned.
+// Validates that workspacePath is absolute and under the expected workspace base directory.
+//
+//nolint:unparam // Returns error for interface compatibility, but always returns nil (best-effort)
 func cleanupWorktree(ctx context.Context, workspacePath string, logger Logger) error {
-	// Get repository root from the worktree
-	root, err := getRepoRoot(ctx, workspacePath)
+	// Validate workspacePath is absolute
+	if !filepath.IsAbs(workspacePath) {
+		logger.Printf("WARN: Worktree path is not absolute, skipping cleanup: %s", workspacePath)
+		return nil // Best-effort: don't fail on invalid input
+	}
+
+	// Validate workspacePath is under expected base directory (.agentd/worktrees)
+	// This provides defense-in-depth against path traversal
+	cleanPath := filepath.Clean(workspacePath)
+	expectedBase := ".agentd/worktrees"
+	absExpectedBase, err := filepath.Abs(expectedBase)
 	if err != nil {
-		logger.Printf("WARN: Failed to get repo root for %s: %v", workspacePath, err)
-		return err
+		logger.Printf("WARN: Failed to resolve workspace base directory, skipping validation: %v", err)
+		// Continue anyway - base validation is defense-in-depth, not critical
+	} else if !strings.HasPrefix(cleanPath, absExpectedBase+string(os.PathSeparator)) {
+		logger.Printf("WARN: Worktree path not under expected base %s, skipping cleanup: %s", expectedBase, cleanPath)
+		return nil // Best-effort: reject paths outside expected location
+	}
+
+	// Check if worktree directory exists
+	if _, err := os.Stat(cleanPath); os.IsNotExist(err) {
+		logger.Printf("Worktree directory already removed: %s", cleanPath)
+		return nil // Idempotent: already cleaned up
+	}
+
+	// Get repository root from the worktree
+	// If this fails (e.g., worktree deleted but not properly deregistered), try to infer root
+	root, err := getRepoRoot(ctx, cleanPath)
+	if err != nil {
+		logger.Printf("WARN: Failed to get repo root for %s: %v", cleanPath, err)
+		// Try to infer repo root from parent directories or use current working directory
+		cwd, cwdErr := os.Getwd()
+		if cwdErr != nil {
+			logger.Printf("WARN: Cannot infer repo root, skipping git cleanup: %v", cwdErr)
+			return nil // Best-effort: skip git operations if we can't find repo
+		}
+		root = cwd
+		logger.Printf("Using current directory as fallback repo root: %s", root)
 	}
 
 	// Get the branch name before removing the worktree
-	branchName, err := getWorktreeBranch(ctx, root, workspacePath)
+	branchName, err := getWorktreeBranch(ctx, root, cleanPath)
 	if err != nil {
-		logger.Printf("WARN: Failed to get worktree branch for %s: %v", workspacePath, err)
+		logger.Printf("WARN: Failed to get worktree branch for %s: %v", cleanPath, err)
 		// Continue with worktree removal even if we can't get the branch
 	}
 
 	// Remove the worktree (use -C to specify repository root)
-	// #nosec G204 - root and workspacePath are validated via getRepoRoot and Docker labels
-	cmd := exec.CommandContext(ctx, "git", "-C", root, "worktree", "remove", workspacePath, "--force")
+	// #nosec G204 - root is validated via getRepoRoot, cleanPath is cleaned and validated
+	cmd := exec.CommandContext(ctx, "git", "-C", root, "worktree", "remove", cleanPath, "--force")
 	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to remove worktree: %v: %s", err, strings.TrimSpace(string(out)))
+		logger.Printf("WARN: Failed to remove worktree %s: %v: %s", cleanPath, err, strings.TrimSpace(string(out)))
+		// Best-effort: don't return error, just log
+	} else {
+		logger.Printf("Removed worktree: %s", cleanPath)
 	}
-
-	logger.Printf("Removed worktree: %s", workspacePath)
 
 	// Delete the branch if we found one
 	if branchName != "" {
@@ -333,12 +370,13 @@ func cleanupWorktree(ctx context.Context, workspacePath string, logger Logger) e
 		cmd := exec.CommandContext(ctx, "git", "-C", root, "branch", "-D", branchName)
 		if err := cmd.Run(); err != nil {
 			logger.Printf("WARN: Failed to delete branch %s: %v", branchName, err)
-			// Don't return error - branch deletion is best-effort
+			// Best-effort: don't return error, just log
 		} else {
 			logger.Printf("Deleted branch: %s", branchName)
 		}
 	}
 
+	// Always return nil - this is truly best-effort cleanup
 	return nil
 }
 
