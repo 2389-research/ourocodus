@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/2389-research/ourocodus/pkg/labels"
 	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/client"
 )
 
@@ -129,10 +129,8 @@ func FindAgentContainerIDForTesting(ctx context.Context, agentID string) (contai
 	}
 	defer func() { _ = cli.Close() }()
 
-	// Build filter for agent label
-	filterArgs := filters.NewArgs()
-	// Use %q to safely quote agentID and prevent format string issues
-	filterArgs.Add("label", fmt.Sprintf("ourocodus.agent/agent-id=%s", agentID))
+	// Build filter using centralized label builder to ensure consistency
+	filterArgs := labels.FindAgentFilter(agentID)
 
 	// List containers with the agent label
 	containers, err := cli.ContainerList(ctx, container.ListOptions{
@@ -151,10 +149,10 @@ func FindAgentContainerIDForTesting(ctx context.Context, agentID string) (contai
 		return "", "", fmt.Errorf("multiple containers found for agent ID %s (found %d)", agentID, len(containers))
 	}
 
-	// Extract container ID and workspace from labels
+	// Extract container ID and workspace from labels using centralized constants
 	ctr := containers[0]
 	containerID = ctr.ID
-	workspace = ctr.Labels["ourocodus.agent/workspace"]
+	workspace = ctr.Labels[labels.Workspace]
 
 	if workspace == "" {
 		// Defensive: format container ID safely for error message
