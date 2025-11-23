@@ -11,6 +11,7 @@ import (
 	"github.com/2389-research/ourocodus/pkg/labels"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
+	"github.com/docker/docker/errdefs"
 )
 
 // ValidateNonEmpty validates that a string is not empty or whitespace-only.
@@ -148,8 +149,8 @@ func StopCLISpawnedContainer(
 		if err := cli.ContainerStop(ctx, containerID, container.StopOptions{
 			Timeout: &timeout,
 		}); err != nil {
-			// Treat "not running" and "not found" as success for idempotence
-			if !strings.Contains(err.Error(), "is not running") && !strings.Contains(err.Error(), "No such container") {
+			// Use errdefs for robust error classification (ignore NotFound for idempotence)
+			if !errdefs.IsNotFound(err) {
 				logger.Printf("WARN: Failed to stop CLI agent container %s: %v", agentID, err)
 				failed = true
 			}
@@ -160,8 +161,8 @@ func StopCLISpawnedContainer(
 			Force:         true,
 			RemoveVolumes: true,
 		}); err != nil {
-			// Ignore NotFound errors for idempotence
-			if !strings.Contains(err.Error(), "No such container") {
+			// Use errdefs for robust error classification (ignore NotFound for idempotence)
+			if !errdefs.IsNotFound(err) {
 				logger.Printf("WARN: Failed to remove CLI agent container %s: %v", agentID, err)
 				failed = true
 			}
@@ -263,24 +264,31 @@ func FindAgentContainerIDForTesting(ctx context.Context, agentID string) (contai
 // cleanupWorktree removes a git worktree and its associated branch.
 // This is best-effort cleanup that logs warnings but doesn't fail the overall termination.
 func cleanupWorktree(ctx context.Context, workspacePath string, logger Logger) error {
+	// Get repository root from the worktree
+	root, err := getRepoRoot(ctx, workspacePath)
+	if err != nil {
+		logger.Printf("WARN: Failed to get repo root for %s: %v", workspacePath, err)
+		return err
+	}
+
 	// Get the branch name before removing the worktree
-	branchName, err := getWorktreeBranch(ctx, workspacePath)
+	branchName, err := getWorktreeBranch(ctx, root, workspacePath)
 	if err != nil {
 		logger.Printf("WARN: Failed to get worktree branch for %s: %v", workspacePath, err)
 		// Continue with worktree removal even if we can't get the branch
 	}
 
-	// Remove the worktree
-	cmd := exec.CommandContext(ctx, "git", "worktree", "remove", workspacePath, "--force")
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to remove worktree: %w", err)
+	// Remove the worktree (use -C to specify repository root)
+	cmd := exec.CommandContext(ctx, "git", "-C", root, "worktree", "remove", workspacePath, "--force")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to remove worktree: %v: %s", err, strings.TrimSpace(string(out)))
 	}
 
 	logger.Printf("Removed worktree: %s", workspacePath)
 
 	// Delete the branch if we found one
 	if branchName != "" {
-		cmd := exec.CommandContext(ctx, "git", "branch", "-D", branchName)
+		cmd := exec.CommandContext(ctx, "git", "-C", root, "branch", "-D", branchName)
 		if err := cmd.Run(); err != nil {
 			logger.Printf("WARN: Failed to delete branch %s: %v", branchName, err)
 			// Don't return error - branch deletion is best-effort
@@ -292,10 +300,21 @@ func cleanupWorktree(ctx context.Context, workspacePath string, logger Logger) e
 	return nil
 }
 
+// getRepoRoot finds the repository root for a given worktree path.
+func getRepoRoot(ctx context.Context, worktreePath string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", "-C", worktreePath, "rev-parse", "--show-toplevel")
+	output, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve repo root: %w", err)
+	}
+	return strings.TrimSpace(string(output)), nil
+}
+
 // getWorktreeBranch extracts the branch name for a given worktree path.
-func getWorktreeBranch(ctx context.Context, workspacePath string) (string, error) {
-	// Run git worktree list --porcelain
-	cmd := exec.CommandContext(ctx, "git", "worktree", "list", "--porcelain")
+// repoRoot is the repository root directory (from getRepoRoot).
+func getWorktreeBranch(ctx context.Context, repoRoot, workspacePath string) (string, error) {
+	// Run git worktree list --porcelain from the repository root
+	cmd := exec.CommandContext(ctx, "git", "-C", repoRoot, "worktree", "list", "--porcelain")
 	output, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("failed to list worktrees: %w", err)
@@ -344,7 +363,12 @@ func parseBranchFromWorktreeList(output, workspacePath string) (string, error) {
 // deleteAttachToken removes the attach token file for an agent.
 // This is idempotent - returns nil if the file doesn't exist.
 func deleteAttachToken(agentID string) error {
-	tokenPath := fmt.Sprintf(".agentd/session/%s.token", agentID)
+	// Validate agentID to prevent path traversal
+	if err := validateAgentID(agentID); err != nil {
+		return err
+	}
+
+	tokenPath := filepath.Join(".agentd/session", agentID+".token")
 	if err := os.Remove(tokenPath); err != nil {
 		if os.IsNotExist(err) {
 			return nil // Already deleted, idempotent
