@@ -535,6 +535,7 @@ func createTestContainer(t *testing.T, agentID, workspace string) string {
 			Force:         true,
 			RemoveVolumes: true,
 		}); err != nil {
+			//nolint:staticcheck // errdefs is Docker SDK's official error handling
 			if !errdefs.IsNotFound(err) {
 				t.Logf("cleanup warning: remove %s: %v", resp.ID[:12], err)
 			}

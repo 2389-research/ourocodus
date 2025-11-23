@@ -150,6 +150,7 @@ func StopCLISpawnedContainer(
 			Timeout: &timeout,
 		}); err != nil {
 			// Use errdefs for robust error classification (ignore NotFound for idempotence)
+			//nolint:staticcheck // errdefs is Docker SDK's official error handling
 			if !errdefs.IsNotFound(err) {
 				logger.Printf("WARN: Failed to stop CLI agent container %s: %v", agentID, err)
 				failed = true
@@ -162,6 +163,7 @@ func StopCLISpawnedContainer(
 			RemoveVolumes: true,
 		}); err != nil {
 			// Use errdefs for robust error classification (ignore NotFound for idempotence)
+			//nolint:staticcheck // errdefs is Docker SDK's official error handling
 			if !errdefs.IsNotFound(err) {
 				logger.Printf("WARN: Failed to remove CLI agent container %s: %v", agentID, err)
 				failed = true
@@ -279,6 +281,7 @@ func cleanupWorktree(ctx context.Context, workspacePath string, logger Logger) e
 	}
 
 	// Remove the worktree (use -C to specify repository root)
+	// #nosec G204 - root and workspacePath are validated via getRepoRoot and Docker labels
 	cmd := exec.CommandContext(ctx, "git", "-C", root, "worktree", "remove", workspacePath, "--force")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to remove worktree: %v: %s", err, strings.TrimSpace(string(out)))
@@ -288,6 +291,7 @@ func cleanupWorktree(ctx context.Context, workspacePath string, logger Logger) e
 
 	// Delete the branch if we found one
 	if branchName != "" {
+		// #nosec G204 - root is validated via getRepoRoot, branchName from git output
 		cmd := exec.CommandContext(ctx, "git", "-C", root, "branch", "-D", branchName)
 		if err := cmd.Run(); err != nil {
 			logger.Printf("WARN: Failed to delete branch %s: %v", branchName, err)
