@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
@@ -9,12 +10,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/2389-research/ourocodus/cmd/agentd/internal/detect"
 	"github.com/2389-research/ourocodus/cmd/agentd/internal/output"
-	"github.com/2389-research/ourocodus/cmd/agentd/internal/theme"
+	spawntui "github.com/2389-research/ourocodus/cmd/agentd/internal/tui/spawn"
 	"github.com/2389-research/ourocodus/pkg/agent/container"
-	"github.com/charmbracelet/lipgloss"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 )
 
@@ -76,6 +78,132 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 	// Get or generate agent ID
 	agentID := generateAgentID(args)
 
+	// Use TUI for rich mode
+	if mode.IsRich() {
+		return runSpawnTUI(ctx, agentID)
+	}
+
+	// Non-TUI mode (JSON or plain)
+	return runSpawnLegacy(cmd, agentID, mode)
+}
+
+// runSpawnTUI runs the spawn command with a Bubble Tea TUI.
+func runSpawnTUI(ctx context.Context, agentID string) error {
+	m := spawntui.New(agentID)
+	p := tea.NewProgram(m)
+
+	// Channel to receive final result
+	type spawnResult struct {
+		handle *container.AgentContainerHandle
+		token  string
+		err    error
+	}
+	resultCh := make(chan spawnResult, 1)
+
+	// Run spawn in background
+	go func() {
+		var result spawnResult
+
+		// Step 1: Check if agent already exists
+		p.Send(spawntui.StepStartMsg{Step: spawntui.StepCheckExisting})
+		time.Sleep(100 * time.Millisecond) // Brief delay for UI
+
+		existingContainerID, err := findAgentContainerID(ctx, agentID)
+		if err != nil {
+			p.Send(spawntui.StepErrorMsg{Step: spawntui.StepCheckExisting, Error: fmt.Errorf("failed to check: %w", err)})
+			result.err = err
+			resultCh <- result
+			return
+		}
+		if existingContainerID != "" {
+			err := fmt.Errorf("agent '%s' already exists", agentID)
+			p.Send(spawntui.StepErrorMsg{Step: spawntui.StepCheckExisting, Error: err})
+			result.err = err
+			resultCh <- result
+			return
+		}
+		p.Send(spawntui.StepCompleteMsg{Step: spawntui.StepCheckExisting})
+
+		// Step 2: Create launcher
+		p.Send(spawntui.StepStartMsg{Step: spawntui.StepCreateLauncher})
+		time.Sleep(50 * time.Millisecond)
+
+		launcher, err := createLauncher()
+		if err != nil {
+			p.Send(spawntui.StepErrorMsg{Step: spawntui.StepCreateLauncher, Error: err})
+			result.err = err
+			resultCh <- result
+			return
+		}
+		p.Send(spawntui.StepCompleteMsg{Step: spawntui.StepCreateLauncher})
+
+		// Step 3: Build spawn config
+		p.Send(spawntui.StepStartMsg{Step: spawntui.StepBuildConfig})
+		time.Sleep(50 * time.Millisecond)
+
+		config, err := buildSpawnConfig(agentID)
+		if err != nil {
+			p.Send(spawntui.StepErrorMsg{Step: spawntui.StepBuildConfig, Error: err})
+			result.err = err
+			resultCh <- result
+			return
+		}
+		p.Send(spawntui.StepCompleteMsg{Step: spawntui.StepBuildConfig})
+
+		// Step 4: Spawn agent
+		p.Send(spawntui.StepStartMsg{Step: spawntui.StepSpawnAgent})
+
+		handle, err := launcher.Spawn(ctx, config)
+		if err != nil {
+			if err == container.ErrAgentAlreadyExists {
+				err = fmt.Errorf("agent '%s' already exists", agentID)
+			} else if strings.Contains(err.Error(), "worktree setup failed") {
+				err = fmt.Errorf("worktree creation failed: %w", err)
+			}
+			p.Send(spawntui.StepErrorMsg{Step: spawntui.StepSpawnAgent, Error: err})
+			result.err = err
+			resultCh <- result
+			return
+		}
+		result.handle = handle
+		p.Send(spawntui.StepCompleteMsg{Step: spawntui.StepSpawnAgent})
+
+		// Step 5: Generate attach token
+		p.Send(spawntui.StepStartMsg{Step: spawntui.StepGenerateToken})
+		time.Sleep(50 * time.Millisecond)
+
+		token, tokenErr := generateAttachToken(agentID)
+		result.token = token
+		if tokenErr != nil {
+			// Non-fatal - agent is running
+			p.Send(spawntui.StepCompleteMsg{Step: spawntui.StepGenerateToken})
+		} else {
+			p.Send(spawntui.StepCompleteMsg{Step: spawntui.StepGenerateToken})
+		}
+
+		// Send final result
+		p.Send(spawntui.SpawnCompleteMsg{
+			Handle:      handle,
+			AttachToken: token,
+			TokenError:  tokenErr,
+		})
+		resultCh <- result
+	}()
+
+	// Run TUI
+	if _, err := p.Run(); err != nil {
+		return err
+	}
+
+	// Get result
+	result := <-resultCh
+	return result.err
+}
+
+// runSpawnLegacy runs the spawn command without TUI (JSON or plain mode).
+func runSpawnLegacy(cmd *cobra.Command, agentID string, mode output.Mode) error {
+	ctx := cmd.Context()
+
 	// Check if agent already exists in Docker
 	existingContainerID, err := findAgentContainerID(ctx, agentID)
 	if err != nil {
@@ -85,16 +213,9 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("agent '%s' already exists\nUse 'agentd list' to see active agents or 'agentd stop %s' to remove it", agentID, agentID)
 	}
 
-	// Only print progress for rich/plain mode, not JSON
+	// Only print progress for plain mode, not JSON
 	if !mode.IsJSON() {
-		if mode.IsRich() {
-			th := theme.NewRetroTheme(theme.PaletteCGA)
-			headerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(string(th.Primary))).Bold(true)
-			fmt.Println(headerStyle.Render(fmt.Sprintf("✨ Creating isolated agent '%s'...", agentID)))
-			fmt.Println()
-		} else {
-			fmt.Printf("Creating agent '%s'...\n", agentID)
-		}
+		fmt.Printf("Creating agent '%s'...\n", agentID)
 	}
 
 	// Create launcher (wiring pkg/ components)
@@ -128,25 +249,15 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 		// Non-fatal: agent is running, just warn about token (only for non-JSON)
 		// For JSON mode, the error is included in the output as tokenError field
 		if !mode.IsJSON() {
-			if mode.IsRich() {
-				th := theme.NewRetroTheme(theme.PaletteCGA)
-				warnStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(string(th.Warning)))
-				fmt.Println(warnStyle.Render(fmt.Sprintf("⚠️  Warning: Failed to generate attach token: %v", tokenErr)))
-				fmt.Println(warnStyle.Render("   Agent is running but attachments will not be secured"))
-			} else {
-				fmt.Printf("Warning: Failed to generate attach token: %v\n", tokenErr)
-			}
+			fmt.Printf("Warning: Failed to generate attach token: %v\n", tokenErr)
 		}
 	}
 
 	// Print success based on output mode
-	switch {
-	case mode.IsJSON():
+	if mode.IsJSON() {
 		printSpawnSuccessJSON(handle, token, tokenErr)
-	case mode.IsPlain():
+	} else {
 		printSpawnSuccessPlain(handle, token)
-	default:
-		printSpawnSuccessRich(handle, token)
 	}
 
 	return nil
@@ -327,57 +438,3 @@ func printSpawnSuccessPlain(handle *container.AgentContainerHandle, attachToken 
 	fmt.Printf("\nAgent %s ready\n", handle.AgentID())
 }
 
-// printSpawnSuccessRich prints the successful spawn output with colors and styling
-func printSpawnSuccessRich(handle *container.AgentContainerHandle, attachToken string) {
-	th := theme.NewRetroTheme(theme.PaletteCGA)
-
-	// Create styles
-	labelStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(string(th.Primary))).Bold(true)
-	valueStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(string(th.Accent)))
-	mutedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(string(th.Muted)))
-	successStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(string(th.Success)))
-
-	// Worktree
-	fmt.Print("🌳 ")
-	fmt.Print(labelStyle.Render("Worktree: "))
-	fmt.Print(valueStyle.Render(handle.WorkspacePath()) + " ")
-	fmt.Println(mutedStyle.Render(fmt.Sprintf("(branch: %s)", handle.BranchName())))
-
-	// Container
-	fmt.Print("📦 ")
-	fmt.Print(labelStyle.Render("Container: "))
-	fmt.Print(valueStyle.Render(handle.ContainerID()) + " ")
-	fmt.Println(successStyle.Render("(running)"))
-
-	// Credentials
-	fmt.Print("🔑 ")
-	fmt.Print(labelStyle.Render("Credentials: "))
-	credPath := handle.CredentialsPath()
-	if credPath != "" && hasCredentialFiles(credPath) {
-		fmt.Print(valueStyle.Render("mounted at /root/.creds "))
-		fmt.Println(mutedStyle.Render("(read-only)"))
-	} else {
-		fmt.Println(mutedStyle.Render("(none)"))
-	}
-
-	// Attach token (Phase 4: Security Hardening)
-	if attachToken != "" {
-		fmt.Println()
-		fmt.Print("🔐 ")
-		tokenLabel := lipgloss.NewStyle().Foreground(lipgloss.Color("#00F6FF")).Bold(true)
-		fmt.Println(tokenLabel.Render("Attach Token:"))
-		fmt.Printf("   %s\n", valueStyle.Render(attachToken))
-		fmt.Println()
-		fmt.Println(mutedStyle.Render("   Use this token when attaching from PWA or relay:"))
-		fmt.Println(mutedStyle.Render(fmt.Sprintf("   → agent:attach {\"agentId\": \"%s\", \"token\": \"<token>\"}", handle.AgentID())))
-	}
-
-	fmt.Println()
-
-	// Success message with box
-	successBox := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(string(th.Success))).
-		Bold(true).
-		Render(fmt.Sprintf("✓ Agent %s ready", handle.AgentID()))
-	fmt.Println(successBox)
-}
