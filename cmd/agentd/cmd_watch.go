@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -12,8 +13,10 @@ import (
 	"github.com/2389-research/ourocodus/cmd/agentd/internal/detect"
 	"github.com/2389-research/ourocodus/cmd/agentd/internal/output"
 	"github.com/2389-research/ourocodus/cmd/agentd/internal/theme"
+	watchtui "github.com/2389-research/ourocodus/cmd/agentd/internal/tui/watch"
 	"github.com/2389-research/ourocodus/pkg/heartbeat"
 	"github.com/2389-research/ourocodus/pkg/relay/session"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/pkg/stdcopy"
@@ -94,6 +97,12 @@ func runWatch(cmd *cobra.Command, args []string) error {
 	ctx, cancel := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
+	// For rich mode, use the Bubble Tea TUI
+	if mode.IsRich() {
+		return runWatchTUI(ctx, agentID)
+	}
+
+	// For JSON/plain modes, use the legacy streaming output
 	// Print header
 	if !mode.IsJSON() {
 		printWatchHeader(agentID, mode)
@@ -117,6 +126,117 @@ func runWatch(cmd *cobra.Command, args []string) error {
 
 	runWatchEventLoop(ctx, mode, msgChan, leaseChan, logCancel)
 	return nil
+}
+
+// runWatchTUI runs the watch command with Bubble Tea TUI.
+func runWatchTUI(ctx context.Context, agentID string) error {
+	// Setup NATS subscription
+	_, msgChan, subject, cleanup, err := setupNATSSubscription(agentID)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+
+	// Create TUI
+	m := watchtui.New(agentID)
+	p := tea.NewProgram(m, tea.WithAltScreen())
+
+	// Start background goroutines to feed events to TUI
+	go func() {
+		// Send subscription notification
+		p.Send(watchtui.SubscribedMsg{Subject: subject})
+
+		// Process heartbeats
+		for msg := range msgChan {
+			var hb heartbeat.Message
+			if err := json.Unmarshal(msg.Data, &hb); err != nil {
+				p.Send(watchtui.ErrorMsg{Err: err})
+				continue
+			}
+			lag := time.Since(hb.Timestamp)
+			p.Send(watchtui.HeartbeatMsg{
+				AgentID:   hb.AgentID,
+				Timestamp: hb.Timestamp,
+				Status:    hb.Status,
+				Lag:       lag,
+			})
+		}
+	}()
+
+	// Monitor lease changes
+	go func() {
+		lastLeaseState, _ := readLeaseState(agentID)
+		ticker := time.NewTicker(2 * time.Second)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				currentLease, err := readLeaseState(agentID)
+				if err != nil {
+					continue
+				}
+				if hasLeaseChanged(lastLeaseState, currentLease) {
+					p.Send(watchtui.LeaseChangeMsg{Lease: currentLease})
+					lastLeaseState = currentLease
+				}
+			}
+		}
+	}()
+
+	// Stream container logs if enabled
+	if watchLogs {
+		go streamAgentLogsTUI(ctx, agentID, p)
+	}
+
+	// Handle context cancellation
+	go func() {
+		<-ctx.Done()
+		p.Quit()
+	}()
+
+	// Run TUI
+	_, err = p.Run()
+	return err
+}
+
+// streamAgentLogsTUI streams container logs to the TUI.
+func streamAgentLogsTUI(ctx context.Context, agentID string, p *tea.Program) {
+	containerID, err := findAgentContainerID(ctx, agentID)
+	if err != nil || containerID == "" {
+		return
+	}
+
+	cli, err := newDockerClient()
+	if err != nil {
+		return
+	}
+	defer func() { _ = cli.Close() }()
+
+	opts := container.LogsOptions{
+		ShowStdout: true,
+		ShowStderr: true,
+		Follow:     true,
+		Tail:       "20",
+	}
+	rc, err := cli.ContainerLogs(ctx, containerID, opts)
+	if err != nil {
+		return
+	}
+	defer func() { _ = rc.Close() }()
+
+	// Use a scanner to read lines
+	scanner := bufio.NewScanner(rc)
+	for scanner.Scan() {
+		line := scanner.Text()
+		// Skip Docker multiplexing header bytes (first 8 bytes of each frame)
+		if len(line) > 8 {
+			line = line[8:]
+		}
+		p.Send(watchtui.LogLineMsg{Line: line, IsErr: false})
+	}
 }
 
 // detectWatchOutputMode determines the output mode based on flags and TTY.
