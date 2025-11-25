@@ -86,7 +86,7 @@ func TestAgentAttachDetach_HappyPath(t *testing.T) {
 	}
 	attachMsg, _ := json.Marshal(attachReq)
 
-	shouldClose := server.handleAgentAttach(ctx, conn, attachMsg)
+	shouldClose := server.handleAgentAttach(ctx, wrapTestConn(conn), attachMsg)
 	if shouldClose {
 		t.Fatal("handleAgentAttach returned true (connection close), expected false")
 	}
@@ -144,7 +144,7 @@ func TestAgentAttachDetach_HappyPath(t *testing.T) {
 	}
 	detachMsg, _ := json.Marshal(detachReq)
 
-	shouldClose = server.handleAgentDetach(ctx, conn, detachMsg)
+	shouldClose = server.handleAgentDetach(ctx, wrapTestConn(conn), detachMsg)
 	if shouldClose {
 		t.Fatal("handleAgentDetach returned true (connection close), expected false")
 	}
@@ -226,7 +226,7 @@ func TestAgentAttach_NonExistentAgent(t *testing.T) {
 	}
 	attachMsg, _ := json.Marshal(attachReq)
 
-	shouldClose := server.handleAgentAttach(ctx, conn, attachMsg)
+	shouldClose := server.handleAgentAttach(ctx, wrapTestConn(conn), attachMsg)
 	if shouldClose {
 		t.Fatal("Expected connection to remain open for recoverable error")
 	}
@@ -325,7 +325,7 @@ func TestAgentAttach_AlreadyAttached(t *testing.T) {
 	}
 	attachMsg1, _ := json.Marshal(attachReq1)
 
-	shouldClose := server.handleAgentAttach(ctx, conn, attachMsg1)
+	shouldClose := server.handleAgentAttach(ctx, wrapTestConn(conn), attachMsg1)
 	if shouldClose {
 		t.Fatal("First attach should succeed")
 	}
@@ -345,7 +345,7 @@ func TestAgentAttach_AlreadyAttached(t *testing.T) {
 	}
 	attachMsg2, _ := json.Marshal(attachReq2)
 
-	shouldClose = server.handleAgentAttach(ctx, conn, attachMsg2)
+	shouldClose = server.handleAgentAttach(ctx, wrapTestConn(conn), attachMsg2)
 	if shouldClose {
 		t.Fatal("Expected connection to remain open for recoverable error")
 	}
@@ -444,7 +444,7 @@ func TestAgentDetach_NotAttachedToYou(t *testing.T) {
 	}
 	attachMsg, _ := json.Marshal(attachReq)
 
-	shouldClose := server.handleAgentAttach(ctx, conn, attachMsg)
+	shouldClose := server.handleAgentAttach(ctx, wrapTestConn(conn), attachMsg)
 	if shouldClose {
 		t.Fatal("Attach should succeed")
 	}
@@ -458,7 +458,7 @@ func TestAgentDetach_NotAttachedToYou(t *testing.T) {
 	}
 	detachMsg, _ := json.Marshal(detachReq)
 
-	shouldClose = server.handleAgentDetach(ctx, conn, detachMsg)
+	shouldClose = server.handleAgentDetach(ctx, wrapTestConn(conn), detachMsg)
 	if shouldClose {
 		t.Fatal("Expected connection to remain open for recoverable error")
 	}
@@ -558,14 +558,14 @@ func TestAgentAttachDetach_Idempotent(t *testing.T) {
 	attachMsg, _ := json.Marshal(attachReq)
 
 	// First attach
-	shouldClose := server.handleAgentAttach(ctx, conn, attachMsg)
+	shouldClose := server.handleAgentAttach(ctx, wrapTestConn(conn), attachMsg)
 	if shouldClose {
 		t.Fatal("First attach should succeed")
 	}
 
 	// Second attach (same session)
 	conn.messages = make([]interface{}, 0)
-	shouldClose = server.handleAgentAttach(ctx, conn, attachMsg)
+	shouldClose = server.handleAgentAttach(ctx, wrapTestConn(conn), attachMsg)
 	if shouldClose {
 		t.Fatal("Second attach should be idempotent")
 	}
@@ -594,14 +594,14 @@ func TestAgentAttachDetach_Idempotent(t *testing.T) {
 	detachMsg, _ := json.Marshal(detachReq)
 
 	conn.messages = make([]interface{}, 0)
-	shouldClose = server.handleAgentDetach(ctx, conn, detachMsg)
+	shouldClose = server.handleAgentDetach(ctx, wrapTestConn(conn), detachMsg)
 	if shouldClose {
 		t.Fatal("First detach should succeed")
 	}
 
 	// Test 2: Detach twice (idempotent detach)
 	conn.messages = make([]interface{}, 0)
-	shouldClose = server.handleAgentDetach(ctx, conn, detachMsg)
+	shouldClose = server.handleAgentDetach(ctx, wrapTestConn(conn), detachMsg)
 	if shouldClose {
 		t.Fatal("Second detach should be idempotent")
 	}
@@ -844,4 +844,9 @@ func (m *testWebSocketConn) SetPongHandler(h func(appData string) error) {}
 
 func (m *testWebSocketConn) WriteMessage(messageType int, data []byte) error {
 	return nil
+}
+
+// wrapTestConn wraps a testWebSocketConn in a SessionWebSocketAdapter for testing handlers
+func wrapTestConn(conn *testWebSocketConn) *SessionWebSocketAdapter {
+	return &SessionWebSocketAdapter{conn: conn}
 }

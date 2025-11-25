@@ -64,18 +64,9 @@ func NewServer(idGen IDGenerator, logger Logger, clock Clock, upgrader Upgrader,
 	}
 }
 
-// sendHandshake sends the connection established message (single responsibility)
-func (s *Server) sendHandshake(conn WebSocketConn) error {
-	handshake := NewConnectionEstablished(s.serverID, s.clock.Now())
-	if err := conn.WriteJSON(handshake); err != nil {
-		s.logger.Printf("Failed to send handshake: %v", err)
-		return err
-	}
-	return nil
-}
-
-// sendHandshakeWithAdapter sends handshake using the adapter for write synchronization
-func (s *Server) sendHandshakeWithAdapter(adapter *SessionWebSocketAdapter) error {
+// sendHandshake sends the connection established message using the adapter for thread-safe writes.
+// All WebSocket writes go through the adapter for synchronization (issue #213).
+func (s *Server) sendHandshake(adapter *SessionWebSocketAdapter) error {
 	handshake := NewConnectionEstablished(s.serverID, s.clock.Now())
 	if err := adapter.WriteJSON(handshake); err != nil {
 		s.logger.Printf("Failed to send handshake: %v", err)
@@ -86,7 +77,8 @@ func (s *Server) sendHandshakeWithAdapter(adapter *SessionWebSocketAdapter) erro
 
 // handleValidationError processes validation errors and sends appropriate responses
 // Returns true if connection should be closed
-func (s *Server) handleValidationError(conn WebSocketConn, err error) bool {
+// Uses adapter for thread-safe writes (issue #213 - WebSocket write synchronization)
+func (s *Server) handleValidationError(adapter *SessionWebSocketAdapter, err error) bool {
 	s.logger.Printf("Invalid message: %v", err)
 
 	// Convert to ValidationError
@@ -102,9 +94,9 @@ func (s *Server) handleValidationError(conn WebSocketConn, err error) bool {
 		}
 	}
 
-	// Send error response
+	// Send error response via adapter for thread-safe writes
 	errorMsg := NewErrorMessage(validationErr.Code, validationErr.Message, validationErr.Recoverable)
-	if err := conn.WriteJSON(errorMsg); err != nil {
+	if err := adapter.WriteJSON(errorMsg); err != nil {
 		s.logger.Printf("Failed to send error response: %v", err)
 	}
 
@@ -124,16 +116,19 @@ func (s *Server) addTimestamp(msg map[string]interface{}) {
 
 // handleEcho handles test:echo messages (kept for Phase 1 testing)
 // Returns true if connection should be closed
-func (s *Server) handleEcho(conn WebSocketConn, rawMessage []byte) bool {
+// Uses adapter for thread-safe writes (issue #213)
+func (s *Server) handleEcho(adapter *SessionWebSocketAdapter, rawMessage []byte) bool {
 	var msg map[string]interface{}
 	if err := json.Unmarshal(rawMessage, &msg); err != nil {
 		s.logger.Printf("Failed to parse echo message: %v", err)
-		return true // Close on parse error
+		return s.handleValidationError(adapter, ValidationError{
+			Code: "INVALID_MESSAGE", Message: "Failed to parse echo message", Recoverable: true,
+		})
 	}
 
 	s.addTimestamp(msg)
 
-	if err := conn.WriteJSON(msg); err != nil {
+	if err := adapter.WriteJSON(msg); err != nil {
 		s.logger.Printf("Write error: %v", err)
 		return true // Close on write error
 	}
@@ -144,10 +139,11 @@ func (s *Server) handleEcho(conn WebSocketConn, rawMessage []byte) bool {
 // routeMessage routes incoming messages to appropriate handlers based on type
 // Returns true if connection should be closed
 // adapter parameter is the SessionWebSocketAdapter for this connection (reused for all writes)
-func (s *Server) routeMessage(ctx context.Context, conn WebSocketConn, adapter *SessionWebSocketAdapter, rawMessage []byte) (sessionID string, shouldClose bool) {
+// All handlers now use adapter for thread-safe writes (issue #213 - WebSocket write synchronization)
+func (s *Server) routeMessage(ctx context.Context, adapter *SessionWebSocketAdapter, rawMessage []byte) (sessionID string, shouldClose bool) {
 	// Validate message
 	if err := ValidateMessage(rawMessage); err != nil {
-		return "", s.handleValidationError(conn, err)
+		return "", s.handleValidationError(adapter, err)
 	}
 
 	// Parse base message to get type
@@ -155,7 +151,7 @@ func (s *Server) routeMessage(ctx context.Context, conn WebSocketConn, adapter *
 	if err := json.Unmarshal(rawMessage, &base); err != nil {
 		// This shouldn't happen since ValidateMessage already parsed it
 		s.logger.Printf("Failed to parse validated message: %v", err)
-		return "", s.handleValidationError(conn, ValidationError{
+		return "", s.handleValidationError(adapter, ValidationError{
 			Code:        "INVALID_MESSAGE",
 			Message:     "Failed to parse message",
 			Recoverable: true,
@@ -170,44 +166,45 @@ func (s *Server) routeMessage(ctx context.Context, conn WebSocketConn, adapter *
 		return s.handleSessionCreate(ctx, adapter, rawMessage)
 	case "session:end":
 		s.logger.Printf("[RELAY] Handling session:end")
-		return "", s.handleSessionEnd(ctx, conn, rawMessage)
+		return "", s.handleSessionEnd(ctx, adapter, rawMessage)
 	case "agent:spawn":
 		s.logger.Printf("[RELAY] Handling agent:spawn")
-		return "", s.handleAgentSpawn(ctx, conn, rawMessage)
+		return "", s.handleAgentSpawn(ctx, adapter, rawMessage)
 	case "agent:message":
 		s.logger.Printf("[RELAY] Handling agent:message")
-		return "", s.handleAgentMessage(ctx, conn, rawMessage)
+		return "", s.handleAgentMessage(ctx, adapter, rawMessage)
 	case "agent:terminate":
 		s.logger.Printf("[RELAY] Handling agent:terminate")
-		return "", s.handleAgentTerminate(ctx, conn, rawMessage)
+		return "", s.handleAgentTerminate(ctx, adapter, rawMessage)
 	case "agent:discover":
 		s.logger.Printf("[RELAY] Handling agent:discover")
-		return "", s.handleAgentDiscover(ctx, conn, rawMessage)
+		return "", s.handleAgentDiscover(ctx, adapter, rawMessage)
 	case "agent:attach":
 		s.logger.Printf("[RELAY] Handling agent:attach")
-		return "", s.handleAgentAttach(ctx, conn, rawMessage)
+		return "", s.handleAgentAttach(ctx, adapter, rawMessage)
 	case "agent:detach":
 		s.logger.Printf("[RELAY] Handling agent:detach")
-		return "", s.handleAgentDetach(ctx, conn, rawMessage)
+		return "", s.handleAgentDetach(ctx, adapter, rawMessage)
 	case "test:echo":
 		// Keep echo for testing during Phase 1
 		s.logger.Printf("[RELAY] Handling test:echo")
-		return "", s.handleEcho(conn, rawMessage)
+		return "", s.handleEcho(adapter, rawMessage)
 	default:
 		s.logger.Printf("[RELAY] Unknown message type: %s", base.Type)
-		return "", s.handleUnknownMessageType(conn, base.Type)
+		return "", s.handleUnknownMessageType(adapter, base.Type)
 	}
 }
 
 // handleUnknownMessageType handles messages with unknown types
-func (s *Server) handleUnknownMessageType(conn WebSocketConn, msgType string) bool {
+// Uses adapter for thread-safe writes (issue #213)
+func (s *Server) handleUnknownMessageType(adapter *SessionWebSocketAdapter, msgType string) bool {
 	s.logger.Printf("Unknown message type: %s", msgType)
 	err := ValidationError{
 		Code:        "UNKNOWN_MESSAGE_TYPE",
 		Message:     fmt.Sprintf("Unknown message type: %s", msgType),
 		Recoverable: true,
 	}
-	return s.handleValidationError(conn, err)
+	return s.handleValidationError(adapter, err)
 }
 
 // SessionWebSocketAdapter adapts relay.WebSocketConn to session.WebSocketConn
@@ -259,7 +256,7 @@ func (s *Server) handleSessionCreate(ctx context.Context, adapter *SessionWebSoc
 	msg, err := parseSessionCreateMessage(rawMessage)
 	if err != nil {
 		s.logger.Printf("[RELAY] handleSessionCreate: parse error: %v", err)
-		return "", s.handleValidationError(adapter.conn, err)
+		return "", s.handleValidationError(adapter, err)
 	}
 
 	s.logger.Printf("[RELAY] handleSessionCreate: validating message")
@@ -267,7 +264,7 @@ func (s *Server) handleSessionCreate(ctx context.Context, adapter *SessionWebSoc
 	// Validate message (currently no-op, but for consistency)
 	if validationErr := validateSessionCreateMessage(msg); validationErr != nil {
 		s.logger.Printf("[RELAY] handleSessionCreate: validation error: %v", validationErr)
-		return "", s.handleValidationError(adapter.conn, validationErr)
+		return "", s.handleValidationError(adapter, validationErr)
 	}
 
 	s.logger.Printf("[RELAY] handleSessionCreate: creating user session")
@@ -334,16 +331,17 @@ func (s *Server) mapError(err error) (code, message string, recoverable bool) {
 
 // handleAgentSpawn handles agent:spawn messages
 // Spawns an agent in an existing session and responds with agent:ready
-func (s *Server) handleAgentSpawn(ctx context.Context, conn WebSocketConn, rawMessage []byte) bool {
+// Uses adapter for thread-safe writes (issue #213)
+func (s *Server) handleAgentSpawn(ctx context.Context, adapter *SessionWebSocketAdapter, rawMessage []byte) bool {
 	// Parse message
 	msg, err := parseAgentSpawnMessage(rawMessage)
 	if err != nil {
-		return s.handleValidationError(conn, err)
+		return s.handleValidationError(adapter, err)
 	}
 
 	// Validate message
 	if validationErr := validateAgentSpawnMessage(msg); validationErr != nil {
-		return s.handleValidationError(conn, validationErr)
+		return s.handleValidationError(adapter, validationErr)
 	}
 
 	s.logger.Printf("[RELAY→SESSION] Request to spawn agent '%s' for user session %s (workspace: %s)",
@@ -356,14 +354,14 @@ func (s *Server) handleAgentSpawn(ctx context.Context, conn WebSocketConn, rawMe
 		s.logger.Printf("[ERROR] Agent spawn failed: %+v", err)
 		// Map error to protocol error code (distinguishes SESSION_NOT_FOUND vs generic spawn failures)
 		// Keep connection open even for non-recoverable errors - client can create missing resources
-		return SendMappedError(conn, s.logger, err, s.mapError)
+		return SendMappedError(adapter, s.logger, err, s.mapError)
 	}
 
 	s.logger.Printf("[RELAY] Agent spawned: userSession=%s agentID=%s", msg.UserSessionID, msg.AgentID)
 
 	// Send agent:ready response
 	response := NewAgentReadyMessage(msg.UserSessionID, msg.AgentID)
-	if err := conn.WriteJSON(response); err != nil {
+	if err := adapter.WriteJSON(response); err != nil {
 		s.logger.Printf("Failed to send agent:ready: %v", err)
 		return true // Close on write failure
 	}
@@ -373,6 +371,7 @@ func (s *Server) handleAgentSpawn(ctx context.Context, conn WebSocketConn, rawMe
 
 // handleAgentMessage handles agent:message messages
 // Forwards messages from PWA to ACP agent process and returns agent:response back to PWA
+// Uses adapter for thread-safe writes (issue #213)
 //
 // Message Flow:
 //  1. Parse and validate agent:message from PWA
@@ -389,16 +388,16 @@ func (s *Server) handleAgentSpawn(ctx context.Context, conn WebSocketConn, rawMe
 //   - Write errors: Close connection immediately (can't communicate with client)
 //
 // Note: ctx is not currently used by ACPClient.SendMessage, but is kept for future timeout/cancellation support
-func (s *Server) handleAgentMessage(ctx context.Context, conn WebSocketConn, rawMessage []byte) bool {
+func (s *Server) handleAgentMessage(ctx context.Context, adapter *SessionWebSocketAdapter, rawMessage []byte) bool {
 	// Parse message
 	msg, err := parseAgentMessageRequest(rawMessage)
 	if err != nil {
-		return s.handleValidationError(conn, err)
+		return s.handleValidationError(adapter, err)
 	}
 
 	// Validate message
 	if validationErr := validateAgentMessageRequest(msg); validationErr != nil {
-		return s.handleValidationError(conn, validationErr)
+		return s.handleValidationError(adapter, validationErr)
 	}
 
 	s.logger.Printf("[RELAY] Routing message to agent: userSession=%s agentID=%s",
@@ -410,14 +409,14 @@ func (s *Server) handleAgentMessage(ctx context.Context, conn WebSocketConn, raw
 		s.logger.Printf("Failed to get agent: %v", err)
 		// Map error to protocol error code (distinguishes SESSION_NOT_FOUND vs AGENT_NOT_FOUND)
 		// Keep connection open even for non-recoverable errors - client can create missing resources
-		return SendMappedError(conn, s.logger, err, s.mapError)
+		return SendMappedError(adapter, s.logger, err, s.mapError)
 	}
 
 	// Check agent state
 	if agent.GetState() != session.AgentActive {
 		s.logger.Printf("Agent not ready: userSession=%s agentID=%s state=%s",
 			msg.UserSessionID, msg.AgentID, agent.GetState())
-		return SendAgentNotReadyError(conn, s.logger,
+		return SendAgentNotReadyError(adapter, s.logger,
 			fmt.Sprintf("Agent is not ready (current state: %s)", agent.GetState()))
 	}
 
@@ -425,7 +424,7 @@ func (s *Server) handleAgentMessage(ctx context.Context, conn WebSocketConn, raw
 	acpClient := agent.GetACPClient()
 	if acpClient == nil {
 		s.logger.Printf("Agent has no ACP client: userSession=%s agentID=%s", msg.UserSessionID, msg.AgentID)
-		return SendAgentNotReadyError(conn, s.logger, "Agent ACP client not initialized")
+		return SendAgentNotReadyError(adapter, s.logger, "Agent ACP client not initialized")
 	}
 
 	// Send message to agent with timeout (fixes issue #226)
@@ -437,7 +436,7 @@ func (s *Server) handleAgentMessage(ctx context.Context, conn WebSocketConn, raw
 	response, err := acpClient.SendMessage(acpCtx, msg.Content)
 	if err != nil {
 		s.logger.Printf("Agent message failed: %v", err)
-		return SendAgentMessageFailedError(conn, s.logger, err)
+		return SendAgentMessageFailedError(adapter, s.logger, err)
 	}
 
 	s.logger.Printf("[RELAY] Agent response received: userSession=%s agentID=%s",
@@ -447,7 +446,7 @@ func (s *Server) handleAgentMessage(ctx context.Context, conn WebSocketConn, raw
 	agentMsg, ok := response.(*acp.AgentMessage)
 	if !ok {
 		s.logger.Printf("Invalid response type from agent: %T", response)
-		return SendErrorMessage(conn, s.logger, "AGENT_MESSAGE_FAILED",
+		return SendErrorMessage(adapter, s.logger, "AGENT_MESSAGE_FAILED",
 			"Invalid response format from agent", true)
 	}
 	responseStr := agentMsg.Content
@@ -458,6 +457,13 @@ func (s *Server) handleAgentMessage(ctx context.Context, conn WebSocketConn, raw
 	agent.AddMessage("user", msg.Content, now)
 	agent.AddMessage("agent", responseStr, now)
 
+	// Renew lease on meaningful interaction (user message + successful agent response)
+	// This extends the lease TTL, preventing expiration during active conversations
+	if err := session.RenewLease(msg.AgentID); err != nil {
+		s.logger.Printf("[LEASE] Failed to renew lease for agent %s: %v", msg.AgentID, err)
+		// Non-fatal: lease expiration will be handled by heartbeat monitor
+	}
+
 	// Send agent:response
 	responseMsg := NewAgentMessageResponse(
 		msg.UserSessionID,
@@ -465,7 +471,7 @@ func (s *Server) handleAgentMessage(ctx context.Context, conn WebSocketConn, raw
 		responseStr,
 		s.clock.Now(),
 	)
-	if err := conn.WriteJSON(responseMsg); err != nil {
+	if err := adapter.WriteJSON(responseMsg); err != nil {
 		s.logger.Printf("Failed to send agent:response: %v", err)
 		return true // Close on write failure
 	}
@@ -475,16 +481,17 @@ func (s *Server) handleAgentMessage(ctx context.Context, conn WebSocketConn, raw
 
 // handleSessionEnd handles session:end messages
 // Terminates all agents in the session and cleans up resources
-func (s *Server) handleSessionEnd(ctx context.Context, conn WebSocketConn, rawMessage []byte) bool {
+// Uses adapter for thread-safe writes (issue #213)
+func (s *Server) handleSessionEnd(ctx context.Context, adapter *SessionWebSocketAdapter, rawMessage []byte) bool {
 	// Parse message
 	msg, err := parseSessionEndMessage(rawMessage)
 	if err != nil {
-		return s.handleValidationError(conn, err)
+		return s.handleValidationError(adapter, err)
 	}
 
 	// Validate message
 	if validationErr := validateSessionEndMessage(msg); validationErr != nil {
-		return s.handleValidationError(conn, validationErr)
+		return s.handleValidationError(adapter, validationErr)
 	}
 
 	s.logger.Printf("[RELAY] Terminating user session: %s", msg.UserSessionID)
@@ -502,11 +509,12 @@ func (s *Server) handleSessionEnd(ctx context.Context, conn WebSocketConn, rawMe
 		// Map error to protocol error code
 		errorCode, errorMessage, recoverable := s.mapError(err)
 		errorMsg := NewErrorMessage(errorCode, errorMessage, recoverable)
-		if writeErr := conn.WriteJSON(errorMsg); writeErr != nil {
+		if writeErr := adapter.WriteJSON(errorMsg); writeErr != nil {
 			s.logger.Printf("Failed to send error response: %v", writeErr)
 			return true
 		}
-		return !recoverable
+		// Keep connection open even on non-recoverable errors - consistent with other handlers
+		return false
 	}
 
 	s.logger.Printf("[RELAY] User session terminated: %s, agents terminated: %d (failures=%d, cleanup=%s)",
@@ -514,7 +522,7 @@ func (s *Server) handleSessionEnd(ctx context.Context, conn WebSocketConn, rawMe
 
 	// Send session:ended response
 	response := NewSessionEndedMessage(msg.UserSessionID, summary.AgentsTerminated, string(summary.CleanupStatus))
-	if err := conn.WriteJSON(response); err != nil {
+	if err := adapter.WriteJSON(response); err != nil {
 		s.logger.Printf("Failed to send session:ended: %v", err)
 		return true
 	}
@@ -524,16 +532,17 @@ func (s *Server) handleSessionEnd(ctx context.Context, conn WebSocketConn, rawMe
 
 // handleAgentTerminate handles agent:terminate messages
 // Terminates a specific agent while keeping the session active
-func (s *Server) handleAgentTerminate(ctx context.Context, conn WebSocketConn, rawMessage []byte) bool {
+// Uses adapter for thread-safe writes (issue #213)
+func (s *Server) handleAgentTerminate(ctx context.Context, adapter *SessionWebSocketAdapter, rawMessage []byte) bool {
 	// Parse message
 	msg, err := parseAgentTerminateMessage(rawMessage)
 	if err != nil {
-		return s.handleValidationError(conn, err)
+		return s.handleValidationError(adapter, err)
 	}
 
 	// Validate message
 	if validationErr := validateAgentTerminateMessage(msg); validationErr != nil {
-		return s.handleValidationError(conn, validationErr)
+		return s.handleValidationError(adapter, validationErr)
 	}
 
 	s.logger.Printf("[RELAY] Terminating agent: userSession=%s agentID=%s", msg.UserSessionID, msg.AgentID)
@@ -543,13 +552,8 @@ func (s *Server) handleAgentTerminate(ctx context.Context, conn WebSocketConn, r
 	if err != nil {
 		s.logger.Printf("Error terminating agent: %v", err)
 		// Map error to protocol error code
-		errorCode, errorMessage, recoverable := s.mapError(err)
-		errorMsg := NewErrorMessage(errorCode, errorMessage, recoverable)
-		if writeErr := conn.WriteJSON(errorMsg); writeErr != nil {
-			s.logger.Printf("Failed to send error response: %v", writeErr)
-			return true
-		}
-		return !recoverable
+		// Keep connection open even for non-recoverable errors - consistent with other handlers
+		return SendMappedError(adapter, s.logger, err, s.mapError)
 	}
 
 	s.logger.Printf("[RELAY] Agent terminated: userSession=%s agentID=%s", msg.UserSessionID, msg.AgentID)
@@ -557,7 +561,7 @@ func (s *Server) handleAgentTerminate(ctx context.Context, conn WebSocketConn, r
 	// Send agent:terminated response
 	// Workspace is always cleaned during termination, so workspaceCleaned is true
 	response := NewAgentTerminatedMessage(msg.UserSessionID, msg.AgentID, true)
-	if err := conn.WriteJSON(response); err != nil {
+	if err := adapter.WriteJSON(response); err != nil {
 		s.logger.Printf("Failed to send agent:terminated: %v", err)
 		return true
 	}
@@ -624,7 +628,7 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	s.logger.Printf("[SERVER] WebSocket connection established from %s", r.RemoteAddr)
 
 	// Send handshake using adapter for synchronized writes
-	if err := s.sendHandshakeWithAdapter(adapter); err != nil {
+	if err := s.sendHandshake(adapter); err != nil {
 		return
 	}
 
@@ -646,7 +650,7 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		messageType := extractMessageType(message)
 		s.logger.Printf("[RELAY] dir=recv type=%s size=%dB", messageType, len(message))
 
-		sessionID, shouldClose := s.routeMessage(ctx, conn, adapter, message)
+		sessionID, shouldClose := s.routeMessage(ctx, adapter, message)
 		// Track session ID if one was created during this connection
 		if sessionID != "" {
 			createdSessionID = sessionID
@@ -655,6 +659,40 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 	}
+}
+
+// NotifyAgentDeath is called when an agent dies externally (via agentd stop, docker stop, or crash).
+// This method looks up the UserSession and pushes an agent:terminated message to the PWA
+// so the UI can update to reflect the agent's termination.
+//
+// This is typically invoked from the HeartbeatMonitor's callback when a lease expires.
+// Errors are logged but not returned since this is best-effort notification.
+func (s *Server) NotifyAgentDeath(agentID, userSessionID string) {
+	s.logger.Printf("[RELAY] Agent death detected: agentID=%s userSession=%s", agentID, userSessionID)
+
+	// Look up the session
+	userSession := s.sessionManager.Get(userSessionID)
+	if userSession == nil {
+		s.logger.Printf("[RELAY] Session not found for dead agent notification: %s", userSessionID)
+		return
+	}
+
+	// Get the WebSocket connection
+	ws := userSession.GetWebSocket()
+	if ws == nil {
+		s.logger.Printf("[RELAY] No WebSocket for session: %s", userSessionID)
+		return
+	}
+
+	// Send agent:terminated message to PWA
+	// workspaceCleaned is false because we didn't clean the workspace - the agent died externally
+	response := NewAgentTerminatedMessage(userSessionID, agentID, false)
+	if err := ws.WriteJSON(response); err != nil {
+		s.logger.Printf("[RELAY] Failed to send agent:terminated notification: %v", err)
+		return
+	}
+
+	s.logger.Printf("[RELAY] Sent agent:terminated to PWA: agentID=%s userSession=%s", agentID, userSessionID)
 }
 
 // startPingRoutine starts a goroutine that sends periodic pings to keep the connection alive.

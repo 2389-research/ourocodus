@@ -89,6 +89,11 @@ func (m *mockWebSocketConn) WriteMessage(messageType int, data []byte) error {
 	return m.writeError
 }
 
+// wrapMockConn wraps a mockWebSocketConn in a SessionWebSocketAdapter for testing handlers
+func wrapMockConn(conn *mockWebSocketConn) *SessionWebSocketAdapter {
+	return &SessionWebSocketAdapter{conn: conn}
+}
+
 // Unit tests for server methods
 
 func TestAddTimestamp(t *testing.T) {
@@ -137,7 +142,7 @@ func TestSendHandshake_Success(t *testing.T) {
 		clock:    clock,
 	}
 
-	err := server.sendHandshake(conn)
+	err := server.sendHandshake(wrapMockConn(conn))
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
@@ -171,7 +176,7 @@ func TestSendHandshake_WriteError(t *testing.T) {
 		clock:    clock,
 	}
 
-	err := server.sendHandshake(conn)
+	err := server.sendHandshake(wrapMockConn(conn))
 
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -197,7 +202,7 @@ func TestHandleValidationError_Recoverable(t *testing.T) {
 		Recoverable: true,
 	}
 
-	shouldClose := server.handleValidationError(conn, validationErr)
+	shouldClose := server.handleValidationError(wrapMockConn(conn), validationErr)
 
 	if shouldClose {
 		t.Error("expected shouldClose=false for recoverable error")
@@ -231,7 +236,7 @@ func TestHandleValidationError_NonRecoverable(t *testing.T) {
 		Recoverable: false,
 	}
 
-	shouldClose := server.handleValidationError(conn, validationErr)
+	shouldClose := server.handleValidationError(wrapMockConn(conn), validationErr)
 
 	if !shouldClose {
 		t.Error("expected shouldClose=true for non-recoverable error")
@@ -262,7 +267,7 @@ func TestHandleValidationError_NonValidationError(t *testing.T) {
 	// Generic error should be treated as recoverable INVALID_MESSAGE
 	genericErr := errors.New("some random error")
 
-	shouldClose := server.handleValidationError(conn, genericErr)
+	shouldClose := server.handleValidationError(wrapMockConn(conn), genericErr)
 
 	if shouldClose {
 		t.Error("expected shouldClose=false for generic error (fallback to recoverable)")
@@ -296,7 +301,7 @@ func TestHandleEcho_Success(t *testing.T) {
 
 	rawMessage := []byte(`{"version":"1.0","type":"test:echo","message":"hello"}`)
 
-	shouldClose := server.handleEcho(conn, rawMessage)
+	shouldClose := server.handleEcho(wrapMockConn(conn), rawMessage)
 	if shouldClose {
 		t.Error("expected shouldClose=false for successful echo")
 	}
@@ -329,10 +334,11 @@ func TestHandleEcho_InvalidJSON(t *testing.T) {
 
 	rawMessage := []byte(`{invalid json}`)
 
-	shouldClose := server.handleEcho(conn, rawMessage)
+	shouldClose := server.handleEcho(wrapMockConn(conn), rawMessage)
 
-	if !shouldClose {
-		t.Error("expected shouldClose=true for invalid JSON")
+	// Invalid JSON is a recoverable error - connection stays open
+	if shouldClose {
+		t.Error("expected shouldClose=false for recoverable invalid JSON error")
 	}
 
 	// Should log error
@@ -340,9 +346,20 @@ func TestHandleEcho_InvalidJSON(t *testing.T) {
 		t.Error("expected error to be logged")
 	}
 
-	// Should not write anything
-	if len(conn.written) != 0 {
-		t.Errorf("expected nothing written on error, got %d messages", len(conn.written))
+	// Should send error message to client (recoverable error)
+	if len(conn.written) != 1 {
+		t.Fatalf("expected 1 error message, got %d", len(conn.written))
+	}
+
+	errorMsg, ok := conn.written[0].(ErrorMessage)
+	if !ok {
+		t.Fatal("expected ErrorMessage")
+	}
+	if errorMsg.Error.Code != "INVALID_MESSAGE" {
+		t.Errorf("expected INVALID_MESSAGE, got %s", errorMsg.Error.Code)
+	}
+	if !errorMsg.Error.Recoverable {
+		t.Error("expected error to be recoverable")
 	}
 }
 
@@ -358,8 +375,8 @@ func TestRouteMessage_ValidEchoMessage(t *testing.T) {
 	ctx := context.Background()
 	rawMessage := []byte(`{"version":"1.0","type":"test:echo","message":"hello"}`)
 
-	adapter := &SessionWebSocketAdapter{conn: conn}
-	_, shouldClose := server.routeMessage(ctx, conn, adapter, rawMessage)
+	adapter := wrapMockConn(conn)
+	_, shouldClose := server.routeMessage(ctx, adapter, rawMessage)
 
 	if shouldClose {
 		t.Error("expected shouldClose=false for valid message")
@@ -384,8 +401,8 @@ func TestRouteMessage_ValidationError(t *testing.T) {
 	// Missing version field
 	rawMessage := []byte(`{"type":"test:echo","message":"hello"}`)
 
-	adapter := &SessionWebSocketAdapter{conn: conn}
-	_, shouldClose := server.routeMessage(ctx, conn, adapter, rawMessage)
+	adapter := wrapMockConn(conn)
+	_, shouldClose := server.routeMessage(ctx, adapter, rawMessage)
 
 	if shouldClose {
 		t.Error("expected shouldClose=false for recoverable validation error")
@@ -419,8 +436,8 @@ func TestRouteMessage_VersionMismatch(t *testing.T) {
 	// Wrong version - non-recoverable
 	rawMessage := []byte(`{"version":"2.0","type":"test:echo"}`)
 
-	adapter := &SessionWebSocketAdapter{conn: conn}
-	_, shouldClose := server.routeMessage(ctx, conn, adapter, rawMessage)
+	adapter := wrapMockConn(conn)
+	_, shouldClose := server.routeMessage(ctx, adapter, rawMessage)
 
 	if !shouldClose {
 		t.Error("expected shouldClose=true for version mismatch")
@@ -600,6 +617,11 @@ func (m *mockSessionManager) Get(sessionID string) *session.UserSession {
 	return nil
 }
 
+func (m *mockSessionManager) List(filter *session.SessionFilter) []*session.UserSession {
+	// Mock implementation returns empty list - not used in unit tests
+	return nil
+}
+
 func (m *mockSessionManager) TerminateAgent(ctx context.Context, sessionID, role string) error {
 	if m.terminateAgentFunc != nil {
 		return m.terminateAgentFunc(ctx, sessionID, role)
@@ -702,7 +724,7 @@ func TestHandleAgentMessage_ParseError(t *testing.T) {
 	ctx := context.Background()
 	rawMessage := []byte(`{invalid json}`)
 
-	shouldClose := server.handleAgentMessage(ctx, conn, rawMessage)
+	shouldClose := server.handleAgentMessage(ctx, wrapMockConn(conn), rawMessage)
 
 	if shouldClose {
 		t.Error("expected shouldClose=false for recoverable parse error")
@@ -739,7 +761,7 @@ func TestHandleAgentMessage_MissingSessionID(t *testing.T) {
 	ctx := context.Background()
 	rawMessage := []byte(`{"version":"1.0","type":"agent:message","agentId":"test-agent","content":"hello"}`)
 
-	shouldClose := server.handleAgentMessage(ctx, conn, rawMessage)
+	shouldClose := server.handleAgentMessage(ctx, wrapMockConn(conn), rawMessage)
 
 	if shouldClose {
 		t.Error("expected shouldClose=false for validation error")
@@ -776,7 +798,7 @@ func TestHandleAgentMessage_SessionNotFound(t *testing.T) {
 	ctx := context.Background()
 	rawMessage := buildValidAgentMessageRequest()
 
-	shouldClose := server.handleAgentMessage(ctx, conn, rawMessage)
+	shouldClose := server.handleAgentMessage(ctx, wrapMockConn(conn), rawMessage)
 
 	if shouldClose {
 		t.Error("expected shouldClose=false even for non-recoverable session not found")
@@ -817,7 +839,7 @@ func TestHandleAgentMessage_AgentNotFound(t *testing.T) {
 	ctx := context.Background()
 	rawMessage := buildValidAgentMessageRequest()
 
-	shouldClose := server.handleAgentMessage(ctx, conn, rawMessage)
+	shouldClose := server.handleAgentMessage(ctx, wrapMockConn(conn), rawMessage)
 
 	if shouldClose {
 		t.Error("expected shouldClose=false")
@@ -936,7 +958,7 @@ func TestHandleAgentSpawn_ParseError(t *testing.T) {
 	ctx := context.Background()
 	rawMessage := []byte(`{invalid json}`)
 
-	shouldClose := server.handleAgentSpawn(ctx, conn, rawMessage)
+	shouldClose := server.handleAgentSpawn(ctx, wrapMockConn(conn), rawMessage)
 
 	if shouldClose {
 		t.Error("expected shouldClose=false")
@@ -972,7 +994,7 @@ func TestHandleAgentSpawn_MissingWorkspace(t *testing.T) {
 	ctx := context.Background()
 	rawMessage := []byte(`{"version":"1.0","type":"agent:spawn","userSessionId":"test-session","agentId":"test-agent"}`)
 
-	shouldClose := server.handleAgentSpawn(ctx, conn, rawMessage)
+	shouldClose := server.handleAgentSpawn(ctx, wrapMockConn(conn), rawMessage)
 
 	if shouldClose {
 		t.Error("expected shouldClose=false")
@@ -1009,7 +1031,7 @@ func TestHandleAgentSpawn_SessionNotFound(t *testing.T) {
 	ctx := context.Background()
 	rawMessage := buildValidAgentSpawnMessage()
 
-	shouldClose := server.handleAgentSpawn(ctx, conn, rawMessage)
+	shouldClose := server.handleAgentSpawn(ctx, wrapMockConn(conn), rawMessage)
 
 	// After issues #219 and #215 fix, we keep connection open even for non-recoverable errors
 	// This allows client to create missing resources

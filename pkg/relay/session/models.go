@@ -78,10 +78,12 @@ type Message struct {
 // Immutable after creation except for state transitions through Manager
 type AgentSession struct {
 	// Immutable fields (set at creation, never modified)
-	AgentID   string    // User-chosen agent identifier (e.g., "coder-1", "analyzer")
-	Workspace string    // Path to agent workspace directory
-	createdAt time.Time // Agent creation timestamp
-	expiresAt time.Time // Lease expiration timestamp
+	AgentID     string    // User-chosen agent identifier (e.g., "coder-1", "analyzer")
+	Workspace   string    // Path to agent workspace directory
+	ContainerID string    // Docker container ID (empty for host-mode agents)
+	IsAdopted   bool      // True if agent was adopted (vs spawned by relay)
+	createdAt   time.Time // Agent creation timestamp
+	expiresAt   time.Time // Lease expiration timestamp
 
 	// Mutable fields (protected by mu)
 	state      AgentState
@@ -210,6 +212,13 @@ func (u *UserSession) ListAgents() map[string]*AgentSession {
 	return agents
 }
 
+// AgentCount returns the number of agents in this session
+func (u *UserSession) AgentCount() int {
+	u.mu.RLock()
+	defer u.mu.RUnlock()
+	return len(u.agents)
+}
+
 // GetCreatedAt returns the session creation timestamp (immutable, no lock needed)
 func (u *UserSession) GetCreatedAt() time.Time {
 	return u.createdAt
@@ -302,30 +311,34 @@ func (a *AgentSession) GetHistory() []Message {
 // Phase 4: Requires a valid attach token for security.
 // The token must match the one generated during agent spawn.
 func (u *UserSession) AttachAgent(agentID string, workspace string, attachToken string) (*AgentSession, error) {
+	// Phase 1: Quick check under lock for idempotency
 	u.mu.Lock()
-	defer u.mu.Unlock()
-
-	// Check if already attached to this session (idempotent)
 	if existing, ok := u.agents[agentID]; ok {
+		u.mu.Unlock()
 		// Audit: Successful idempotent attach
 		audit.LogAgentAttach(u.ID, agentID, true, nil)
 		return existing, nil
 	}
+	userID := u.ID // Capture for use outside lock
+	u.mu.Unlock()
+
+	// Phase 2: All I/O operations WITHOUT holding the lock
+	// This prevents blocking other goroutines during slow operations
 
 	// Verify attach token BEFORE acquiring lease (Phase 4: Security)
 	if err := verifyAttachToken(agentID, attachToken); err != nil {
 		// Audit: Token verification failure
-		audit.LogAuthFailure(u.ID, agentID, err.Error(), map[string]string{
+		audit.LogAuthFailure(userID, agentID, err.Error(), map[string]string{
 			"operation": "attach",
 		})
 		return nil, err
 	}
 
 	// Try to acquire lease (this is atomic via O_EXCL)
-	lease, err := AcquireLease(agentID, u.ID)
+	lease, err := AcquireLease(agentID, userID)
 	if err != nil {
 		// Audit: Lease acquisition failure
-		audit.LogAgentAttach(u.ID, agentID, false, err)
+		audit.LogAgentAttach(userID, agentID, false, err)
 		return nil, err // ErrAlreadyAttached if taken by another session
 	}
 
@@ -335,7 +348,7 @@ func (u *UserSession) AttachAgent(agentID string, workspace string, attachToken 
 		// Release lease if we can't find the container
 		_ = ReleaseLease(agentID)
 		// Audit: Container discovery failure
-		audit.LogAgentAttach(u.ID, agentID, false, fmt.Errorf("failed to find agent container: %w", err))
+		audit.LogAgentAttach(userID, agentID, false, fmt.Errorf("failed to find agent container: %w", err))
 		return nil, fmt.Errorf("failed to find agent container: %w", err)
 	}
 
@@ -350,27 +363,43 @@ func (u *UserSession) AttachAgent(agentID string, workspace string, attachToken 
 		// Release lease if bridge creation fails
 		_ = ReleaseLease(agentID)
 		// Audit: ACP bridge creation failure
-		audit.LogAgentAttach(u.ID, agentID, false, fmt.Errorf("failed to create ACP bridge: %w", err))
+		audit.LogAgentAttach(userID, agentID, false, fmt.Errorf("failed to create ACP bridge: %w", err))
 		return nil, fmt.Errorf("failed to create ACP bridge: %w", err)
+	}
+
+	// Phase 3: Re-acquire lock for state mutation only
+	u.mu.Lock()
+	defer u.mu.Unlock()
+
+	// Double-check: another goroutine may have attached while we were doing I/O
+	if existing, ok := u.agents[agentID]; ok {
+		// Clean up our work - another goroutine won the race
+		_ = bridge.Close(context.Background())
+		_ = ReleaseLease(agentID)
+		// Audit: Successful idempotent attach
+		audit.LogAgentAttach(userID, agentID, true, nil)
+		return existing, nil
 	}
 
 	// Create AgentSession for this CLI agent
 	agent := &AgentSession{
-		AgentID:    agentID,
-		Workspace:  workspace,
-		createdAt:  lease.AttachedAt,
-		expiresAt:  lease.ExpiresAt,
-		state:      AgentActive, // CLI agent is already running
-		lastActive: time.Now(),
-		history:    []Message{},
-		acpClient:  bridge, // Phase 3: ACP bridge for communication
+		AgentID:     agentID,
+		Workspace:   workspace,
+		ContainerID: containerID, // Track container for termination
+		IsAdopted:   true,        // Mark as adopted (not spawned by relay)
+		createdAt:   lease.AttachedAt,
+		expiresAt:   lease.ExpiresAt,
+		state:       AgentActive, // CLI agent is already running
+		lastActive:  time.Now(),
+		history:     []Message{},
+		acpClient:   bridge, // Phase 3: ACP bridge for communication
 	}
 
 	u.agents[agentID] = agent
 	u.lastActive = time.Now()
 
 	// Audit: Successful agent attachment
-	audit.LogAgentAttach(u.ID, agentID, true, nil)
+	audit.LogAgentAttach(userID, agentID, true, nil)
 
 	return agent, nil
 }
@@ -379,36 +408,43 @@ func (u *UserSession) AttachAgent(agentID string, workspace string, attachToken 
 // The agent container continues running but is no longer associated with this session.
 // This operation is idempotent - calling it multiple times has no effect.
 func (u *UserSession) DetachAgent(agentID string) error {
+	// Phase 1: Quick check and extract under lock
 	u.mu.Lock()
-	defer u.mu.Unlock()
-
-	// Check if agent is attached to this session
 	agent, ok := u.agents[agentID]
 	if !ok {
+		userID := u.ID
+		u.mu.Unlock()
 		// Already detached - idempotent
 		// Audit: Successful idempotent detach
-		audit.LogAgentDetach(u.ID, agentID, true, nil)
+		audit.LogAgentDetach(userID, agentID, true, nil)
 		return nil
 	}
+	// Remove from map immediately to prevent double-detach races
+	delete(u.agents, agentID)
+	u.lastActive = time.Now()
+	userID := u.ID
+	acpClient := agent.acpClient
+	u.mu.Unlock()
+
+	// Phase 2: All I/O operations WITHOUT holding the lock
+	// This prevents blocking other goroutines during slow operations
 
 	// Close ACP bridge (Phase 3)
-	if agent.acpClient != nil {
-		_ = agent.acpClient.Close(context.Background())
+	if acpClient != nil {
+		_ = acpClient.Close(context.Background())
 	}
 
 	// Release lease (idempotent operation)
 	if err := ReleaseLease(agentID); err != nil {
 		// Audit: Lease release failure
-		audit.LogAgentDetach(u.ID, agentID, false, err)
+		// Note: We've already removed from map, so this is a partial failure
+		// The agent is effectively detached from this session but lease may be orphaned
+		audit.LogAgentDetach(userID, agentID, false, err)
 		return err
 	}
 
-	// Remove from session's agent map
-	delete(u.agents, agentID)
-	u.lastActive = time.Now()
-
 	// Audit: Successful agent detachment
-	audit.LogAgentDetach(u.ID, agentID, true, nil)
+	audit.LogAgentDetach(userID, agentID, true, nil)
 
 	// Note: Don't terminate the agent container, it continues running detached
 

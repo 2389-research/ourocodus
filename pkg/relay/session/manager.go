@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/2389-research/ourocodus/pkg/agent"
+	"github.com/2389-research/ourocodus/pkg/labels"
 	"github.com/2389-research/ourocodus/pkg/runtime"
 )
 
@@ -246,6 +247,18 @@ func (m *Manager) SpawnAgent(ctx context.Context, userSessionID, agentID, worksp
 	userSession.setLastActive(now)
 	userSession.mu.Unlock()
 
+	// Acquire lease for this agent (makes it visible in agentd list as attached)
+	lease, err := AcquireLease(agentID, userSessionID)
+	if err != nil {
+		// Rollback: remove agent from session
+		userSession.mu.Lock()
+		userSession.removeAgent(agentID)
+		userSession.mu.Unlock()
+		m.logger.Printf("[SESSION] ✗ Failed to acquire lease for agent %s: %v", agentID, err)
+		return fmt.Errorf("failed to acquire lease: %w", err)
+	}
+	m.logger.Printf("[SESSION] ✓ Acquired lease for agent %s (expires: %s)", agentID, lease.ExpiresAt.Format("15:04:05"))
+
 	// Create launcher ONLY in container mode
 	var handle agent.AgentHandle
 	if m.isContainerModeEnabled() {
@@ -281,6 +294,9 @@ func (m *Manager) SpawnAgent(ctx context.Context, userSessionID, agentID, worksp
 			agentSession.setError(err.Error())
 			agentSession.mu.Unlock()
 
+			// Release lease on failure
+			_ = ReleaseLease(agentID)
+
 			m.logger.Printf("[SESSION] ✗ Failed to create launcher: %v", err)
 			return fmt.Errorf("failed to create launcher: %w", err)
 		}
@@ -293,6 +309,7 @@ func (m *Manager) SpawnAgent(ctx context.Context, userSessionID, agentID, worksp
 			Image:     launcherConfig.ImageName,
 			Command:   launcherConfig.Command,
 			Workspace: absPath,
+			Labels:    labels.Standard(agentID, absPath, "relay"),
 		}
 
 		handle, err = launcher.Spawn(ctx, spawnConfig)
@@ -302,6 +319,9 @@ func (m *Manager) SpawnAgent(ctx context.Context, userSessionID, agentID, worksp
 			agentSession.setAgentState(AgentFailed)
 			agentSession.setError(err.Error())
 			agentSession.mu.Unlock()
+
+			// Release lease on failure
+			_ = ReleaseLease(agentID)
 
 			m.logger.Printf("[SESSION] ✗ Container spawn failed: %v", err)
 			return fmt.Errorf("failed to spawn agent: %w", err)
@@ -341,6 +361,9 @@ func (m *Manager) SpawnAgent(ctx context.Context, userSessionID, agentID, worksp
 			m.logger.Printf("[SESSION] ├─ Container/launcher cleanup failed after ACP client creation failure")
 		}
 
+		// Release lease on failure
+		_ = ReleaseLease(agentID)
+
 		// Mark agent as FAILED
 		agentSession.mu.Lock()
 		agentSession.setAgentState(AgentFailed)
@@ -359,6 +382,9 @@ func (m *Manager) SpawnAgent(ctx context.Context, userSessionID, agentID, worksp
 	agentSession.mu.Unlock()
 
 	m.logger.Printf("[SESSION] ✓ Agent '%s' is now ACTIVE (session: %s)", agentID, userSessionID)
+
+	// Note: Lease renewal is triggered by meaningful interaction (user messages),
+	// not by a timer. See server.handleAgentMessage for renewal on message exchange.
 
 	// Publish agent.spawned event (synchronous, errors logged but non-fatal)
 	if m.publisher != nil {
@@ -450,6 +476,14 @@ func (m *Manager) TerminateAgent(ctx context.Context, userSessionID, agentID str
 	// Close ACP client safely with context (fixes Issue #212)
 	_ = CloseACPClientSafely(agent, ctx, m.logger, userSessionID, agentID)
 
+	// Security: Remove credentials from workspace (prevents key exposure in orphaned workspaces)
+	removeCredentialFile(agent.Workspace, m.logger)
+
+	// Release lease for this agent
+	if err := ReleaseLease(agentID); err != nil {
+		m.logger.Printf("[LEASE] Failed to release lease for agent %s: %v", agentID, err)
+	}
+
 	userSession.mu.Lock()
 	userSession.removeAgent(agentID)
 	userSession.setLastActive(m.clock.Now())
@@ -539,6 +573,14 @@ func (m *Manager) TerminateUserSession(ctx context.Context, userSessionID string
 					if StopCLISpawnedContainer(shutdownCtx, id, m.logger) {
 						failed = true
 					}
+				}
+
+				// Security: Remove credentials from workspace
+				removeCredentialFile(a.Workspace, m.logger)
+
+				// Release lease for this agent
+				if err := ReleaseLease(id); err != nil {
+					m.logger.Printf("[LEASE] Failed to release lease for agent %s: %v", id, err)
 				}
 
 				if failed {
@@ -642,4 +684,26 @@ func writeCredentialFile(workspace, apiKey string) error {
 	}
 
 	return nil
+}
+
+// removeCredentialFile removes .creds/ directory from workspace on agent termination
+// This ensures sensitive API keys are not left on disk after agent shutdown
+// Security: Credential cleanup prevents key exposure in orphaned workspaces
+func removeCredentialFile(workspace string, logger Logger) {
+	if workspace == "" {
+		return // No workspace to clean
+	}
+
+	credsDir := filepath.Join(workspace, ".creds")
+
+	// Check if directory exists before attempting removal
+	if _, err := os.Stat(credsDir); os.IsNotExist(err) {
+		return // Already cleaned or never created
+	}
+
+	if err := os.RemoveAll(credsDir); err != nil {
+		logger.Printf("[SECURITY] Warning: Failed to remove credentials directory %s: %v", credsDir, err)
+	} else {
+		logger.Printf("[SECURITY] Removed credentials directory: %s", credsDir)
+	}
 }

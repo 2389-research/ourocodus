@@ -75,11 +75,12 @@ type AgentDetachResponse struct {
 
 // handleAgentDiscover handles agent:discover messages
 // Returns true if connection should be closed
-func (s *Server) handleAgentDiscover(ctx context.Context, conn WebSocketConn, rawMessage []byte) bool {
+// Uses adapter for thread-safe writes (issue #213)
+func (s *Server) handleAgentDiscover(ctx context.Context, adapter *SessionWebSocketAdapter, rawMessage []byte) bool {
 	var req AgentDiscoverRequest
 	if err := json.Unmarshal(rawMessage, &req); err != nil {
 		s.logger.Printf("Failed to parse agent:discover message: %v", err)
-		return s.handleValidationError(conn, ValidationError{
+		return s.handleValidationError(adapter, ValidationError{
 			Code:        "INVALID_MESSAGE",
 			Message:     "Failed to parse agent:discover message",
 			Recoverable: true,
@@ -91,7 +92,7 @@ func (s *Server) handleAgentDiscover(ctx context.Context, conn WebSocketConn, ra
 	if err != nil {
 		s.logger.Printf("Failed to discover agents: %v", err)
 		errorMsg := NewErrorMessage("AGENT_DISCOVERY_FAILED", fmt.Sprintf("Failed to discover agents: %v", err), true)
-		if err := conn.WriteJSON(errorMsg); err != nil {
+		if err := adapter.WriteJSON(errorMsg); err != nil {
 			s.logger.Printf("Failed to send error response: %v", err)
 			return true
 		}
@@ -104,7 +105,7 @@ func (s *Server) handleAgentDiscover(ctx context.Context, conn WebSocketConn, ra
 		Agents: agents,
 	}
 
-	if err := conn.WriteJSON(resp); err != nil {
+	if err := adapter.WriteJSON(resp); err != nil {
 		s.logger.Printf("Failed to send agent:discovered response: %v", err)
 		return true
 	}
@@ -190,11 +191,12 @@ func (s *Server) discoverAgents(ctx context.Context) ([]AgentInfo, error) {
 
 // validateAttachRequest validates required fields for agent:attach
 // Returns true if connection should be closed
-func (s *Server) validateAttachRequest(conn WebSocketConn, req *AgentAttachRequest) bool {
+// Uses adapter for thread-safe writes (issue #213)
+func (s *Server) validateAttachRequest(adapter *SessionWebSocketAdapter, req *AgentAttachRequest) bool {
 	if req.AgentID == "" {
 		s.logger.Printf("agent:attach missing agentId")
 		errorMsg := NewErrorMessage("MISSING_AGENT_ID", "agentId is required", true)
-		if err := conn.WriteJSON(errorMsg); err != nil {
+		if err := adapter.WriteJSON(errorMsg); err != nil {
 			s.logger.Printf("Failed to send error response: %v", err)
 			return true
 		}
@@ -203,7 +205,7 @@ func (s *Server) validateAttachRequest(conn WebSocketConn, req *AgentAttachReque
 	if req.UserSessionID == "" {
 		s.logger.Printf("agent:attach missing userSessionId")
 		errorMsg := NewErrorMessage("MISSING_SESSION_ID", "userSessionId is required", true)
-		if err := conn.WriteJSON(errorMsg); err != nil {
+		if err := adapter.WriteJSON(errorMsg); err != nil {
 			s.logger.Printf("Failed to send error response: %v", err)
 			return true
 		}
@@ -214,7 +216,8 @@ func (s *Server) validateAttachRequest(conn WebSocketConn, req *AgentAttachReque
 
 // handleAlreadyAttachedError handles the case where agent is already attached
 // Returns true if connection should be closed
-func (s *Server) handleAlreadyAttachedError(conn WebSocketConn, req *AgentAttachRequest) bool {
+// Uses adapter for thread-safe writes (issue #213)
+func (s *Server) handleAlreadyAttachedError(adapter *SessionWebSocketAdapter, req *AgentAttachRequest) bool {
 	existingLease, readErr := session.ReadLease(req.AgentID)
 	if readErr == nil && existingLease.UserSessionID == req.UserSessionID {
 		// Already attached to this user - return success (idempotent)
@@ -224,7 +227,7 @@ func (s *Server) handleAlreadyAttachedError(conn WebSocketConn, req *AgentAttach
 			SessionID: req.UserSessionID,
 			ExpiresAt: existingLease.ExpiresAt,
 		}
-		if err := conn.WriteJSON(resp); err != nil {
+		if err := adapter.WriteJSON(resp); err != nil {
 			s.logger.Printf("Failed to send agent:attached response: %v", err)
 			return true
 		}
@@ -233,7 +236,7 @@ func (s *Server) handleAlreadyAttachedError(conn WebSocketConn, req *AgentAttach
 	// Attached to different user
 	s.logger.Printf("Agent %s already attached to session %s", req.AgentID, existingLease.UserSessionID)
 	errorMsg := NewErrorMessage("AGENT_ALREADY_ATTACHED", "Agent is already attached to another session", true)
-	if err := conn.WriteJSON(errorMsg); err != nil {
+	if err := adapter.WriteJSON(errorMsg); err != nil {
 		s.logger.Printf("Failed to send error response: %v", err)
 		return true
 	}
@@ -241,28 +244,30 @@ func (s *Server) handleAlreadyAttachedError(conn WebSocketConn, req *AgentAttach
 }
 
 // handleAttachError handles various attach errors and returns true if connection should close
-func (s *Server) handleAttachError(conn WebSocketConn, req *AgentAttachRequest, err error) bool {
+// Uses adapter for thread-safe writes (issue #213)
+func (s *Server) handleAttachError(adapter *SessionWebSocketAdapter, req *AgentAttachRequest, err error) bool {
 	// Handle specific error types
 	if err == session.ErrAlreadyAttached {
-		return s.handleAlreadyAttachedError(conn, req)
+		return s.handleAlreadyAttachedError(adapter, req)
 	}
 	if err == session.ErrMissingAttachToken {
 		s.logger.Printf("Attach token missing for agent %s", req.AgentID)
-		return s.sendErrorResponse(conn, "MISSING_TOKEN", "Attach token is required")
+		return s.sendErrorResponseAdapter(adapter, "MISSING_TOKEN", "Attach token is required")
 	}
 	if err == session.ErrInvalidAttachToken {
 		s.logger.Printf("Invalid attach token for agent %s", req.AgentID)
-		return s.sendErrorResponse(conn, "INVALID_TOKEN", "Invalid attach token")
+		return s.sendErrorResponseAdapter(adapter, "INVALID_TOKEN", "Invalid attach token")
 	}
 	// Generic attach failure
 	s.logger.Printf("Failed to attach agent %s to session %s: %v", req.AgentID, req.UserSessionID, err)
-	return s.sendErrorResponse(conn, "ATTACH_FAILED", fmt.Sprintf("Failed to attach agent: %v", err))
+	return s.sendErrorResponseAdapter(adapter, "ATTACH_FAILED", fmt.Sprintf("Failed to attach agent: %v", err))
 }
 
-// sendErrorResponse sends a recoverable error message and returns true if connection should close
-func (s *Server) sendErrorResponse(conn WebSocketConn, code, message string) bool {
+// sendErrorResponseAdapter sends a recoverable error message using adapter for thread-safe writes
+// Returns true if connection should close
+func (s *Server) sendErrorResponseAdapter(adapter *SessionWebSocketAdapter, code, message string) bool {
 	errorMsg := NewErrorMessage(code, message, true)
-	if err := conn.WriteJSON(errorMsg); err != nil {
+	if err := adapter.WriteJSON(errorMsg); err != nil {
 		s.logger.Printf("Failed to send error response: %v", err)
 		return true
 	}
@@ -271,11 +276,12 @@ func (s *Server) sendErrorResponse(conn WebSocketConn, code, message string) boo
 
 // handleAgentAttach handles agent:attach messages
 // Returns true if connection should be closed
-func (s *Server) handleAgentAttach(ctx context.Context, conn WebSocketConn, rawMessage []byte) bool {
+// Uses adapter for thread-safe writes (issue #213)
+func (s *Server) handleAgentAttach(ctx context.Context, adapter *SessionWebSocketAdapter, rawMessage []byte) bool {
 	var req AgentAttachRequest
 	if err := json.Unmarshal(rawMessage, &req); err != nil {
 		s.logger.Printf("Failed to parse agent:attach message: %v", err)
-		return s.handleValidationError(conn, ValidationError{
+		return s.handleValidationError(adapter, ValidationError{
 			Code:        "INVALID_MESSAGE",
 			Message:     "Failed to parse agent:attach message",
 			Recoverable: true,
@@ -283,34 +289,34 @@ func (s *Server) handleAgentAttach(ctx context.Context, conn WebSocketConn, rawM
 	}
 
 	// Validate required fields
-	if shouldClose := s.validateAttachRequest(conn, &req); shouldClose {
+	if shouldClose := s.validateAttachRequest(adapter, &req); shouldClose {
 		return shouldClose
 	}
 
 	// Phase 4: Rate limiting for attach operations
 	if !s.rateLimiter.Allow(req.UserSessionID) {
 		s.logger.Printf("Rate limit exceeded for user session %s on agent:attach", req.UserSessionID)
-		return s.sendErrorResponse(conn, "RATE_LIMIT_EXCEEDED", "Too many attach requests. Please wait before trying again.")
+		return s.sendErrorResponseAdapter(adapter, "RATE_LIMIT_EXCEEDED", "Too many attach requests. Please wait before trying again.")
 	}
 
 	// Get workspace path from Docker
 	workspace, err := s.getAgentWorkspace(ctx, req.AgentID)
 	if err != nil {
 		s.logger.Printf("Failed to get workspace for agent %s: %v", req.AgentID, err)
-		return s.sendErrorResponse(conn, "AGENT_NOT_FOUND", fmt.Sprintf("Agent %s not found or workspace unavailable", req.AgentID))
+		return s.sendErrorResponseAdapter(adapter, "AGENT_NOT_FOUND", fmt.Sprintf("Agent %s not found or workspace unavailable", req.AgentID))
 	}
 
 	// Get UserSession from session manager
 	userSession := s.sessionManager.Get(req.UserSessionID)
 	if userSession == nil {
 		s.logger.Printf("User session not found: %s", req.UserSessionID)
-		return s.sendErrorResponse(conn, "SESSION_NOT_FOUND", fmt.Sprintf("User session %s not found", req.UserSessionID))
+		return s.sendErrorResponseAdapter(adapter, "SESSION_NOT_FOUND", fmt.Sprintf("User session %s not found", req.UserSessionID))
 	}
 
 	// Attach agent to user session (Phase 4: with token verification)
 	agentSession, err := userSession.AttachAgent(req.AgentID, workspace, req.Token)
 	if err != nil {
-		return s.handleAttachError(conn, &req, err)
+		return s.handleAttachError(adapter, &req, err)
 	}
 
 	// Send success response
@@ -321,7 +327,7 @@ func (s *Server) handleAgentAttach(ctx context.Context, conn WebSocketConn, rawM
 		ExpiresAt: agentSession.GetExpiresAt(),
 	}
 
-	if err := conn.WriteJSON(resp); err != nil {
+	if err := adapter.WriteJSON(resp); err != nil {
 		s.logger.Printf("Failed to send agent:attached response: %v", err)
 		// Detach agent since we couldn't send the response
 		_ = userSession.DetachAgent(req.AgentID)
@@ -333,11 +339,12 @@ func (s *Server) handleAgentAttach(ctx context.Context, conn WebSocketConn, rawM
 
 // validateDetachRequest validates required fields for agent:detach
 // Returns true if connection should be closed
-func (s *Server) validateDetachRequest(conn WebSocketConn, req *AgentDetachRequest) bool {
+// Uses adapter for thread-safe writes (issue #213)
+func (s *Server) validateDetachRequest(adapter *SessionWebSocketAdapter, req *AgentDetachRequest) bool {
 	if req.AgentID == "" {
 		s.logger.Printf("agent:detach missing agentId")
 		errorMsg := NewErrorMessage("MISSING_AGENT_ID", "agentId is required", true)
-		if err := conn.WriteJSON(errorMsg); err != nil {
+		if err := adapter.WriteJSON(errorMsg); err != nil {
 			s.logger.Printf("Failed to send error response: %v", err)
 			return true
 		}
@@ -346,7 +353,7 @@ func (s *Server) validateDetachRequest(conn WebSocketConn, req *AgentDetachReque
 	if req.UserSessionID == "" {
 		s.logger.Printf("agent:detach missing userSessionId")
 		errorMsg := NewErrorMessage("MISSING_SESSION_ID", "userSessionId is required", true)
-		if err := conn.WriteJSON(errorMsg); err != nil {
+		if err := adapter.WriteJSON(errorMsg); err != nil {
 			s.logger.Printf("Failed to send error response: %v", err)
 			return true
 		}
@@ -357,14 +364,15 @@ func (s *Server) validateDetachRequest(conn WebSocketConn, req *AgentDetachReque
 
 // checkDetachOwnership checks if agent can be detached by this session
 // Returns (shouldClose, handled) - if handled is true, response was already sent
-func (s *Server) checkDetachOwnership(conn WebSocketConn, req *AgentDetachRequest, agent *session.AgentSession) (bool, bool) {
+// Uses adapter for thread-safe writes (issue #213)
+func (s *Server) checkDetachOwnership(adapter *SessionWebSocketAdapter, req *AgentDetachRequest, agent *session.AgentSession) (bool, bool) {
 	if agent == nil {
 		// Check if it's attached to a different session
 		lease, err := session.ReadLease(req.AgentID)
 		if err == nil && lease.UserSessionID != req.UserSessionID {
 			s.logger.Printf("Agent %s is attached to session %s, not %s", req.AgentID, lease.UserSessionID, req.UserSessionID)
 			errorMsg := NewErrorMessage("NOT_ATTACHED_TO_YOU", "Agent is not attached to your session", true)
-			if err := conn.WriteJSON(errorMsg); err != nil {
+			if err := adapter.WriteJSON(errorMsg); err != nil {
 				s.logger.Printf("Failed to send error response: %v", err)
 				return true, true
 			}
@@ -375,7 +383,7 @@ func (s *Server) checkDetachOwnership(conn WebSocketConn, req *AgentDetachReques
 			Type:    "agent:detached",
 			AgentID: req.AgentID,
 		}
-		if err := conn.WriteJSON(resp); err != nil {
+		if err := adapter.WriteJSON(resp); err != nil {
 			s.logger.Printf("Failed to send agent:detached response: %v", err)
 			return true, true
 		}
@@ -386,13 +394,14 @@ func (s *Server) checkDetachOwnership(conn WebSocketConn, req *AgentDetachReques
 
 // handleAgentDetach handles agent:detach messages
 // Returns true if connection should be closed
+// Uses adapter for thread-safe writes (issue #213)
 //
 //nolint:unparam // ctx parameter required by handler interface, may be used in future
-func (s *Server) handleAgentDetach(ctx context.Context, conn WebSocketConn, rawMessage []byte) bool {
+func (s *Server) handleAgentDetach(ctx context.Context, adapter *SessionWebSocketAdapter, rawMessage []byte) bool {
 	var req AgentDetachRequest
 	if err := json.Unmarshal(rawMessage, &req); err != nil {
 		s.logger.Printf("Failed to parse agent:detach message: %v", err)
-		return s.handleValidationError(conn, ValidationError{
+		return s.handleValidationError(adapter, ValidationError{
 			Code:        "INVALID_MESSAGE",
 			Message:     "Failed to parse agent:detach message",
 			Recoverable: true,
@@ -400,7 +409,7 @@ func (s *Server) handleAgentDetach(ctx context.Context, conn WebSocketConn, rawM
 	}
 
 	// Validate required fields
-	if shouldClose := s.validateDetachRequest(conn, &req); shouldClose {
+	if shouldClose := s.validateDetachRequest(adapter, &req); shouldClose {
 		return shouldClose
 	}
 
@@ -409,7 +418,7 @@ func (s *Server) handleAgentDetach(ctx context.Context, conn WebSocketConn, rawM
 	if userSession == nil {
 		s.logger.Printf("User session not found: %s", req.UserSessionID)
 		errorMsg := NewErrorMessage("SESSION_NOT_FOUND", fmt.Sprintf("User session %s not found", req.UserSessionID), true)
-		if err := conn.WriteJSON(errorMsg); err != nil {
+		if err := adapter.WriteJSON(errorMsg); err != nil {
 			s.logger.Printf("Failed to send error response: %v", err)
 			return true
 		}
@@ -418,7 +427,7 @@ func (s *Server) handleAgentDetach(ctx context.Context, conn WebSocketConn, rawM
 
 	// Check if agent is attached to this session before detaching
 	agent := userSession.GetAgent(req.AgentID)
-	if shouldClose, handled := s.checkDetachOwnership(conn, &req, agent); handled {
+	if shouldClose, handled := s.checkDetachOwnership(adapter, &req, agent); handled {
 		return shouldClose
 	}
 
@@ -426,7 +435,7 @@ func (s *Server) handleAgentDetach(ctx context.Context, conn WebSocketConn, rawM
 	if err := userSession.DetachAgent(req.AgentID); err != nil {
 		s.logger.Printf("Failed to detach agent %s from session %s: %v", req.AgentID, req.UserSessionID, err)
 		errorMsg := NewErrorMessage("DETACH_FAILED", fmt.Sprintf("Failed to detach agent: %v", err), true)
-		if err := conn.WriteJSON(errorMsg); err != nil {
+		if err := adapter.WriteJSON(errorMsg); err != nil {
 			s.logger.Printf("Failed to send error response: %v", err)
 			return true
 		}
@@ -439,7 +448,7 @@ func (s *Server) handleAgentDetach(ctx context.Context, conn WebSocketConn, rawM
 		AgentID: req.AgentID,
 	}
 
-	if err := conn.WriteJSON(resp); err != nil {
+	if err := adapter.WriteJSON(resp); err != nil {
 		s.logger.Printf("Failed to send agent:detached response: %v", err)
 		return true
 	}
