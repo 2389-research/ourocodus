@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -11,12 +12,19 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/2389-research/ourocodus/cmd/agentd/internal/detect"
+	"github.com/2389-research/ourocodus/cmd/agentd/internal/output"
 	doctortui "github.com/2389-research/ourocodus/cmd/agentd/internal/tui/doctor"
 	"github.com/2389-research/ourocodus/pkg/tui/theme"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/docker/docker/api/types/container"
 	"github.com/spf13/cobra"
+)
+
+var (
+	doctorJSON  bool
+	doctorPlain bool
 )
 
 var doctorCmd = &cobra.Command{
@@ -39,6 +47,11 @@ Run this before spawning agents to catch configuration issues early.`,
   # - After Docker Desktop updates
   # - Debugging spawn failures`,
 	RunE: runDoctor,
+}
+
+func init() {
+	doctorCmd.Flags().BoolVar(&doctorJSON, "json", false, "Output in JSON format")
+	doctorCmd.Flags().BoolVar(&doctorPlain, "plain", false, "Output in plain text (no colors)")
 }
 
 type Check struct {
@@ -79,8 +92,15 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 		{"Spawn smoke test", checkSpawnSmokeTest},
 	}
 
-	// Use TUI
-	return runDoctorTUI(ctx, checks)
+	// Detect output mode
+	shouldPlain := detect.ShouldUsePlainMode(doctorJSON, doctorPlain, os.Environ)
+	mode := output.DetectMode(doctorJSON, doctorPlain, shouldPlain)
+
+	// Use TUI for rich mode, legacy for others
+	if mode.IsRich() {
+		return runDoctorTUI(ctx, checks)
+	}
+	return runDoctorLegacy(ctx, checks, mode)
 }
 
 // runDoctorTUI runs the doctor command with a Bubble Tea TUI.
@@ -130,6 +150,80 @@ func runDoctorTUI(ctx context.Context, checks []Check) error {
 
 	// Get result
 	allPassed := <-resultCh
+	if !allPassed {
+		return fmt.Errorf("environment validation failed")
+	}
+
+	return nil
+}
+
+// DoctorResult represents a single check result for JSON output.
+type DoctorResult struct {
+	Name    string `json:"name"`
+	Status  string `json:"status"` // "passed", "skipped", "failed"
+	Message string `json:"message,omitempty"`
+	Error   string `json:"error,omitempty"`
+}
+
+// DoctorResults represents all doctor results for JSON output.
+type DoctorResults struct {
+	Results []DoctorResult `json:"results"`
+	Success bool           `json:"success"`
+}
+
+// runDoctorLegacy runs doctor checks without TUI (for JSON/plain mode).
+func runDoctorLegacy(ctx context.Context, checks []Check, mode output.Mode) error {
+	results := make([]DoctorResult, 0, len(checks))
+	allPassed := true
+
+	for _, check := range checks {
+		result := DoctorResult{Name: check.Name}
+
+		msg, err := check.Run(ctx)
+		if err != nil {
+			errStr := err.Error()
+			if strings.Contains(strings.ToLower(errStr), "skip") {
+				result.Status = "skipped"
+				result.Message = msg
+				if !mode.IsJSON() {
+					fmt.Printf("⊘ %s (%s)\n", check.Name, msg)
+				}
+			} else {
+				result.Status = "failed"
+				result.Error = errStr
+				allPassed = false
+				if !mode.IsJSON() {
+					printError(fmt.Sprintf("%s: %s", check.Name, errStr))
+				}
+			}
+		} else {
+			result.Status = "passed"
+			result.Message = msg
+			if !mode.IsJSON() {
+				if msg != "" {
+					printSuccess(fmt.Sprintf("%s (%s)", check.Name, msg))
+				} else {
+					printSuccess(check.Name)
+				}
+			}
+		}
+		results = append(results, result)
+	}
+
+	if mode.IsJSON() {
+		encoder := json.NewEncoder(os.Stdout)
+		encoder.SetIndent("", "  ")
+		_ = encoder.Encode(DoctorResults{
+			Results: results,
+			Success: allPassed,
+		})
+	} else {
+		fmt.Println()
+		if allPassed {
+			fmt.Println("Environment ready! All systems go for spawning agents.")
+		}
+	}
+
 	if !allPassed {
 		return fmt.Errorf("environment validation failed")
 	}

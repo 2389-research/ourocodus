@@ -39,8 +39,9 @@ func TestCLI_DoctorCommand(t *testing.T) {
 	}
 
 	outputStr := string(output)
-	if !strings.Contains(outputStr, "Docker daemon running") {
-		t.Errorf("Doctor output missing 'Docker daemon running': %s", outputStr)
+	// Doctor check passes and shows version info like "Docker daemon (v27.4.0)"
+	if !strings.Contains(outputStr, "Docker daemon") {
+		t.Errorf("Doctor output missing 'Docker daemon': %s", outputStr)
 	}
 }
 
@@ -144,7 +145,8 @@ func TestCLI_SpawnListStopWorkflow(t *testing.T) {
 		if !strings.Contains(outputStr, "Stopped container") {
 			t.Errorf("Stop output missing 'Stopped container': %s", outputStr)
 		}
-		if !strings.Contains(outputStr, "Cleaned up agent resources") {
+		// Output format is "Agent <id> stopped and cleaned up"
+		if !strings.Contains(outputStr, "stopped and cleaned up") {
 			t.Errorf("Stop output missing cleanup message: %s", outputStr)
 		}
 	})

@@ -8,7 +8,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/2389-research/ourocodus/cmd/agentd/internal/theme"
+	"github.com/2389-research/ourocodus/pkg/tui/theme"
 	"github.com/2389-research/ourocodus/pkg/acp"
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"

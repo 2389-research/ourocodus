@@ -10,7 +10,7 @@ import (
 
 	"github.com/2389-research/ourocodus/cmd/agentd/internal/detect"
 	"github.com/2389-research/ourocodus/cmd/agentd/internal/output"
-	"github.com/2389-research/ourocodus/cmd/agentd/internal/theme"
+	"github.com/2389-research/ourocodus/pkg/tui/theme"
 	"github.com/charmbracelet/bubbles/table"
 	"github.com/charmbracelet/lipgloss"
 )

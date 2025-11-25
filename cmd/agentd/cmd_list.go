@@ -9,7 +9,7 @@ import (
 	"github.com/2389-research/ourocodus/cmd/agentd/internal/detect"
 	"github.com/2389-research/ourocodus/cmd/agentd/internal/output"
 	"github.com/2389-research/ourocodus/cmd/agentd/internal/render"
-	"github.com/2389-research/ourocodus/cmd/agentd/internal/theme"
+	"github.com/2389-research/ourocodus/pkg/tui/theme"
 	uilist "github.com/2389-research/ourocodus/cmd/agentd/internal/tui/list"
 	"github.com/2389-research/ourocodus/pkg/labels"
 	"github.com/2389-research/ourocodus/pkg/relay/session"

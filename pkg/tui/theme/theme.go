@@ -65,6 +65,19 @@ func Default() *Theme {
 	return New(PaletteCGA)
 }
 
+// RetroTheme is an alias for Theme for backward compatibility.
+type RetroTheme = Theme
+
+// NewRetroTheme is an alias for New for backward compatibility.
+func NewRetroTheme(palette PaletteName) *Theme {
+	return New(palette)
+}
+
+// DefaultTheme is an alias for Default for backward compatibility.
+func DefaultTheme() *Theme {
+	return Default()
+}
+
 // New creates a new theme with the specified palette.
 func New(palette PaletteName) *Theme {
 	th := &Theme{

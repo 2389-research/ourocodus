@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/2389-research/ourocodus/cmd/agentd/internal/theme"
+	"github.com/2389-research/ourocodus/pkg/tui/theme"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 )
