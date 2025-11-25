@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"os"
 	"sync"
 	"sync/atomic"
 
@@ -30,6 +29,7 @@ import (
 type ACPBridge struct {
 	containerID string
 	agentID     string
+	logger      Logger // Optional logger for diagnostics
 
 	// Docker hijacked connection for writes
 	conn net.Conn
@@ -52,6 +52,9 @@ type ACPBridge struct {
 	closed atomic.Bool
 	wg     sync.WaitGroup // Tracks background goroutines (readLoop, logStderr, demux)
 
+	// Request ID generation (per-bridge counter for isolation)
+	reqCounter atomic.Uint64
+
 	// Optional: notifications channel for agent-initiated messages
 	notifCh chan []byte
 }
@@ -70,8 +73,9 @@ type pendingReq struct {
 // - Continuously read and parse JSON-RPC responses from stdout
 // - Log stderr output from the agent
 //
+// The logger parameter is optional (may be nil) and used for diagnostic output.
 // The bridge must be closed via Close() when done to release resources.
-func NewACPBridge(ctx context.Context, containerID, agentID string) (*ACPBridge, error) {
+func NewACPBridge(ctx context.Context, containerID, agentID string, logger Logger) (*ACPBridge, error) {
 	// Validate input parameters
 	if err := ValidateNonEmpty(containerID, fmt.Errorf("containerID cannot be empty")); err != nil {
 		return nil, err
@@ -105,6 +109,7 @@ func NewACPBridge(ctx context.Context, containerID, agentID string) (*ACPBridge,
 	bridge := &ACPBridge{
 		containerID: containerID,
 		agentID:     agentID,
+		logger:      logger,
 		conn:        attachResp.Conn,
 		ctx:         bridgeCtx,
 		cancel:      cancel,
@@ -170,13 +175,9 @@ func NewACPBridge(ctx context.Context, containerID, agentID string) (*ACPBridge,
 // The context is used for timeout/cancellation. If the context is canceled before
 // the response arrives, the pending request is marked as canceled and the eventual
 // late response will be discarded to prevent misalignment with future requests.
-//
-// Returns *acp.AgentMessage to match the ACPClient interface contract expected by
-// pkg/relay/server.go. The server performs a type assertion to *acp.AgentMessage,
-// so returning the raw interface{} would cause AGENT_MESSAGE_FAILED errors.
-func (b *ACPBridge) SendMessage(ctx context.Context, content string) (interface{}, error) {
+func (b *ACPBridge) SendMessage(ctx context.Context, content string) (*acp.AgentMessage, error) {
 	// Generate unique request ID
-	reqID := generateRequestID()
+	reqID := b.generateRequestID()
 
 	// Build ACP JSON-RPC request
 	// Note: ACP protocol uses "agent/sendMessage" method (see pkg/acp/types.go)
@@ -302,24 +303,13 @@ func (b *ACPBridge) readLoop() {
 		if !b.scan.Scan() {
 			// EOF or scanner error - check for scanner error first
 			if err := b.scan.Err(); err != nil {
-				// TODO: Use proper logger when available
-				fmt.Fprintf(os.Stderr, "[ACPBridge] Scanner error for agent %s: %v\n", b.agentID, err)
+				b.logf("[ACPBridge] Scanner error for agent %s: %v", b.agentID, err)
 			}
 
 			// Signal shutdown without waiting on wg to avoid self-deadlock
 			// Note: Cannot call Close() here as it waits on wg.Wait() which includes this goroutine
 			if b.closed.CompareAndSwap(false, true) {
-				b.cancel()
-				if b.conn != nil {
-					_ = b.conn.Close()
-				}
-				b.pendMu.Lock()
-				if b.pending != nil {
-					b.pending.canceled.Store(true)
-					close(b.pending.respCh)
-					b.pending = nil
-				}
-				b.pendMu.Unlock()
+				b.performShutdown()
 			}
 			return
 		}
@@ -366,9 +356,14 @@ func (b *ACPBridge) logStderr() {
 	defer b.wg.Done()
 	scanner := bufio.NewScanner(b.stderrR)
 	for scanner.Scan() {
-		// TODO: Use proper logger when available
-		// For now, stderr from agent is silently consumed
-		// In production, forward to relay logger with agentID context
+		b.logf("[ACPBridge] Agent %s stderr: %s", b.agentID, scanner.Text())
+	}
+}
+
+// logf logs a message using the bridge's logger if available.
+func (b *ACPBridge) logf(format string, v ...interface{}) {
+	if b.logger != nil {
+		b.logger.Printf(format, v...)
 	}
 }
 
@@ -381,14 +376,10 @@ func (b *ACPBridge) clearPendingOnError(pend *pendingReq) {
 	b.pendMu.Unlock()
 }
 
-// Close closes the ACP bridge and releases all resources.
-// This method is safe to call multiple times.
-// The provided context controls the grace period for goroutine shutdown.
-func (b *ACPBridge) Close(ctx context.Context) error {
-	if !b.closed.CompareAndSwap(false, true) {
-		return nil // Already closed
-	}
-
+// performShutdown executes the core shutdown sequence: cancel context, close connection,
+// and fail any pending request. This is shared between Close() and readLoop's EOF handling.
+// Caller must ensure this is only called once (via closed.CompareAndSwap or similar).
+func (b *ACPBridge) performShutdown() {
 	// Signal all goroutines to exit
 	b.cancel()
 
@@ -405,6 +396,17 @@ func (b *ACPBridge) Close(ctx context.Context) error {
 		b.pending = nil
 	}
 	b.pendMu.Unlock()
+}
+
+// Close closes the ACP bridge and releases all resources.
+// This method is safe to call multiple times.
+// The provided context controls the grace period for goroutine shutdown.
+func (b *ACPBridge) Close(ctx context.Context) error {
+	if !b.closed.CompareAndSwap(false, true) {
+		return nil // Already closed
+	}
+
+	b.performShutdown()
 
 	// Wait for all goroutines to exit with context timeout
 	done := make(chan struct{})
@@ -458,11 +460,7 @@ func extractJSONRPCID(data []byte) string {
 }
 
 // generateRequestID generates a unique request ID for JSON-RPC requests.
-func generateRequestID() string {
-	// Simple counter-based ID for now
-	// Could use UUID or other scheme if needed
-	// Note: Since requests are serialized, a simple counter is sufficient
-	return fmt.Sprintf("req-%d", requestCounter.Add(1))
+// Uses a per-bridge counter for isolation between bridge instances.
+func (b *ACPBridge) generateRequestID() string {
+	return fmt.Sprintf("req-%d", b.reqCounter.Add(1))
 }
-
-var requestCounter atomic.Uint64

@@ -1,11 +1,14 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 	"time"
 
+	"github.com/2389-research/ourocodus/cmd/agentd/internal/output"
 	"github.com/2389-research/ourocodus/pkg/relay/session"
+	"github.com/nats-io/nats.go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -148,4 +151,166 @@ func TestLeaseRenewalEventJSON(t *testing.T) {
 	assert.Equal(t, "session-abc123", raw["userSessionId"])
 	assert.Contains(t, raw, "expiresAt")
 	assert.Equal(t, 3600.5, raw["timeUntilExpiry"])
+}
+
+func TestDetectWatchOutputMode(t *testing.T) {
+	// Save original flag values
+	origJSON := watchJSON
+	origPlain := watchPlain
+	defer func() {
+		watchJSON = origJSON
+		watchPlain = origPlain
+	}()
+
+	tests := []struct {
+		name      string
+		jsonFlag  bool
+		plainFlag bool
+		want      string // Use string for comparison since output.Mode is internal
+	}{
+		{
+			name:      "JSON flag takes precedence",
+			jsonFlag:  true,
+			plainFlag: false,
+			want:      "json",
+		},
+		{
+			name:      "JSON flag takes precedence over plain",
+			jsonFlag:  true,
+			plainFlag: true,
+			want:      "json",
+		},
+		{
+			name:      "plain flag when no JSON",
+			jsonFlag:  false,
+			plainFlag: true,
+			want:      "plain",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			watchJSON = tt.jsonFlag
+			watchPlain = tt.plainFlag
+
+			mode := detectWatchOutputMode()
+
+			switch tt.want {
+			case "json":
+				assert.True(t, mode.IsJSON(), "expected JSON mode")
+			case "plain":
+				assert.True(t, mode.IsPlain(), "expected plain mode")
+			case "rich":
+				assert.True(t, mode.IsRich(), "expected rich mode")
+			}
+		})
+	}
+}
+
+func TestStartLogStreamer(t *testing.T) {
+	// Save original flag value
+	origWatchLogs := watchLogs
+	defer func() {
+		watchLogs = origWatchLogs
+	}()
+
+	t.Run("returns nil when watchLogs is false", func(t *testing.T) {
+		watchLogs = false
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		// Use JSON mode to prevent actual log streaming attempts
+		logCancel := startLogStreamer(ctx, "test-agent", output.ModeJSON)
+		assert.Nil(t, logCancel, "expected nil cancel func when watchLogs is false")
+	})
+
+	t.Run("returns cancel func when watchLogs is true", func(t *testing.T) {
+		watchLogs = true
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		// Use JSON mode - streamAgentLogs returns early for JSON mode
+		logCancel := startLogStreamer(ctx, "test-agent", output.ModeJSON)
+		assert.NotNil(t, logCancel, "expected non-nil cancel func when watchLogs is true")
+
+		// Clean up
+		logCancel()
+	})
+}
+
+func TestRunWatchEventLoop(t *testing.T) {
+	t.Run("exits on context cancellation", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+
+		msgChan := make(chan *nats.Msg, 1)
+		leaseChan := make(chan *session.Lease, 1)
+
+		done := make(chan struct{})
+		go func() {
+			runWatchEventLoop(ctx, output.ModeJSON, msgChan, leaseChan, nil)
+			close(done)
+		}()
+
+		// Cancel context
+		cancel()
+
+		// Should exit quickly
+		select {
+		case <-done:
+			// Success
+		case <-time.After(time.Second):
+			t.Fatal("event loop did not exit on context cancellation")
+		}
+	})
+
+	t.Run("calls logCancel on context cancellation", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+
+		msgChan := make(chan *nats.Msg, 1)
+		leaseChan := make(chan *session.Lease, 1)
+
+		logCancelCalled := false
+		logCancel := func() { logCancelCalled = true }
+
+		done := make(chan struct{})
+		go func() {
+			runWatchEventLoop(ctx, output.ModeJSON, msgChan, leaseChan, logCancel)
+			close(done)
+		}()
+
+		cancel()
+
+		select {
+		case <-done:
+			assert.True(t, logCancelCalled, "expected logCancel to be called")
+		case <-time.After(time.Second):
+			t.Fatal("event loop did not exit")
+		}
+	})
+
+	t.Run("processes lease changes", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		msgChan := make(chan *nats.Msg, 1)
+		leaseChan := make(chan *session.Lease, 1)
+
+		// Start event loop
+		go func() {
+			runWatchEventLoop(ctx, output.ModeJSON, msgChan, leaseChan, nil)
+		}()
+
+		// Send a lease change
+		leaseChan <- &session.Lease{
+			AgentID:       "test-agent",
+			UserSessionID: "test-session",
+			ExpiresAt:     time.Now().Add(time.Hour),
+		}
+
+		// Give time for processing
+		time.Sleep(50 * time.Millisecond)
+
+		// If we get here without panic, the lease was processed
+		// (output goes to stdout which we don't capture in this test)
+	})
 }

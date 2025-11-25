@@ -54,7 +54,7 @@ func TestACPBridge_Integration(t *testing.T) {
 
 	// Step 2: Create ACP bridge
 	t.Log("Step 2: Creating ACP bridge...")
-	bridge, err := session.NewACPBridge(ctx, containerID, agentID)
+	bridge, err := session.NewACPBridge(ctx, containerID, agentID, nil)
 	if err != nil {
 		t.Fatalf("Failed to create ACP bridge: %v", err)
 	}

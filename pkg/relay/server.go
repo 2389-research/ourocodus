@@ -9,7 +9,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/2389-research/ourocodus/pkg/acp"
 	"github.com/2389-research/ourocodus/pkg/relay/ratelimit"
 	"github.com/2389-research/ourocodus/pkg/relay/session"
 	"github.com/gorilla/websocket"
@@ -433,7 +432,7 @@ func (s *Server) handleAgentMessage(ctx context.Context, adapter *SessionWebSock
 	acpCtx, acpCancel := contextWithMaxTimeout(ctx, 30*time.Second)
 	defer acpCancel()
 
-	response, err := acpClient.SendMessage(acpCtx, msg.Content)
+	agentMsg, err := acpClient.SendMessage(acpCtx, msg.Content)
 	if err != nil {
 		s.logger.Printf("Agent message failed: %v", err)
 		return SendAgentMessageFailedError(adapter, s.logger, err)
@@ -442,13 +441,6 @@ func (s *Server) handleAgentMessage(ctx context.Context, adapter *SessionWebSock
 	s.logger.Printf("[RELAY] Agent response received: userSession=%s agentID=%s",
 		msg.UserSessionID, msg.AgentID)
 
-	// Type assert response to *acp.AgentMessage and extract content
-	agentMsg, ok := response.(*acp.AgentMessage)
-	if !ok {
-		s.logger.Printf("Invalid response type from agent: %T", response)
-		return SendErrorMessage(adapter, s.logger, "AGENT_MESSAGE_FAILED",
-			"Invalid response format from agent", true)
-	}
 	responseStr := agentMsg.Content
 
 	// Store both messages in history after successful ACP response

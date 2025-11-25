@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/2389-research/ourocodus/pkg/acp"
 	"github.com/2389-research/ourocodus/pkg/agent"
 )
 
@@ -94,11 +95,11 @@ func (m *mockWebSocket) WasClosed() bool {
 }
 
 type mockACPClient struct {
-	sendFunc  func(context.Context, string) (interface{}, error)
+	sendFunc  func(context.Context, string) (*acp.AgentMessage, error)
 	closeFunc func(context.Context) error
 }
 
-func (m *mockACPClient) SendMessage(ctx context.Context, content string) (interface{}, error) {
+func (m *mockACPClient) SendMessage(ctx context.Context, content string) (*acp.AgentMessage, error) {
 	if m.sendFunc != nil {
 		return m.sendFunc(ctx, content)
 	}

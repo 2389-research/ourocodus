@@ -161,6 +161,29 @@ func (m *Manager) List(filter *SessionFilter) []*UserSession {
 	return m.store.List(filter)
 }
 
+// markAgentFailed marks an agent as FAILED with the given error message.
+// Thread-safe: acquires agent lock internally.
+func markAgentFailed(agent *AgentSession, errMsg string) {
+	agent.mu.Lock()
+	agent.setAgentState(AgentFailed)
+	agent.setError(errMsg)
+	agent.mu.Unlock()
+}
+
+// spawnFailure handles common failure cleanup during agent spawn:
+// marks agent as FAILED, releases lease, and optionally cleans up container.
+// Returns the wrapped error for consistent error messaging.
+func (m *Manager) spawnFailure(ctx context.Context, agent *AgentSession, agentID, userSessionID, errMsg string, cleanupContainer bool) error {
+	markAgentFailed(agent, errMsg)
+	_ = ReleaseLease(agentID)
+	if cleanupContainer {
+		if StopContainerAndCleanupLauncher(ctx, m, userSessionID, agentID, m.logger) {
+			m.logger.Printf("[SESSION] ├─ Container/launcher cleanup failed")
+		}
+	}
+	return fmt.Errorf("%s", errMsg)
+}
+
 // SpawnAgent spawns ONE agent into an existing user session
 // Creates workspace directory if needed, spawns ACP client, adds to session
 // Returns error if spawn fails, but user session stays ACTIVE
@@ -288,17 +311,9 @@ func (m *Manager) SpawnAgent(ctx context.Context, userSessionID, agentID, worksp
 
 		launcher, err := m.launcherFactory.CreateLauncher(ctx, agentID, launcherConfig)
 		if err != nil {
-			// Mark agent as FAILED and cleanup
-			agentSession.mu.Lock()
-			agentSession.setAgentState(AgentFailed)
-			agentSession.setError(err.Error())
-			agentSession.mu.Unlock()
-
-			// Release lease on failure
-			_ = ReleaseLease(agentID)
-
 			m.logger.Printf("[SESSION] ✗ Failed to create launcher: %v", err)
-			return fmt.Errorf("failed to create launcher: %w", err)
+			return m.spawnFailure(ctx, agentSession, agentID, userSessionID,
+				fmt.Sprintf("failed to create launcher: %v", err), false)
 		}
 		m.logger.Printf("[SESSION] ✓ Launcher created successfully")
 
@@ -314,17 +329,9 @@ func (m *Manager) SpawnAgent(ctx context.Context, userSessionID, agentID, worksp
 
 		handle, err = launcher.Spawn(ctx, spawnConfig)
 		if err != nil {
-			// Mark agent as FAILED and cleanup
-			agentSession.mu.Lock()
-			agentSession.setAgentState(AgentFailed)
-			agentSession.setError(err.Error())
-			agentSession.mu.Unlock()
-
-			// Release lease on failure
-			_ = ReleaseLease(agentID)
-
 			m.logger.Printf("[SESSION] ✗ Container spawn failed: %v", err)
-			return fmt.Errorf("failed to spawn agent: %w", err)
+			return m.spawnFailure(ctx, agentSession, agentID, userSessionID,
+				fmt.Sprintf("failed to spawn agent: %v", err), false)
 		}
 		m.logger.Printf("[SESSION] ✓ Container spawned (id: %s)", handle.ContainerID())
 
@@ -355,22 +362,8 @@ func (m *Manager) SpawnAgent(ctx context.Context, userSessionID, agentID, worksp
 	acpClient, err := m.clientFactory.NewClient(ctx, runtimeCtx)
 	if err != nil {
 		m.logger.Printf("[SESSION] ✗ Failed to create ACP client: %v", err)
-
-		// Cleanup launcher on client creation failure (container mode only)
-		if StopContainerAndCleanupLauncher(ctx, m, userSessionID, agentID, m.logger) {
-			m.logger.Printf("[SESSION] ├─ Container/launcher cleanup failed after ACP client creation failure")
-		}
-
-		// Release lease on failure
-		_ = ReleaseLease(agentID)
-
-		// Mark agent as FAILED
-		agentSession.mu.Lock()
-		agentSession.setAgentState(AgentFailed)
-		agentSession.setError(err.Error())
-		agentSession.mu.Unlock()
-
-		return fmt.Errorf("failed to spawn ACP client: %w", err)
+		return m.spawnFailure(ctx, agentSession, agentID, userSessionID,
+			fmt.Sprintf("failed to spawn ACP client: %v", err), true)
 	}
 	m.logger.Printf("[SESSION] ✓ ACP client created successfully")
 
@@ -432,6 +425,60 @@ func (m *Manager) GetAgentHistory(userSessionID, agentID string) ([]Message, err
 	return agent.GetHistory(), nil
 }
 
+// terminateAgentInternal performs the core agent termination sequence:
+// 1. Close ACP client
+// 2. Stop container (if applicable)
+// 3. Remove credential files
+// 4. Release lease
+// Returns true if any operation failed (partial failure), false on success.
+// This is shared by TerminateAgent and TerminateUserSession.
+func (m *Manager) terminateAgentInternal(ctx context.Context, agent *AgentSession, userSessionID, agentID string) bool {
+	failed := false
+
+	// Close ACP client safely with context (fixes Issue #212)
+	if err := CloseACPClientSafely(agent, ctx, m.logger, userSessionID, agentID); err != nil {
+		failed = true
+	}
+
+	// Stop container - check if it's a relay-spawned or CLI-spawned agent
+	key := launcherKey(userSessionID, agentID)
+	m.launchersMu.RLock()
+	hasLauncher := m.launchers[key] != nil
+	m.launchersMu.RUnlock()
+
+	if hasLauncher {
+		// Relay-spawned agent with launcher: requires container mode to be enabled
+		if m.isContainerModeEnabled() {
+			if StopContainerAndCleanupLauncher(ctx, m, userSessionID, agentID, m.logger) {
+				m.logger.Printf("WARN: Failed to stop container and cleanup launcher: session=%s agentID=%s", userSessionID, agentID)
+				failed = true
+			}
+		} else {
+			// This should not happen (launcher exists but container mode disabled)
+			m.logger.Printf("WARN: Agent %s has launcher but container mode is disabled", agentID)
+		}
+	} else if agent.IsAdopted && agent.ContainerID != "" {
+		// CLI-spawned (attached) agent with known container: stop via Docker API
+		m.logger.Printf("[SESSION] Agent %s is CLI-spawned (adopted) - stopping via Docker API", agentID)
+		if StopCLISpawnedContainer(ctx, agentID, m.logger) {
+			m.logger.Printf("WARN: Failed to stop CLI-spawned container: agentID=%s", agentID)
+			failed = true
+		}
+	}
+	// else: adopted agent without containerID (unit test mock) - no container to stop
+	// else: relay-spawned agent without container mode (mock/test) - no container to stop
+
+	// Security: Remove credentials from workspace
+	removeCredentialFile(agent.Workspace, m.logger)
+
+	// Release lease for this agent
+	if err := ReleaseLease(agentID); err != nil {
+		m.logger.Printf("[LEASE] Failed to release lease for agent %s: %v", agentID, err)
+	}
+
+	return failed
+}
+
 // TerminateAgent terminates ONE agent in a user session
 // User session stays ACTIVE, other agents unaffected
 func (m *Manager) TerminateAgent(ctx context.Context, userSessionID, agentID string) error {
@@ -451,44 +498,8 @@ func (m *Manager) TerminateAgent(ctx context.Context, userSessionID, agentID str
 
 	m.logger.Printf("[SESSION] Terminating agent: session=%s agentID=%s", userSessionID, agentID)
 
-	// Stop container - check if it's a relay-spawned or CLI-spawned agent
-	// First check if this agent has a launcher (relay-spawned with container mode)
-	key := launcherKey(userSessionID, agentID)
-	m.launchersMu.RLock()
-	hasLauncher := m.launchers[key] != nil
-	m.launchersMu.RUnlock()
-
-	if hasLauncher {
-		// Relay-spawned agent with launcher: requires container mode to be enabled
-		if m.isContainerModeEnabled() {
-			if StopContainerAndCleanupLauncher(ctx, m, userSessionID, agentID, m.logger) {
-				m.logger.Printf("WARN: Failed to stop container and cleanup launcher: session=%s agentID=%s", userSessionID, agentID)
-			}
-		} else {
-			// This should not happen (launcher exists but container mode disabled)
-			m.logger.Printf("WARN: Agent %s has launcher but container mode is disabled", agentID)
-		}
-	} else if agent.IsAdopted && agent.ContainerID != "" {
-		// CLI-spawned (attached) agent with known container: stop via Docker API
-		// (does not depend on relay's container mode)
-		m.logger.Printf("[SESSION] Agent %s is CLI-spawned (adopted) - stopping via Docker API", agentID)
-		if StopCLISpawnedContainer(ctx, agentID, m.logger) {
-			m.logger.Printf("WARN: Failed to stop CLI-spawned container: agentID=%s", agentID)
-		}
-	}
-	// else: adopted agent without containerID (unit test mock), or
-	// relay-spawned agent without container mode (mock/test) - no container to stop
-
-	// Close ACP client safely with context (fixes Issue #212)
-	_ = CloseACPClientSafely(agent, ctx, m.logger, userSessionID, agentID)
-
-	// Security: Remove credentials from workspace (prevents key exposure in orphaned workspaces)
-	removeCredentialFile(agent.Workspace, m.logger)
-
-	// Release lease for this agent
-	if err := ReleaseLease(agentID); err != nil {
-		m.logger.Printf("[LEASE] Failed to release lease for agent %s: %v", agentID, err)
-	}
+	// Perform core termination sequence
+	_ = m.terminateAgentInternal(ctx, agent, userSessionID, agentID)
 
 	userSession.mu.Lock()
 	userSession.removeAgent(agentID)
@@ -543,55 +554,14 @@ func (m *Manager) TerminateUserSession(ctx context.Context, userSessionID string
 			wg.Add(1)
 			go func(id string, a *AgentSession) {
 				defer wg.Done()
-				failed := false
 
 				// CRITICAL P1 FIX: Create dedicated shutdown context independent of request context
 				// This ensures cleanup completes even if HTTP request times out (prevents zombie processes)
 				shutdownCtx, cancel := context.WithTimeout(context.Background(), agentTimeout)
 				defer cancel()
 
-				// Close ACP client safely with context (fixes Issue #212)
-				if err := CloseACPClientSafely(a, shutdownCtx, m.logger, userSessionID, id); err != nil {
-					failed = true
-				}
-
-				// Stop container - check if it's a relay-spawned or CLI-spawned agent
-				// First check if this agent has a launcher (relay-spawned with container mode)
-				key := launcherKey(userSessionID, id)
-				m.launchersMu.RLock()
-				hasLauncher := m.launchers[key] != nil
-				m.launchersMu.RUnlock()
-
-				if hasLauncher {
-					// Relay-spawned agent with launcher: requires container mode to be enabled
-					if m.isContainerModeEnabled() {
-						if StopContainerAndCleanupLauncher(shutdownCtx, m, userSessionID, id, m.logger) {
-							failed = true
-						}
-					} else {
-						// This should not happen (launcher exists but container mode disabled)
-						m.logger.Printf("WARN: Agent %s has launcher but container mode is disabled", id)
-					}
-				} else if a.IsAdopted && a.ContainerID != "" {
-					// CLI-spawned (attached) agent with known container: stop via Docker API
-					// (does not depend on relay's container mode)
-					m.logger.Printf("[SESSION] Agent %s is CLI-spawned (adopted) - stopping via Docker API", id)
-					if StopCLISpawnedContainer(shutdownCtx, id, m.logger) {
-						failed = true
-					}
-				}
-				// else: adopted agent without containerID (unit test mock) - no container to stop
-				// else: relay-spawned agent without container mode (mock/test) - no container to stop
-
-				// Security: Remove credentials from workspace
-				removeCredentialFile(a.Workspace, m.logger)
-
-				// Release lease for this agent
-				if err := ReleaseLease(id); err != nil {
-					m.logger.Printf("[LEASE] Failed to release lease for agent %s: %v", id, err)
-				}
-
-				if failed {
+				// Perform core termination sequence
+				if m.terminateAgentInternal(shutdownCtx, a, userSessionID, id) {
 					atomic.AddInt32(&agentFailures, 1)
 				} else {
 					atomic.AddInt32(&agentSuccesses, 1)

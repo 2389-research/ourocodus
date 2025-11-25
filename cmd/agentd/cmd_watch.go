@@ -88,16 +88,7 @@ func runWatch(cmd *cobra.Command, args []string) error {
 	agentID := args[0]
 	ctx := cmd.Context()
 
-	// Detect output mode - for watch, we only care about explicit flags and TTY,
-	// not terminal size (watch is simple streaming output, doesn't need 80x24)
-	mode := output.ModeRich
-	if watchJSON {
-		mode = output.ModeJSON
-	} else if watchPlain {
-		mode = output.ModePlain
-	} else if !detect.IsTTY() {
-		mode = output.ModePlain
-	}
+	mode := detectWatchOutputMode()
 
 	// Setup signal handling for clean exit on Ctrl+C
 	ctx, cancel := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
@@ -108,44 +99,90 @@ func runWatch(cmd *cobra.Command, args []string) error {
 		printWatchHeader(agentID, mode)
 	}
 
-	// Connect to NATS
-	nc, err := connectNATS(watchNATSURL)
+	// Setup NATS subscription
+	_, msgChan, subject, cleanup, err := setupNATSSubscription(agentID)
 	if err != nil {
-		return fmt.Errorf("failed to connect to NATS: %w", err)
+		return err
 	}
-	defer nc.Close()
-
-	// Subscribe to agent heartbeats
-	subject := fmt.Sprintf("%s.%s", heartbeat.SubjectPrefix, agentID)
-
-	msgChan := make(chan *nats.Msg, 100)
-	sub, err := nc.ChanSubscribe(subject, msgChan)
-	if err != nil {
-		return fmt.Errorf("failed to subscribe to heartbeats: %w", err)
-	}
-	defer func() { _ = sub.Unsubscribe() }()
+	defer cleanup()
 
 	// Print subscription info
 	if !mode.IsJSON() {
 		printWatchSubscribed(subject, mode)
 	}
 
-	// Read initial lease state
-	lastLeaseState, _ := readLeaseState(agentID)
+	// Start background monitors
+	leaseChan := startLeaseMonitor(ctx, agentID)
+	logCancel := startLogStreamer(ctx, agentID, mode)
 
-	// Start lease monitor in background
-	leaseChan := make(chan *session.Lease, 10)
-	go monitorLease(ctx, agentID, lastLeaseState, leaseChan)
+	runWatchEventLoop(ctx, mode, msgChan, leaseChan, logCancel)
+	return nil
+}
 
-	// Optionally stream container logs
-	var logCancel context.CancelFunc
-	if watchLogs {
-		var logsCtx context.Context
-		logsCtx, logCancel = context.WithCancel(ctx)
-		go streamAgentLogs(logsCtx, agentID, mode)
+// detectWatchOutputMode determines the output mode based on flags and TTY.
+// For watch, we only care about explicit flags and TTY,
+// not terminal size (watch is simple streaming output, doesn't need 80x24).
+func detectWatchOutputMode() output.Mode {
+	switch {
+	case watchJSON:
+		return output.ModeJSON
+	case watchPlain:
+		return output.ModePlain
+	case !detect.IsTTY():
+		return output.ModePlain
+	default:
+		return output.ModeRich
+	}
+}
+
+// setupNATSSubscription connects to NATS and subscribes to the agent's heartbeat subject.
+// Returns the connection, message channel, subject name, cleanup function, and any error.
+func setupNATSSubscription(agentID string) (*nats.Conn, <-chan *nats.Msg, string, func(), error) {
+	nc, err := connectNATS(watchNATSURL)
+	if err != nil {
+		return nil, nil, "", nil, fmt.Errorf("failed to connect to NATS: %w", err)
 	}
 
-	// Event loop
+	subject := fmt.Sprintf("%s.%s", heartbeat.SubjectPrefix, agentID)
+	msgChan := make(chan *nats.Msg, 100)
+
+	sub, err := nc.ChanSubscribe(subject, msgChan)
+	if err != nil {
+		nc.Close()
+		return nil, nil, "", nil, fmt.Errorf("failed to subscribe to heartbeats: %w", err)
+	}
+
+	cleanup := func() {
+		_ = sub.Unsubscribe()
+		nc.Close()
+	}
+
+	return nc, msgChan, subject, cleanup, nil
+}
+
+// startLeaseMonitor starts a background goroutine to monitor lease changes.
+// Returns the channel that will receive lease change events.
+func startLeaseMonitor(ctx context.Context, agentID string) <-chan *session.Lease {
+	lastLeaseState, _ := readLeaseState(agentID)
+	leaseChan := make(chan *session.Lease, 10)
+	go monitorLease(ctx, agentID, lastLeaseState, leaseChan)
+	return leaseChan
+}
+
+// startLogStreamer starts a background goroutine to stream container logs if enabled.
+// Returns a cancel function that should be called on shutdown, or nil if streaming is disabled.
+func startLogStreamer(ctx context.Context, agentID string, mode output.Mode) context.CancelFunc {
+	if !watchLogs {
+		return nil
+	}
+	logsCtx, logCancel := context.WithCancel(ctx)
+	go streamAgentLogs(logsCtx, agentID, mode)
+	return logCancel
+}
+
+// runWatchEventLoop runs the main event loop, processing heartbeats and lease changes.
+// Returns when the context is cancelled.
+func runWatchEventLoop(ctx context.Context, mode output.Mode, msgChan <-chan *nats.Msg, leaseChan <-chan *session.Lease, logCancel context.CancelFunc) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -155,13 +192,11 @@ func runWatch(cmd *cobra.Command, args []string) error {
 			if !mode.IsJSON() {
 				printWatchStopped(mode)
 			}
-			return nil
+			return
 
 		case msg := <-msgChan:
-			if err := handleHeartbeat(msg, mode); err != nil {
-				if !mode.IsJSON() {
-					fmt.Printf("Error handling heartbeat: %v\n", err)
-				}
+			if err := handleHeartbeat(msg, mode); err != nil && !mode.IsJSON() {
+				fmt.Printf("Error handling heartbeat: %v\n", err)
 			}
 
 		case lease := <-leaseChan:

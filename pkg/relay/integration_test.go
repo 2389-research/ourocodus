@@ -20,13 +20,13 @@ import (
 // integrationMockACPClient simulates a successful ACP agent for integration testing
 // Separate from mockACPClient in server_unit_test.go to avoid conflicts
 type integrationMockACPClient struct {
-	sendFunc  func(context.Context, string) (interface{}, error)
+	sendFunc  func(context.Context, string) (*acp.AgentMessage, error)
 	closeFunc func(context.Context) error
 	mu        sync.Mutex
 	messages  []string // Track messages sent
 }
 
-func (m *integrationMockACPClient) SendMessage(ctx context.Context, content string) (interface{}, error) {
+func (m *integrationMockACPClient) SendMessage(ctx context.Context, content string) (*acp.AgentMessage, error) {
 	m.mu.Lock()
 	m.messages = append(m.messages, content)
 	m.mu.Unlock()
@@ -225,7 +225,7 @@ func Test_FullFlow_CreateSession_SpawnAgent_SendMessage(t *testing.T) {
 	var testClient *integrationMockACPClient
 	clientFactory.clientFunc = func(workspace string) (session.ACPClient, error) {
 		testClient = &integrationMockACPClient{
-			sendFunc: func(ctx context.Context, content string) (interface{}, error) {
+			sendFunc: func(ctx context.Context, content string) (*acp.AgentMessage, error) {
 				return &acp.AgentMessage{
 					Content: fmt.Sprintf("Mock agent says: %s", content),
 				}, nil
@@ -573,7 +573,7 @@ func Test_HandleAgentMessage_Success_FullFlow(t *testing.T) {
 	var capturedContent string
 	clientFactory.clientFunc = func(workspace string) (session.ACPClient, error) {
 		return &integrationMockACPClient{
-			sendFunc: func(ctx context.Context, content string) (interface{}, error) {
+			sendFunc: func(ctx context.Context, content string) (*acp.AgentMessage, error) {
 				capturedContent = content
 				return &acp.AgentMessage{
 					Content: "Agent processed: " + content,

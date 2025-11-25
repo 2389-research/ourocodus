@@ -59,6 +59,12 @@ type RetroTheme struct {
 	Highlight lipgloss.Style
 }
 
+// DefaultTheme returns the default CGA retro theme.
+// Use this for CLI commands instead of NewRetroTheme(PaletteCGA) for consistency.
+func DefaultTheme() *RetroTheme {
+	return NewRetroTheme(PaletteCGA)
+}
+
 // NewRetroTheme creates a new retro theme with the specified palette
 func NewRetroTheme(palette PaletteName) *RetroTheme {
 	theme := &RetroTheme{

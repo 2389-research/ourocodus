@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/2389-research/ourocodus/pkg/acp"
 	"github.com/2389-research/ourocodus/pkg/relay/audit"
 )
 
@@ -135,9 +136,8 @@ type WebSocketConn interface {
 
 // ACPClient abstracts ACP process operations
 // Implemented by pkg/acp.Client
-// Note: AgentMessage type is defined in pkg/acp
 type ACPClient interface {
-	SendMessage(ctx context.Context, content string) (interface{}, error) // Returns *acp.AgentMessage
+	SendMessage(ctx context.Context, content string) (*acp.AgentMessage, error)
 	Close(ctx context.Context) error
 }
 
@@ -358,7 +358,8 @@ func (u *UserSession) AttachAgent(agentID string, workspace string, attachToken 
 	}
 
 	// Create ACP bridge for bidirectional communication (Phase 3)
-	bridge, err := NewACPBridge(context.Background(), containerID, agentID)
+	// Note: logger is nil here; AttachAgent caller should provide logger if needed
+	bridge, err := NewACPBridge(context.Background(), containerID, agentID, nil)
 	if err != nil {
 		// Release lease if bridge creation fails
 		_ = ReleaseLease(agentID)

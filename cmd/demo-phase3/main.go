@@ -92,7 +92,7 @@ func runDemo() error {
 
 	// Step 4: Create ACP Bridge
 	fmt.Println("🌉 Step 4: Creating ACP Bridge...")
-	bridge, err := session.NewACPBridge(ctx, containerID, demoAgentID)
+	bridge, err := session.NewACPBridge(ctx, containerID, demoAgentID, nil)
 	if err != nil {
 		return fmt.Errorf("failed to create ACP bridge: %w", err)
 	}
@@ -201,27 +201,12 @@ func sendTestMessage(ctx context.Context, bridge *session.ACPBridge, content str
 		return fmt.Errorf("failed to send message: %w", err)
 	}
 
-	// Parse response
-	respMap, ok := response.(map[string]interface{})
-	if !ok {
-		return fmt.Errorf("unexpected response type: %T", response)
-	}
-
-	fmt.Printf("   📥 Response type: %v\n", respMap["type"])
-
 	// Show response content (truncate if too long)
-	if text, ok := respMap["text"].(string); ok && text != "" {
-		if len(text) > 100 {
-			fmt.Printf("   📝 Content: %s... (truncated)\n", text[:100])
-		} else {
-			fmt.Printf("   📝 Content: %s\n", text)
-		}
-	} else if content, ok := respMap["content"].(string); ok && content != "" {
-		if len(content) > 100 {
-			fmt.Printf("   📝 Content: %s... (truncated)\n", content[:100])
-		} else {
-			fmt.Printf("   📝 Content: %s\n", content)
-		}
+	respContent := response.Content
+	if len(respContent) > 100 {
+		fmt.Printf("   📝 Content: %s... (truncated)\n", respContent[:100])
+	} else {
+		fmt.Printf("   📝 Content: %s\n", respContent)
 	}
 
 	fmt.Println()

@@ -123,17 +123,18 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 	}
 
 	// Generate attach token (Phase 4: Security Hardening)
-	token, err := generateAttachToken(agentID)
-	if err != nil {
+	token, tokenErr := generateAttachToken(agentID)
+	if tokenErr != nil {
 		// Non-fatal: agent is running, just warn about token (only for non-JSON)
+		// For JSON mode, the error is included in the output as tokenError field
 		if !mode.IsJSON() {
 			if mode.IsRich() {
 				th := theme.NewRetroTheme(theme.PaletteCGA)
 				warnStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(string(th.Warning)))
-				fmt.Println(warnStyle.Render(fmt.Sprintf("⚠️  Warning: Failed to generate attach token: %v", err)))
+				fmt.Println(warnStyle.Render(fmt.Sprintf("⚠️  Warning: Failed to generate attach token: %v", tokenErr)))
 				fmt.Println(warnStyle.Render("   Agent is running but attachments will not be secured"))
 			} else {
-				fmt.Printf("Warning: Failed to generate attach token: %v\n", err)
+				fmt.Printf("Warning: Failed to generate attach token: %v\n", tokenErr)
 			}
 		}
 	}
@@ -141,7 +142,7 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 	// Print success based on output mode
 	switch {
 	case mode.IsJSON():
-		printSpawnSuccessJSON(handle, token)
+		printSpawnSuccessJSON(handle, token, tokenErr)
 	case mode.IsPlain():
 		printSpawnSuccessPlain(handle, token)
 	default:
@@ -276,11 +277,13 @@ type SpawnResult struct {
 	BranchName      string `json:"branchName"`
 	CredentialsPath string `json:"credentialsPath,omitempty"`
 	AttachToken     string `json:"attachToken,omitempty"`
+	TokenError      string `json:"tokenError,omitempty"`
 	Status          string `json:"status"`
 }
 
-// printSpawnSuccessJSON prints the successful spawn output as JSON
-func printSpawnSuccessJSON(handle *container.AgentContainerHandle, attachToken string) {
+// printSpawnSuccessJSON prints the successful spawn output as JSON.
+// If tokenErr is non-nil, includes the error message in the tokenError field.
+func printSpawnSuccessJSON(handle *container.AgentContainerHandle, attachToken string, tokenErr error) {
 	result := SpawnResult{
 		AgentID:       handle.AgentID(),
 		ContainerID:   handle.ContainerID(),
@@ -288,6 +291,10 @@ func printSpawnSuccessJSON(handle *container.AgentContainerHandle, attachToken s
 		BranchName:    handle.BranchName(),
 		AttachToken:   attachToken,
 		Status:        "running",
+	}
+
+	if tokenErr != nil {
+		result.TokenError = tokenErr.Error()
 	}
 
 	credPath := handle.CredentialsPath()

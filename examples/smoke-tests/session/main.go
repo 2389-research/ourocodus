@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/2389-research/ourocodus/pkg/acp"
 	"github.com/2389-research/ourocodus/pkg/agent"
 	"github.com/2389-research/ourocodus/pkg/relay/session"
 )
@@ -510,10 +511,9 @@ type fakeACPClient struct {
 	closed    bool
 }
 
-func (c *fakeACPClient) SendMessage(ctx context.Context, content string) (interface{}, error) {
-	return map[string]interface{}{
-		"type":    "text",
-		"content": "fake response from " + c.workspace,
+func (c *fakeACPClient) SendMessage(ctx context.Context, content string) (*acp.AgentMessage, error) {
+	return &acp.AgentMessage{
+		Content: "fake response from " + c.workspace,
 	}, nil
 }
 
