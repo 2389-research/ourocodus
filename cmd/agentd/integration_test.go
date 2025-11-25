@@ -24,6 +24,10 @@ func TestIntegration_SpawnListStop(t *testing.T) {
 		t.Skip("DOCKER_HOST not set, skipping integration test")
 	}
 
+	if os.Getenv("ANTHROPIC_API_KEY") == "" {
+		t.Skip("ANTHROPIC_API_KEY not set, skipping integration test")
+	}
+
 	ctx := context.Background()
 	agentID := "test-integration"
 
@@ -171,6 +175,10 @@ func TestIntegration_StopIdempotent(t *testing.T) {
 		t.Skip("DOCKER_HOST not set, skipping integration test")
 	}
 
+	if os.Getenv("ANTHROPIC_API_KEY") == "" {
+		t.Skip("ANTHROPIC_API_KEY not set, skipping integration test")
+	}
+
 	ctx := context.Background()
 	agentID := "test-idempotent"
 
@@ -194,6 +202,10 @@ func TestIntegration_MultipleAgents(t *testing.T) {
 
 	if os.Getenv("DOCKER_HOST") == "" {
 		t.Skip("DOCKER_HOST not set, skipping integration test")
+	}
+
+	if os.Getenv("ANTHROPIC_API_KEY") == "" {
+		t.Skip("ANTHROPIC_API_KEY not set, skipping integration test")
 	}
 
 	ctx := context.Background()

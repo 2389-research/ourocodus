@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -14,6 +15,25 @@ import (
 	"github.com/2389-research/ourocodus/pkg/internal/testutil"
 	"github.com/nats-io/nats.go"
 )
+
+// safeBuffer is a thread-safe wrapper around bytes.Buffer for use in tests
+// where concurrent writes (from NATS callbacks) and reads (from assertions) occur.
+type safeBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (sb *safeBuffer) Write(p []byte) (int, error) {
+	sb.mu.Lock()
+	defer sb.mu.Unlock()
+	return sb.buf.Write(p)
+}
+
+func (sb *safeBuffer) String() string {
+	sb.mu.Lock()
+	defer sb.mu.Unlock()
+	return sb.buf.String()
+}
 
 func TestNewHeartbeatMonitor(t *testing.T) {
 	ns := testutil.StartTestNATSServer(t)
@@ -330,6 +350,85 @@ func TestHeartbeatMonitor_ReapExpiredLeases(t *testing.T) {
 	}
 }
 
+func TestHeartbeatMonitor_ReapExpiredLeases_CallsCallback(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping reaper callback test in short mode")
+	}
+
+	ns := testutil.StartTestNATSServer(t)
+	defer ns.Shutdown()
+
+	// Setup temporary lease directory
+	tmpDir := t.TempDir()
+	originalLeaseDir := LeaseDir
+	LeaseDir = filepath.Join(tmpDir, "session")
+	defer func() { LeaseDir = originalLeaseDir }()
+
+	natsURL := ns.ClientURL()
+	agentID := "callback-test-agent"
+	sessionID := "callback-sess-456"
+
+	// Create an expired lease
+	lease, err := AcquireLease(agentID, sessionID)
+	if err != nil {
+		t.Fatalf("failed to acquire lease: %v", err)
+	}
+
+	// Manually expire the lease
+	lease.ExpiresAt = time.Now().Add(-1 * time.Minute)
+	leasePath := filepath.Join(LeaseDir, agentID+".lease")
+	data, err := json.Marshal(lease)
+	if err != nil {
+		t.Fatalf("failed to marshal lease: %v", err)
+	}
+	if err := os.WriteFile(leasePath, data, 0o600); err != nil {
+		t.Fatalf("failed to write expired lease: %v", err)
+	}
+
+	// Create monitor and set up callback to track invocations
+	monitor, err := NewHeartbeatMonitor(natsURL)
+	if err != nil {
+		t.Fatalf("failed to create monitor: %v", err)
+	}
+	defer monitor.Stop()
+
+	var callbackInvoked bool
+	var callbackAgentID, callbackSessionID string
+	monitor.SetOnAgentDeath(func(aid, sid string) {
+		callbackInvoked = true
+		callbackAgentID = aid
+		callbackSessionID = sid
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	if err := monitor.Start(ctx); err != nil {
+		t.Fatalf("failed to start monitor: %v", err)
+	}
+
+	// Manually trigger reaper
+	monitor.removeExpiredLeases()
+
+	// Verify callback was invoked with correct parameters
+	if !callbackInvoked {
+		t.Error("OnAgentDeath callback should have been invoked")
+	}
+	if callbackAgentID != agentID {
+		t.Errorf("callback agentID = %q, want %q", callbackAgentID, agentID)
+	}
+	if callbackSessionID != sessionID {
+		t.Errorf("callback sessionID = %q, want %q", callbackSessionID, sessionID)
+	}
+
+	// Verify lease was also removed
+	if _, err := os.Stat(leasePath); err == nil {
+		t.Error("expired lease should have been reaped")
+	} else if !os.IsNotExist(err) {
+		t.Errorf("unexpected error checking lease file: %v", err)
+	}
+}
+
 func TestHeartbeatMonitor_GracefulStop(t *testing.T) {
 	ns := testutil.StartTestNATSServer(t)
 	defer ns.Shutdown()
@@ -371,8 +470,9 @@ func TestHeartbeatMonitor_InvalidHeartbeatMessage(t *testing.T) {
 	}
 	defer monitor.Stop()
 
-	// Capture log output
-	var logBuf bytes.Buffer
+	// Capture log output using thread-safe buffer to prevent race condition
+	// between NATS callback writes and test assertion reads
+	var logBuf safeBuffer
 	monitor.SetLogger(log.New(&logBuf, "", 0))
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -395,12 +495,22 @@ func TestHeartbeatMonitor_InvalidHeartbeatMessage(t *testing.T) {
 		t.Fatalf("failed to publish invalid message: %v", err)
 	}
 
-	// Wait for message processing
-	time.Sleep(100 * time.Millisecond)
-
-	// Check error was logged
-	logOutput := logBuf.String()
-	if !bytes.Contains([]byte(logOutput), []byte("Failed to unmarshal heartbeat")) {
-		t.Errorf("expected unmarshal error in log, got: %s", logOutput)
+	// Flush to ensure message is delivered before checking
+	if err := nc.Flush(); err != nil {
+		t.Fatalf("failed to flush NATS: %v", err)
 	}
+
+	// Wait for message processing with condition-based polling
+	deadline := time.Now().Add(2 * time.Second)
+	var logOutput string
+	for time.Now().Before(deadline) {
+		logOutput = logBuf.String()
+		if bytes.Contains([]byte(logOutput), []byte("Failed to unmarshal heartbeat")) {
+			return // Success - found expected log message
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	// Final check after timeout
+	t.Errorf("expected unmarshal error in log, got: %s", logOutput)
 }

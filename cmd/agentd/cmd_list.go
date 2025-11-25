@@ -4,19 +4,16 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/signal"
-	"syscall"
 	"time"
 
 	"github.com/2389-research/ourocodus/cmd/agentd/internal/detect"
 	"github.com/2389-research/ourocodus/cmd/agentd/internal/output"
 	"github.com/2389-research/ourocodus/cmd/agentd/internal/render"
 	"github.com/2389-research/ourocodus/cmd/agentd/internal/theme"
+	uilist "github.com/2389-research/ourocodus/cmd/agentd/internal/tui/list"
+	"github.com/2389-research/ourocodus/pkg/labels"
 	"github.com/2389-research/ourocodus/pkg/relay/session"
 	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/filters"
-	"github.com/docker/docker/client"
-	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 )
 
@@ -24,8 +21,10 @@ var (
 	listFormat    string
 	listPlainFlag bool
 	listTheme     string
-	listWatch     bool
+	listNATSURL   string
 )
+
+const defaultNATSURL = "nats://localhost:4222"
 
 var listCmd = &cobra.Command{
 	Use:   "list",
@@ -33,9 +32,6 @@ var listCmd = &cobra.Command{
 	Long:  "Shows all active agents with their status, workspace, and container information.",
 	Example: `  # List all running agents (auto-detect mode)
   agentd list
-
-  # Watch agents with live updates
-  agentd list --watch
 
   # Force plain text output
   agentd list --plain
@@ -52,20 +48,11 @@ func init() {
 	listCmd.Flags().StringVar(&listFormat, "format", "auto", "Output format (auto|rich|plain|json)")
 	listCmd.Flags().BoolVar(&listPlainFlag, "plain", false, "Force plain text output (alias for --format plain)")
 	listCmd.Flags().StringVar(&listTheme, "theme", "cga", "Color theme for rich mode (cga|amber|green|c64)")
-	listCmd.Flags().BoolVar(&listWatch, "watch", false, "Watch for changes and update every 2 seconds")
+	listCmd.Flags().StringVar(&listNATSURL, "nats", defaultNATSURL, "NATS server URL for live heartbeats (use empty string to disable)")
 }
 
 func runList(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
-
-	// Setup signal handling for clean exit on Ctrl+C
-	ctx, cancel := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
-	defer cancel()
-
-	// If watch mode, enter watch loop
-	if listWatch {
-		return watchList(ctx)
-	}
 
 	// Step 1: Detect output mode
 	jsonFlag := listFormat == "json"
@@ -94,6 +81,30 @@ func runList(cmd *cobra.Command, args []string) error {
 		th = theme.NewRetroTheme(palette)
 	}
 
+	// Step 2.5: Optional heartbeat monitor
+	hbURL := listNATSURL
+	if env := os.Getenv("AGENTD_NATS"); env != "" {
+		hbURL = env
+	}
+	var hbMonitor *session.HeartbeatMonitor
+	hbStatus := "Heartbeats: disabled (no NATS URL)"
+	if hbURL != "" {
+		monitor, err := session.NewHeartbeatMonitor(hbURL)
+		if err != nil {
+			hbStatus = fmt.Sprintf("Heartbeats disabled: %v", err)
+		} else if err := monitor.Start(ctx); err != nil {
+			hbStatus = fmt.Sprintf("Heartbeats disabled: %v", err)
+			monitor.Stop()
+		} else {
+			hbMonitor = monitor
+			hbStatus = fmt.Sprintf("Heartbeats: live (%s)", hbURL)
+			go func() {
+				<-ctx.Done()
+				monitor.Stop()
+			}()
+		}
+	}
+
 	// Step 3: Query Docker for agents
 	agents, err := listAgentsFromDocker(ctx)
 	if err != nil {
@@ -111,10 +122,41 @@ func runList(cmd *cobra.Command, args []string) error {
 			SpawnSource: agent.SpawnSource,
 			AttachedTo:  agent.AttachedTo,
 			CreatedAt:   agent.CreatedAt,
+			LastBeat:    agent.LastBeat,
 		}
 	}
+	applyHeartbeats(renderAgents, hbMonitor)
 
 	// Step 5: Render using new renderer
+	if mode.IsRich() {
+		opts := uilist.RunOptions{
+			Loader: func(ctx context.Context) ([]render.AgentInfo, error) {
+				agents, err := listAgentsFromDocker(ctx)
+				if err != nil {
+					return nil, err
+				}
+				res := make([]render.AgentInfo, len(agents))
+				for i, agent := range agents {
+					res[i] = render.AgentInfo{
+						AgentID:     agent.AgentID,
+						ContainerID: agent.ContainerID,
+						Status:      agent.Status,
+						Workspace:   agent.Workspace,
+						SpawnSource: agent.SpawnSource,
+						AttachedTo:  agent.AttachedTo,
+						CreatedAt:   agent.CreatedAt,
+						LastBeat:    agent.LastBeat,
+					}
+				}
+				applyHeartbeats(res, hbMonitor)
+				return res, nil
+			},
+			Stopper: func(ctx context.Context, agentID string) error {
+				return stopAgent(ctx, nil, agentID)
+			},
+		}
+		return uilist.Run(ctx, th, renderAgents, hbStatus, opts)
+	}
 	return render.RenderAgentList(os.Stdout, renderAgents, mode, th)
 }
 
@@ -127,40 +169,37 @@ type agentInfo struct {
 	SpawnSource string
 	AttachedTo  string
 	CreatedAt   time.Time
+	LastBeat    time.Time
 }
 
 // listAgentsFromDocker queries Docker for containers with agentd labels
 func listAgentsFromDocker(ctx context.Context) ([]agentInfo, error) {
-	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	cli, err := newDockerClient()
 	if err != nil {
-		return nil, fmt.Errorf("failed to create Docker client: %w", err)
+		return nil, err
 	}
 	defer func() { _ = cli.Close() }()
 
-	// Filter for containers with ourocodus.agent label (from pkg/)
-	// Note: We use the pkg-provided labels since SpawnConfig doesn't support custom labels
-	filterArgs := filters.NewArgs()
-	filterArgs.Add("label", fmt.Sprintf("%s=true", LabelNamespace))
-
+	// Use centralized filter builder from pkg/labels
 	containers, err := cli.ContainerList(ctx, container.ListOptions{
 		All:     false, // Only running containers
-		Filters: filterArgs,
+		Filters: labels.ListAgentsFilter(),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to list containers: %w", err)
 	}
 
-	// Get all leases to determine attached status
+	// Get all leases to determine attached status and last heartbeat
 	leases, err := listLeasesForList()
 	if err != nil {
 		// Don't fail if leases can't be read, just continue without adoption status
-		leases = make(map[string]string)
+		leases = make(map[string]*session.Lease)
 	}
 
 	agents := make([]agentInfo, 0, len(containers))
 	for _, c := range containers {
-		// Get agent ID from pkg-provided label
-		agentID := c.Labels[LabelAgentID]
+		// Get agent ID from centralized label
+		agentID := c.Labels[labels.AgentID]
 		if agentID == "" {
 			continue // Skip containers without agent-id
 		}
@@ -180,13 +219,18 @@ func listAgentsFromDocker(ctx context.Context) ([]agentInfo, error) {
 		}
 
 		// Get spawn source from label (defaults to "unknown")
-		spawnSource := c.Labels[LabelSpawnSource]
+		spawnSource := c.Labels[labels.SpawnSource]
 		if spawnSource == "" {
 			spawnSource = "unknown"
 		}
 
-		// Get attachment status from leases
-		attachedTo := leases[agentID]
+		// Get attachment status and last beat from leases
+		var attachedTo string
+		var lastBeat time.Time
+		if lease, ok := leases[agentID]; ok {
+			attachedTo = lease.UserSessionID
+			lastBeat = lease.ExpiresAt.Add(-session.LeaseTTL)
+		}
 
 		agents = append(agents, agentInfo{
 			AgentID:     agentID,
@@ -196,132 +240,37 @@ func listAgentsFromDocker(ctx context.Context) ([]agentInfo, error) {
 			SpawnSource: spawnSource,
 			AttachedTo:  attachedTo,
 			CreatedAt:   time.Unix(c.Created, 0),
+			LastBeat:    lastBeat,
 		})
 	}
 
 	return agents, nil
 }
 
-// listLeasesForList returns a map of agentID -> userSessionID for attached agents
-func listLeasesForList() (map[string]string, error) {
+// listLeasesForList returns a map of agentID -> lease for attached agents
+func listLeasesForList() (map[string]*session.Lease, error) {
 	leases, err := session.ListLeases()
 	if err != nil {
 		return nil, err
 	}
 
-	result := make(map[string]string)
+	result := make(map[string]*session.Lease)
 	for _, lease := range leases {
 		if !session.IsLeaseExpired(lease) {
-			result[lease.AgentID] = lease.UserSessionID
+			result[lease.AgentID] = lease
 		}
 	}
 
 	return result, nil
 }
 
-// formatContainerID shows short container ID
-func formatContainerID(id string) string {
-	if len(id) > 12 {
-		return id[:12]
+func applyHeartbeats(agents []render.AgentInfo, monitor *session.HeartbeatMonitor) {
+	if monitor == nil {
+		return
 	}
-	return id
-}
-
-// formatWorkspace shortens workspace path for display
-func formatWorkspace(path string) string {
-	// Show relative path from current directory if possible
-	if len(path) > 60 {
-		// Truncate long paths
-		return "..." + path[len(path)-57:]
-	}
-	return path
-}
-
-// watchList continuously polls and displays agent status
-func watchList(ctx context.Context) error {
-	ticker := time.NewTicker(2 * time.Second)
-	defer ticker.Stop()
-
-	// Detect output mode (same logic as non-watch mode)
-	jsonFlag := listFormat == "json"
-	plainFlag := listPlainFlag || listFormat == "plain"
-	shouldPlain := detect.ShouldUsePlainMode(jsonFlag, plainFlag, os.Environ)
-
-	mode := output.ModeRich
-	if listFormat != "auto" {
-		// Explicit format flag takes precedence
-		parsedMode, valid := output.ParseMode(listFormat)
-		if valid {
-			mode = parsedMode
-		}
-	} else {
-		// Auto-detect mode
-		mode = output.DetectMode(jsonFlag, plainFlag, shouldPlain)
-	}
-
-	// Create theme if rich mode
-	var th *theme.RetroTheme
-	if mode.IsRich() {
-		palette, valid := theme.ParsePaletteName(listTheme)
-		if !valid {
-			palette = theme.PaletteCGA
-		}
-		th = theme.NewRetroTheme(palette)
-	}
-
-	// Clear screen and show initial state
-	clearScreen()
-	if err := displayListOnce(ctx, mode, th); err != nil {
-		return err
-	}
-
-	// Print watch footer
-	fmt.Println(color.New(color.FgHiBlack).Sprint("Press Ctrl+C to stop watching..."))
-
-	for {
-		select {
-		case <-ctx.Done():
-			fmt.Println() // Add newline before exit
-			return nil
-		case <-ticker.C:
-			clearScreen()
-
-			if err := displayListOnce(ctx, mode, th); err != nil {
-				fmt.Printf("Error: %v\n", err)
-				continue
-			}
-
-			// Print watch footer
-			fmt.Println(color.New(color.FgHiBlack).Sprint("Press Ctrl+C to stop watching..."))
+	for i := range agents {
+		if ts := monitor.GetLastSeen(agents[i].AgentID); !ts.IsZero() {
+			agents[i].LastBeat = ts
 		}
 	}
-}
-
-// displayListOnce displays agents once (used by watch loop)
-func displayListOnce(ctx context.Context, mode output.Mode, th *theme.RetroTheme) error {
-	agents, err := listAgentsFromDocker(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to list agents: %w", err)
-	}
-
-	// Convert to render.AgentInfo format
-	renderAgents := make([]render.AgentInfo, len(agents))
-	for i, agent := range agents {
-		renderAgents[i] = render.AgentInfo{
-			AgentID:     agent.AgentID,
-			ContainerID: agent.ContainerID,
-			Status:      agent.Status,
-			Workspace:   agent.Workspace,
-			SpawnSource: agent.SpawnSource,
-			AttachedTo:  agent.AttachedTo,
-			CreatedAt:   agent.CreatedAt,
-		}
-	}
-
-	return render.RenderAgentList(os.Stdout, renderAgents, mode, th)
-}
-
-// clearScreen clears the terminal screen
-func clearScreen() {
-	fmt.Print("\033[2J\033[H")
 }

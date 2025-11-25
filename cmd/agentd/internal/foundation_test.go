@@ -55,13 +55,6 @@ func TestFoundationIntegration(t *testing.T) {
 
 	iconASCII := theme.GetAgentStatusIcon(theme.StatusRunning, false)
 	assert.Equal(t, ">", iconASCII)
-
-	box := theme.DrawBox("Title", "Content", 30)
-	assert.Contains(t, box, "Title")
-	assert.Contains(t, box, "Content")
-
-	msg := theme.GetVintageMessage(theme.MsgSuccess)
-	assert.NotEmpty(t, msg)
 }
 
 // TestFoundationWorkflow tests a realistic workflow

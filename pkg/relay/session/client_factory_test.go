@@ -732,6 +732,10 @@ func (m *mockDockerClient) ContainerExecAttach(ctx context.Context, execID strin
 	return types.HijackedResponse{}, nil
 }
 
+func (m *mockDockerClient) ContainerKill(ctx context.Context, containerID, signal string) error {
+	return nil
+}
+
 func (m *mockDockerClient) ContainerExecInspect(ctx context.Context, execID string) (dockercontainer.ExecInspect, error) {
 	return dockercontainer.ExecInspect{}, nil
 }

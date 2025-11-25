@@ -177,9 +177,6 @@ export class App {
                 } : undefined
             });
         };
-        this.connection.onShowSuccess = (message: string) => {
-            this.notifications.showSuccess(message);
-        };
 
         // Wire theme toggle button
         const themeToggleBtn = document.getElementById('themeToggle');
@@ -202,59 +199,61 @@ export class App {
             });
         }
 
-        // Phase 3: Setup Discover Agents button handler
+        // Discover adoptable agents
         const discoverAgentsBtn = document.getElementById('discoverAgentsBtn');
         if (discoverAgentsBtn) {
             discoverAgentsBtn.addEventListener('click', () => {
                 this.logger.debug('Discover Agents button clicked');
-                this.handleDiscoverAgents();
+                this.connection.discoverAgents();
             });
         }
 
-        // Phase 3: Setup Attach Agent modal handlers
+        // Attach modal buttons
         const confirmAttachBtn = document.getElementById('confirmAttachAgent');
         const cancelAttachBtn = document.getElementById('cancelAttachAgent');
         const attachModal = document.getElementById('attachAgentModal');
-        const attachModalOverlay = attachModal?.querySelector('.modal-overlay');
+        const tokenInput = document.getElementById('attachTokenInput') as HTMLInputElement | null;
+        const toggleTokenBtn = document.getElementById('toggleTokenVisibility');
+        const toggleTokenIcon = document.getElementById('toggleTokenIcon');
 
         if (confirmAttachBtn) {
             confirmAttachBtn.addEventListener('click', () => {
-                this.logger.debug('Confirm Attach button clicked');
-                this.handleConfirmAttach();
+                const agentId = (attachModal as any)?._pendingAgentId as string | undefined;
+                const token = tokenInput?.value.trim() || '';
+                if (agentId && token) {
+                    this.connection.attachAgent(agentId, token);
+                    if (attachModal) attachModal.style.display = 'none';
+                } else {
+                    const errorEl = document.getElementById('attachError');
+                    if (errorEl) {
+                        errorEl.textContent = '⚠️ Please enter a token';
+                        errorEl.style.display = 'block';
+                    }
+                }
             });
         }
 
-        if (cancelAttachBtn) {
+        if (cancelAttachBtn && attachModal) {
             cancelAttachBtn.addEventListener('click', () => {
-                this.logger.debug('Cancel Attach button clicked');
-                if (attachModal) {
-                    attachModal.style.display = 'none';
-                }
+                attachModal.style.display = 'none';
             });
         }
 
-        if (attachModalOverlay) {
-            attachModalOverlay.addEventListener('click', () => {
-                this.logger.debug('Attach modal overlay clicked');
-                if (attachModal) {
-                    attachModal.style.display = 'none';
-                }
-            });
+        if (attachModal) {
+            const overlay = attachModal.querySelector('.modal-overlay');
+            if (overlay) {
+                overlay.addEventListener('click', () => (attachModal.style.display = 'none'));
+            }
         }
 
-        // Phase 3: Setup token visibility toggle
-        const toggleTokenBtn = document.getElementById('toggleTokenVisibility');
-        const tokenInput = document.getElementById('attachTokenInput') as HTMLInputElement;
-        const toggleIcon = document.getElementById('toggleTokenIcon');
-
-        if (toggleTokenBtn && tokenInput && toggleIcon) {
+        if (toggleTokenBtn && tokenInput && toggleTokenIcon) {
             toggleTokenBtn.addEventListener('click', () => {
                 if (tokenInput.type === 'password') {
                     tokenInput.type = 'text';
-                    toggleIcon.textContent = '🙈';
+                    toggleTokenIcon.textContent = '🙈';
                 } else {
                     tokenInput.type = 'password';
-                    toggleIcon.textContent = '👁️';
+                    toggleTokenIcon.textContent = '👁️‍🗨️';
                 }
             });
         }
@@ -492,59 +491,6 @@ export class App {
             (btn as HTMLButtonElement).disabled = false;
             btn!.innerHTML = '<span class="btn-icon">🤖</span> Spawn Agent';
             this.loading.hide();
-        }
-    }
-
-    /**
-     * Phase 3: Handle Discover Agents button click
-     */
-    handleDiscoverAgents() {
-        this.logger.info('Discovering CLI-spawned agents');
-        if (this.connection.discoverAgents()) {
-            this.logger.info('Agent discovery initiated');
-        } else {
-            this.logger.error('Failed to initiate agent discovery');
-            alert('Failed to discover agents. Please ensure you are connected.');
-        }
-    }
-
-    /**
-     * Phase 3: Handle Confirm Attach button click
-     */
-    handleConfirmAttach() {
-        const modal = document.getElementById('attachAgentModal');
-        const tokenInput = document.getElementById('attachTokenInput') as HTMLInputElement;
-        const errorEl = document.getElementById('attachError');
-        const agentId = (modal as any)?._pendingAgentId;
-
-        if (!tokenInput || !agentId) {
-            this.logger.error('Attach modal elements not found or no pending agent ID');
-            return;
-        }
-
-        const token = tokenInput.value.trim();
-        if (!token) {
-            if (errorEl) {
-                errorEl.textContent = '⚠️ Please enter an attach token';
-                errorEl.style.display = 'block';
-            }
-            return;
-        }
-
-        this.logger.info('Attempting to attach to agent:', agentId);
-        if (this.connection.attachAgent(agentId, token)) {
-            this.logger.info('Agent attachment initiated');
-            // Clear token immediately after use for security
-            tokenInput.value = '';
-            // Modal will be closed by handleAgentAttached on success
-        } else {
-            this.logger.error('Failed to initiate agent attachment');
-            // Clear token on failure too
-            tokenInput.value = '';
-            if (errorEl) {
-                errorEl.textContent = '⚠️ Failed to attach. Please ensure you are connected.';
-                errorEl.style.display = 'block';
-            }
         }
     }
 

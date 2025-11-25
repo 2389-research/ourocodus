@@ -3,6 +3,8 @@ package session
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -470,9 +472,31 @@ func TestUserSession_AttachDetach_ConcurrentAccess(t *testing.T) {
 	}
 }
 
+// setupDockerSocket configures the Docker socket for Colima if available
+func setupDockerSocket(t *testing.T) {
+	t.Helper()
+
+	// Check if DOCKER_HOST is already set (don't override user configuration)
+	if existingHost := os.Getenv("DOCKER_HOST"); existingHost != "" {
+		return
+	}
+
+	// Check if Colima is running
+	colimaSocket := filepath.Join(os.Getenv("HOME"), ".colima", "default", "docker.sock")
+	if _, err := os.Stat(colimaSocket); err == nil {
+		// Colima socket exists, use it
+		_ = os.Setenv("DOCKER_HOST", "unix://"+colimaSocket)
+		t.Logf("Using Colima Docker socket: %s", colimaSocket)
+	}
+}
+
 // isDockerAvailable checks if Docker is available and fails the test if not
 func isDockerAvailable(t *testing.T) bool {
 	t.Helper()
+
+	// Set up Docker socket (try Colima first if DOCKER_HOST not already set)
+	setupDockerSocket(t)
+
 	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
 		t.Fatalf("Docker client creation failed: %v. Docker must be available to run these tests.", err)

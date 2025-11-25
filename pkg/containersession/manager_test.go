@@ -55,6 +55,7 @@ type mockDockerClient struct {
 	createFn     func(ctx context.Context, config *container.Config, hostConfig *container.HostConfig, networkingConfig *network.NetworkingConfig, platform *ocispec.Platform, containerName string) (container.CreateResponse, error)
 	startFn      func(ctx context.Context, containerID string, options container.StartOptions) error
 	stopFn       func(ctx context.Context, containerID string, options container.StopOptions) error
+	killFn       func(ctx context.Context, containerID string, signal string) error
 	attachFn     func(ctx context.Context, containerID string, options container.AttachOptions) (types.HijackedResponse, error)
 	execCreateFn func(ctx context.Context, containerID string, config container.ExecOptions) (container.ExecCreateResponse, error)
 	execAttachFn func(ctx context.Context, execID string, config container.ExecAttachOptions) (types.HijackedResponse, error)
@@ -80,6 +81,13 @@ func (m *mockDockerClient) ContainerStart(ctx context.Context, containerID strin
 func (m *mockDockerClient) ContainerStop(ctx context.Context, containerID string, options container.StopOptions) error {
 	if m.stopFn != nil {
 		return m.stopFn(ctx, containerID, options)
+	}
+	return nil
+}
+
+func (m *mockDockerClient) ContainerKill(ctx context.Context, containerID string, signal string) error {
+	if m.killFn != nil {
+		return m.killFn(ctx, containerID, signal)
 	}
 	return nil
 }
@@ -123,7 +131,14 @@ func (m *mockDockerClient) ContainerInspect(ctx context.Context, containerID str
 	if m.inspectFn != nil {
 		return m.inspectFn(ctx, containerID)
 	}
-	return container.InspectResponse{}, nil
+	// Return a default response with State initialized to avoid nil pointer dereference
+	return container.InspectResponse{
+		ContainerJSONBase: &container.ContainerJSONBase{
+			State: &container.State{
+				Running: false,
+			},
+		},
+	}, nil
 }
 
 type mockIDGenerator struct {

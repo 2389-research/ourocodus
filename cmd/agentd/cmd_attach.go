@@ -1,16 +1,16 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"os"
 	"os/signal"
 	"syscall"
 
+	"github.com/2389-research/ourocodus/cmd/agentd/internal/output"
+	"github.com/2389-research/ourocodus/cmd/agentd/internal/theme"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/client"
-	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
@@ -39,7 +39,7 @@ Press Ctrl-D or type 'exit' to detach from the agent.`,
 }
 
 func runAttach(cmd *cobra.Command, args []string) error {
-	ctx := context.Background()
+	ctx := cmd.Context()
 	agentID := args[0]
 
 	// Find the container
@@ -53,7 +53,7 @@ func runAttach(cmd *cobra.Command, args []string) error {
 	}
 
 	// Check if agent is running
-	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	cli, err := newDockerClient()
 	if err != nil {
 		return err
 	}
@@ -69,11 +69,17 @@ func runAttach(cmd *cobra.Command, args []string) error {
 	}
 
 	// Print attach message
-	headerColor := color.New(color.FgCyan, color.Bold)
-	_, _ = headerColor.Printf("\n📎 Attaching to agent '%s'\n", agentID)
-	_, _ = color.New(color.FgHiBlack).Printf("   Container: %s\n", formatContainerID(containerID))
-	_, _ = color.New(color.FgHiBlack).Printf("   Workspace: /workspace\n\n")
-	_, _ = color.New(color.FgYellow).Println("   Press Ctrl-D or type 'exit' to detach")
+	th := theme.NewRetroTheme(theme.PaletteCGA)
+	headerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(string(th.Primary))).Bold(true)
+	mutedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(string(th.Muted)))
+	warnStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(string(th.Warning)))
+
+	fmt.Println()
+	fmt.Println(headerStyle.Render(fmt.Sprintf("📎 Attaching to agent '%s'", agentID)))
+	fmt.Println(mutedStyle.Render(fmt.Sprintf("   Container: %s", output.FormatContainerID(containerID))))
+	fmt.Println(mutedStyle.Render("   Workspace: /workspace"))
+	fmt.Println()
+	fmt.Println(warnStyle.Render("   Press Ctrl-D or type 'exit' to detach"))
 	fmt.Println()
 
 	// Create exec instance with interactive TTY

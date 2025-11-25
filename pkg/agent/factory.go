@@ -145,6 +145,7 @@ func (a *containerLauncherAdapter) Spawn(ctx context.Context, config *SpawnConfi
 		GitSSHKey:   a.launcherConfig.GitSSHKey,  // Use credentials from LauncherConfig
 		GitHubToken: a.launcherConfig.GitHubToken,
 		Env:         env,
+		Labels:      config.Labels, // Pass through custom labels (including spawn-source)
 	}
 
 	handle, err := launcher.Spawn(ctx, spawnConfig)

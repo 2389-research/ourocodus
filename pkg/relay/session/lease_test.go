@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/2389-research/ourocodus/pkg/heartbeat"
 )
 
 // TestLease_AcquireAndRelease tests basic lease operations
@@ -232,7 +234,7 @@ func TestLease_CleanupExpiredLeases(t *testing.T) {
 	// Create an expired lease
 	agentID := "test-expired"
 	leasePath := filepath.Join(LeaseDir, agentID+".lease")
-	if err := os.WriteFile(leasePath, []byte(`{"agentId":"`+agentID+`","userSessionId":"session-expired","attachedAt":"2020-01-01T00:00:00Z","expiresAt":"2020-01-01T00:00:00Z","heartbeatInterval":"30s"}`), 0o600); err != nil {
+	if err := os.WriteFile(leasePath, []byte(`{"agentId":"`+agentID+`","userSessionId":"session-expired","attachedAt":"2020-01-01T00:00:00Z","expiresAt":"2020-01-01T00:00:00Z","heartbeatInterval":"`+heartbeat.Interval.String()+`"}`), 0o600); err != nil {
 		t.Fatalf("Failed to write expired lease: %v", err)
 	}
 
@@ -314,7 +316,7 @@ func TestLease_MaxRetries(t *testing.T) {
 	if err := os.MkdirAll(LeaseDir, 0o700); err != nil {
 		t.Fatalf("Failed to create lease directory: %v", err)
 	}
-	if err := os.WriteFile(leasePath, []byte(`{"agentId":"`+agentID+`","userSessionId":"session-old","attachedAt":"2020-01-01T00:00:00Z","expiresAt":"2020-01-01T00:00:00Z","heartbeatInterval":"30s"}`), 0o600); err != nil {
+	if err := os.WriteFile(leasePath, []byte(`{"agentId":"`+agentID+`","userSessionId":"session-old","attachedAt":"2020-01-01T00:00:00Z","expiresAt":"2020-01-01T00:00:00Z","heartbeatInterval":"`+heartbeat.Interval.String()+`"}`), 0o600); err != nil {
 		t.Fatalf("Failed to write expired lease: %v", err)
 	}
 	defer ReleaseLease(agentID)
@@ -582,5 +584,62 @@ func TestLease_RapidCreateDelete(t *testing.T) {
 		if err != ErrLeaseNotFound {
 			t.Errorf("Iteration %d: Expected ErrLeaseNotFound, got %v", i, err)
 		}
+	}
+}
+
+// TestLease_ConcurrentRenewal tests that concurrent renewals don't corrupt the lease
+func TestLease_ConcurrentRenewal(t *testing.T) {
+	// Use temp directory for test leases
+	tmpDir := t.TempDir()
+	oldLeaseDir := LeaseDir
+	LeaseDir = tmpDir
+	defer func() { LeaseDir = oldLeaseDir }()
+
+	agentID := "test-agent-concurrent-renew"
+	sessionID := "test-session"
+
+	// Create initial lease
+	_, err := AcquireLease(agentID, sessionID)
+	if err != nil {
+		t.Fatalf("Failed to acquire lease: %v", err)
+	}
+	defer ReleaseLease(agentID)
+
+	// Launch multiple goroutines trying to renew the same lease
+	numGoroutines := 20
+	done := make(chan error, numGoroutines)
+
+	for i := 0; i < numGoroutines; i++ {
+		go func() {
+			done <- RenewLease(agentID)
+		}()
+	}
+
+	// Collect results - all should succeed or fail gracefully
+	successes := 0
+	for i := 0; i < numGoroutines; i++ {
+		err := <-done
+		if err == nil {
+			successes++
+		}
+	}
+
+	// All renewals should succeed (atomic writes shouldn't conflict)
+	if successes != numGoroutines {
+		t.Errorf("Expected all %d renewals to succeed, got %d", numGoroutines, successes)
+	}
+
+	// Verify lease is still valid and readable
+	lease, err := ReadLease(agentID)
+	if err != nil {
+		t.Fatalf("Failed to read lease after concurrent renewals: %v", err)
+	}
+
+	// Verify lease data is intact (not corrupted)
+	if lease.AgentID != agentID {
+		t.Errorf("AgentID corrupted: expected %s, got %s", agentID, lease.AgentID)
+	}
+	if lease.UserSessionID != sessionID {
+		t.Errorf("UserSessionID corrupted: expected %s, got %s", sessionID, lease.UserSessionID)
 	}
 }

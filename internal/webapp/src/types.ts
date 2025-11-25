@@ -56,31 +56,19 @@ export interface AgentTerminateMessage extends BaseMessage {
     agentId: string;
 }
 
-// Agent discovery and attachment (Phase 3)
 export interface AgentDiscoverMessage extends BaseMessage {
     type: 'agent:discover';
-    userSessionId: string;
-}
-
-export interface AgentInfo {
-    agentId: string;
-    containerId: string;
-    workspace: string;
-    status: 'detached' | 'attached';
-    spawnSource: string;
-    attachedTo?: string;
-    createdAt: string;
 }
 
 export interface AgentDiscoveredMessage extends BaseMessage {
     type: 'agent:discovered';
-    agents: AgentInfo[];
+    agents: DiscoveredAgent[];
 }
 
 export interface AgentAttachMessage extends BaseMessage {
     type: 'agent:attach';
-    userSessionId: string;
     agentId: string;
+    userSessionId: string;
     token: string;
 }
 
@@ -88,18 +76,22 @@ export interface AgentAttachedMessage extends BaseMessage {
     type: 'agent:attached';
     agentId: string;
     sessionId: string;
-    expiresAt: string;
-}
-
-export interface AgentDetachMessage extends BaseMessage {
-    type: 'agent:detach';
-    userSessionId: string;
-    agentId: string;
+    expiresAt?: string;
 }
 
 export interface AgentDetachedMessage extends BaseMessage {
     type: 'agent:detached';
     agentId: string;
+}
+
+export interface DiscoveredAgent {
+    agentId: string;
+    containerId: string;
+    workspace: string;
+    status: string;
+    spawnSource?: string;
+    attachedTo?: string;
+    createdAt?: string;
 }
 
 export interface ConnectionEstablishedMessage extends BaseMessage {
@@ -131,12 +123,6 @@ export type ProtocolMessage =
     | AgentResponseMessage
     | SessionEndMessage
     | AgentTerminateMessage
-    | AgentDiscoverMessage
-    | AgentDiscoveredMessage
-    | AgentAttachMessage
-    | AgentAttachedMessage
-    | AgentDetachMessage
-    | AgentDetachedMessage
     | ConnectionEstablishedMessage
     | ErrorMessage;
 

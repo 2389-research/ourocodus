@@ -130,10 +130,8 @@ func TestHeartbeatPublisher_PeriodicPublish(t *testing.T) {
 	}
 
 	// NOTE: This test validates the immediate heartbeat on Start().
-	// With heartbeat.Interval = 30s, we cannot test actual periodic behavior
-	// within a reasonable test timeout (2s). The test will skip if it doesn't
-	// receive 2+ heartbeats, which is expected. To test true periodic behavior,
-	// heartbeat.Interval would need to be made configurable per instance.
+	// With heartbeat.Interval = 5s, we still can't reliably get 2+ beats within
+	// the short timeout here, so the test skips if it doesn't get them.
 
 	ns := testutil.StartTestNATSServer(t)
 	defer ns.Shutdown()

@@ -11,9 +11,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/2389-research/ourocodus/cmd/agentd/internal/theme"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/client"
-	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 )
 
@@ -44,24 +44,28 @@ type Check struct {
 	Run  func(context.Context) error
 }
 
-var (
-	successColor = color.New(color.FgGreen)
-	errorColor   = color.New(color.FgRed)
-	infoColor    = color.New(color.FgCyan)
-)
+// doctorTheme provides consistent styling for doctor output
+var doctorTheme = theme.NewRetroTheme(theme.PaletteCGA)
 
 func printSuccess(msg string) {
-	_, _ = successColor.Print("✓ ")
+	style := lipgloss.NewStyle().Foreground(lipgloss.Color(string(doctorTheme.Success)))
+	fmt.Print(style.Render("✓ "))
 	fmt.Println(msg)
 }
 
 func printError(msg string) {
-	_, _ = errorColor.Print("× ")
+	style := lipgloss.NewStyle().Foreground(lipgloss.Color(string(doctorTheme.Error)))
+	fmt.Print(style.Render("× "))
 	fmt.Println(msg)
 }
 
+func printInfo(msg string) {
+	style := lipgloss.NewStyle().Foreground(lipgloss.Color(string(doctorTheme.Primary)))
+	fmt.Println(style.Render(msg))
+}
+
 func runDoctor(cmd *cobra.Command, args []string) error {
-	ctx := context.Background()
+	ctx := cmd.Context()
 
 	checks := []Check{
 		{"Docker daemon", checkDockerDaemon},
@@ -84,8 +88,10 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	fmt.Println()
 	if allPassed {
 		fmt.Println()
-		_, _ = color.New(color.FgGreen, color.Bold).Print("✨ Environment ready!")
-		_, _ = color.New(color.FgHiBlack).Println(" All systems go for spawning agents.")
+		successStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(string(doctorTheme.Success))).Bold(true)
+		mutedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(string(doctorTheme.Muted)))
+		fmt.Print(successStyle.Render("✨ Environment ready!"))
+		fmt.Println(mutedStyle.Render(" All systems go for spawning agents."))
 		fmt.Println()
 		return nil
 	}
@@ -94,14 +100,14 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 }
 
 func checkDockerDaemon(ctx context.Context) error {
-	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	cli, err := newDockerClient()
 	if err != nil {
-		return fmt.Errorf("Docker client creation failed: %w", err)
+		return fmt.Errorf("docker client creation failed: %w", err)
 	}
 	defer func() { _ = cli.Close() }()
 
 	if _, err := cli.Ping(ctx); err != nil {
-		return fmt.Errorf("Docker daemon not running. Start Docker Desktop and retry")
+		return fmt.Errorf("docker daemon not running: start Docker Desktop and retry")
 	}
 
 	// Get version for display
@@ -116,7 +122,7 @@ func checkDockerDaemon(ctx context.Context) error {
 }
 
 func checkDockerVersion(ctx context.Context) error {
-	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	cli, err := newDockerClient()
 	if err != nil {
 		return err
 	}
@@ -137,7 +143,7 @@ func checkDockerVersion(ctx context.Context) error {
 	major := versionParts[0]
 	majorInt, err := strconv.Atoi(major)
 	if err != nil || majorInt < 20 {
-		return fmt.Errorf("Docker version %s is too old (need >= 20.10)", version.Version)
+		return fmt.Errorf("docker version %s is too old (need >= 20.10)", version.Version)
 	}
 
 	printSuccess("Docker version supported (>= 20.10)")
@@ -177,7 +183,7 @@ func checkFileSharingMacOS(ctx context.Context) error {
 }
 
 func checkImagePresence(ctx context.Context) error {
-	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	cli, err := newDockerClient()
 	if err != nil {
 		return err
 	}
@@ -189,7 +195,7 @@ func checkImagePresence(ctx context.Context) error {
 	_, err = cli.ImageInspect(ctx, imageName)
 	if err != nil {
 		// Image not present - offer guidance
-		_, _ = infoColor.Printf("Image %s not found locally\n", imageName)
+		printInfo(fmt.Sprintf("Image %s not found locally", imageName))
 		fmt.Println("  Run: docker pull ourocodus/agent:latest")
 		return fmt.Errorf("image not present (pull required)")
 	}
@@ -253,7 +259,7 @@ func checkDiskSpace(ctx context.Context) error {
 }
 
 func checkSpawnSmokeTest(ctx context.Context) error {
-	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	cli, err := newDockerClient()
 	if err != nil {
 		return err
 	}
@@ -267,7 +273,7 @@ func checkSpawnSmokeTest(ctx context.Context) error {
 	_, err = cli.ImageInspect(ctx, testImage)
 	if err != nil {
 		// Image not present, skip smoke test
-		_, _ = infoColor.Println("  Smoke test skipped (alpine:latest not available)")
+		printInfo("  Smoke test skipped (alpine:latest not available)")
 		printSuccess("Spawn smoke test (skipped)")
 		return nil
 	}

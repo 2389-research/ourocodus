@@ -1,16 +1,15 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"io"
-	"os"
-	"os/signal"
+	"strings"
 
+	"github.com/2389-research/ourocodus/cmd/agentd/internal/theme"
+	uirepl "github.com/2389-research/ourocodus/cmd/agentd/internal/tui/repl"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/stdcopy"
-	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 )
 
@@ -39,7 +38,7 @@ func runREPL(cmd *cobra.Command, args []string) error {
 	}
 
 	agentID := args[0]
-	ctx := context.Background()
+	ctx := cmd.Context()
 
 	// Find agent
 	agents, err := listAgentsFromDocker(ctx)
@@ -47,9 +46,14 @@ func runREPL(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to list agents: %w", err)
 	}
 
+	th := theme.NewRetroTheme(theme.PaletteCGA)
+	errorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(string(th.Error)))
+	successStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(string(th.Success)))
+	mutedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(string(th.Muted)))
+
 	agent, found := findAgentByID(agents, agentID)
 	if !found {
-		_, _ = color.New(color.FgRed).Printf("✗ Agent '%s' not found\n", agentID)
+		fmt.Println(errorStyle.Render(fmt.Sprintf("✗ Agent '%s' not found", agentID)))
 		fmt.Println("\nRunning agents:")
 		if len(agents) == 0 {
 			fmt.Println("  (none)")
@@ -65,17 +69,17 @@ func runREPL(cmd *cobra.Command, args []string) error {
 	}
 
 	// Connect to Docker
-	dockerClient, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	dockerClient, err := newDockerClient()
 	if err != nil {
 		return fmt.Errorf("failed to create Docker client: %w", err)
 	}
 	defer func() { _ = dockerClient.Close() }()
 
 	// Print connection message
-	_, _ = color.New(color.FgGreen).Printf("✓ Connected to agent '%s'\n", agentID)
-	_, _ = color.New(color.FgHiBlack).Println("  Press Ctrl+D to exit")
+	fmt.Println(successStyle.Render(fmt.Sprintf("✓ Connected to agent '%s'", agentID)))
+	fmt.Println(mutedStyle.Render("  Press Ctrl+D to exit"))
 
-	// Attach to container with TTY
+	// Attach to container without TTY (raw JSON lines)
 	attachResp, err := dockerClient.ContainerAttach(ctx, agent.ContainerID, container.AttachOptions{
 		Stream: true,
 		Stdin:  true,
@@ -87,45 +91,25 @@ func runREPL(cmd *cobra.Command, args []string) error {
 	}
 	defer attachResp.Close()
 
-	// Note: We do NOT set raw terminal mode here because ACP communicates
-	// via line-buffered stdin/stdout, not character-by-character TTY I/O.
-	// The container was spawned without a TTY, so raw mode would break input.
-
-	// Handle Ctrl+C gracefully
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt)
-	defer signal.Stop(sigChan)
-
-	// Bidirectional copy
-	errChan := make(chan error, 2)
-
-	// Copy container output to stdout (demultiplex Docker stream)
+	// Demultiplex Docker stdio
+	stdoutR, stdoutW := io.Pipe()
+	stderrR, stderrW := io.Pipe()
 	go func() {
-		_, err := stdcopy.StdCopy(os.Stdout, os.Stderr, attachResp.Reader)
-		errChan <- err
+		_, _ = stdcopy.StdCopy(stdoutW, stderrW, attachResp.Reader)
+		_ = stdoutW.Close()
+		_ = stderrW.Close()
 	}()
 
-	// Copy stdin to container
-	go func() {
-		_, err := io.Copy(attachResp.Conn, os.Stdin)
-		errChan <- err
-	}()
+	// Start TUI
+	err = uirepl.Run(ctx, th, agentID, attachResp.Conn, stdoutR, stderrR)
 
-	// Wait for completion or signal
-	select {
-	case <-sigChan:
-		// User interrupted - clean exit
+	// On exit, print disconnect unless user already saw one
+	if err == nil || strings.Contains(err.Error(), "interrupt") {
 		fmt.Println()
-		_, _ = color.New(color.FgGreen).Printf("✓ Disconnected from agent '%s'\n", agentID)
-		return nil
-	case err := <-errChan:
-		// Connection closed or error
-		if err != nil && err != io.EOF {
-			return fmt.Errorf("REPL error: %w", err)
-		}
-		_, _ = color.New(color.FgGreen).Printf("\n✓ Disconnected from agent '%s'\n", agentID)
+		fmt.Println(successStyle.Render(fmt.Sprintf("✓ Disconnected from agent '%s'", agentID)))
 		return nil
 	}
+	return err
 }
 
 // findAgentByID searches for an agent by ID

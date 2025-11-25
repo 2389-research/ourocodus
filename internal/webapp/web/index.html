@@ -11,7 +11,32 @@
     <link rel="apple-touch-icon" href="/icon-192.png">
     <title>Ourocodus</title>
     <link rel="stylesheet" href="styles.min.07ba15c4.css">
-    <link rel="stylesheet" href="tailwind.8c19d015.css">
+    <link rel="stylesheet" href="tailwind.a18b04ae.css">
+    <style>
+        /* Lightweight styles for discover/adopt UI */
+        .agent-discovery { margin-top: 16px; padding: 12px; border-radius: 8px; }
+        .agent-discovery .card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+        .discovered-agents-list { display: grid; gap: 10px; }
+        .discovered-agent-card { border-radius: 8px; padding: 10px; display: flex; justify-content: space-between; align-items: center; }
+        .discovered-agent-meta { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 4px; font-size: 0.9rem; }
+        .discovered-agent-meta .agent-id { font-weight: 700; grid-column: span 2; }
+        .discovered-agent-actions { display: flex; gap: 8px; align-items: center; }
+        .info-text { font-size: 0.9rem; }
+        .input-with-button { display: flex; gap: 6px; align-items: center; }
+        .input-with-button input { flex: 1; }
+
+        /* Dark theme */
+        :root:not([data-theme="light"]) .agent-discovery { border: 1px solid #1f2937; background: #0f172a; color: #e5e7eb; }
+        :root:not([data-theme="light"]) .discovered-agent-card { border: 1px solid #1f2937; background: #111827; box-shadow: 0 4px 8px rgba(0,0,0,0.3); }
+        :root:not([data-theme="light"]) .discovered-agent-meta .agent-id { color: #a5b4fc; }
+        :root:not([data-theme="light"]) .info-text { color: #9ca3af; }
+
+        /* Light theme */
+        :root[data-theme="light"] .agent-discovery { border: 1px solid #cbd5e1; background: #f8fafc; color: #0f172a; }
+        :root[data-theme="light"] .discovered-agent-card { border: 1px solid #e2e8f0; background: #ffffff; box-shadow: 0 2px 6px rgba(0,0,0,0.06); }
+        :root[data-theme="light"] .discovered-agent-meta .agent-id { color: #4338ca; }
+        :root[data-theme="light"] .info-text { color: #475569; }
+    </style>
 </head>
 <body>
     <div class="container">
@@ -61,19 +86,6 @@
                     </div>
                 </div>
 
-                <!-- Agent Discovery Section (Phase 3) -->
-                <div class="agent-discovery-section" id="agentDiscoverySection">
-                    <h3>CLI-Spawned Agents</h3>
-                    <p class="info-text">Discover and attach to agents spawned via <code>agentd spawn</code></p>
-                    <button class="btn btn-secondary" id="discoverAgentsBtn">
-                        <span class="btn-icon">🔍</span>
-                        Discover Agents
-                    </button>
-                    <div id="discoveredAgentsList" class="discovered-agents-list" style="display: none;">
-                        <!-- Discovered agents will be listed here -->
-                    </div>
-                </div>
-
                 <div class="agent-spawn-section" id="agentSpawnSection">
                     <h3>Spawn Agent</h3>
                     <div class="form-group">
@@ -89,6 +101,35 @@
                         Spawn Agent
                     </button>
                 </div>
+
+                <div class="agent-discovery">
+                    <div class="card-header">
+                        <h3>Discover Adoptable Agents</h3>
+                        <button class="btn btn-primary btn-small" id="discoverAgentsBtn">
+                            <span class="btn-icon">🔍</span>
+                            Discover
+                        </button>
+                    </div>
+                    <div id="discoveredAgentsList" class="discovered-agents-list">
+                        <!-- Discovered agents will render here -->
+                    </div>
+                </div>
+
+                <template id="agent-card-template">
+                    <div class="discovered-agent-card">
+                        <div class="discovered-agent-meta">
+                            <div class="agent-id">-</div>
+                            <div class="agent-workspace">workspace</div>
+                            <div class="agent-source">source</div>
+                            <div class="agent-created">created</div>
+                        </div>
+                        <div class="discovered-agent-actions">
+                            <button class="btn btn-small btn-primary" data-action="attach">
+                                Attach
+                            </button>
+                        </div>
+                    </div>
+                </template>
 
                 <div id="agentCards" class="agent-cards-container">
                     <!-- Agent cards will be rendered here -->
@@ -205,28 +246,27 @@
         </div>
     </div>
 
-    <!-- Agent Attachment Modal (Phase 3) -->
+    <!-- Attach Agent Modal -->
     <div class="modal" id="attachAgentModal" style="display: none;">
         <div class="modal-overlay" aria-hidden="true"></div>
         <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="attachAgentModalTitle" aria-describedby="attachAgentModalDesc">
             <h3 id="attachAgentModalTitle">Attach to Agent</h3>
             <div id="attachAgentModalDesc">
-                <p>Attach to CLI-spawned agent: <strong id="attachAgentId">-</strong></p>
-                <p class="modal-info">🔐 Enter the attach token displayed when you ran <code>agentd spawn</code></p>
+                <p>Enter the attach token for agent <strong id="attachAgentId">-</strong>.</p>
                 <div class="form-group">
-                    <label for="attachTokenInput">Attach Token:</label>
-                    <div style="position: relative;">
-                        <input type="password" id="attachTokenInput" placeholder="Paste token from agentd spawn output" style="font-family: monospace; width: 100%; padding-right: 3rem;" autocomplete="off" spellcheck="false" autocapitalize="off">
-                        <button type="button" id="toggleTokenVisibility" class="btn btn-small" style="position: absolute; right: 0.5rem; top: 50%; transform: translateY(-50%);" title="Show/hide token" aria-label="Toggle token visibility">
-                            <span id="toggleTokenIcon" aria-hidden="true">👁️</span>
+                    <label for="attachTokenInput">Attach Token</label>
+                    <div class="input-with-button">
+                        <input type="password" id="attachTokenInput" placeholder="paste token here">
+                        <button id="toggleTokenVisibility" type="button" aria-label="Toggle token visibility">
+                            <span id="toggleTokenIcon">👁️‍🗨️</span>
                         </button>
                     </div>
+                    <div id="attachError" class="error-text" style="display: none;"></div>
                 </div>
-                <div id="attachError" class="modal-warning" style="display: none;"></div>
             </div>
             <div class="modal-actions">
-                <button class="btn btn-secondary" id="cancelAttachAgent" aria-label="Cancel attach agent">Cancel</button>
-                <button class="btn btn-primary" id="confirmAttachAgent" aria-label="Confirm attach agent">
+                <button class="btn btn-secondary" id="cancelAttachAgent" aria-label="Cancel attach">Cancel</button>
+                <button class="btn btn-primary" id="confirmAttachAgent" aria-label="Confirm attach">
                     <span class="btn-icon" aria-hidden="true">🔗</span>
                     Attach
                 </button>
@@ -234,25 +274,7 @@
         </div>
     </div>
 
-    <!-- Agent Card Template (Phase 3) -->
-    <template id="agent-card-template">
-        <div class="discovered-agent-card">
-            <div class="agent-info-text">
-                <strong class="agent-id"></strong>
-                <small>
-                    <strong>Workspace:</strong> <span class="agent-workspace"></span><br>
-                    <strong>Source:</strong> <span class="agent-source"></span><br>
-                    <strong>Created:</strong> <span class="agent-created"></span>
-                </small>
-            </div>
-            <button class="btn btn-primary btn-small" data-action="attach">
-                <span class="btn-icon">🔗</span>
-                Attach
-            </button>
-        </div>
-    </template>
-
     <script src="logger.e107c653.js"></script>
-    <script src="app.5f8a4aaf.js"></script>
+    <script src="app.2e86a28b.js"></script>
 </body>
 </html>

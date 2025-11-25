@@ -53,6 +53,10 @@ func TestCLI_SpawnListStopWorkflow(t *testing.T) {
 		t.Skip("DOCKER_HOST not set, skipping integration test")
 	}
 
+	if os.Getenv("ANTHROPIC_API_KEY") == "" {
+		t.Skip("ANTHROPIC_API_KEY not set, skipping integration test")
+	}
+
 	ctx := context.Background()
 	agentID := "test-cli-workflow"
 
@@ -167,6 +171,10 @@ func TestCLI_StopMultipleAgents(t *testing.T) {
 		t.Skip("DOCKER_HOST not set, skipping integration test")
 	}
 
+	if os.Getenv("ANTHROPIC_API_KEY") == "" {
+		t.Skip("ANTHROPIC_API_KEY not set, skipping integration test")
+	}
+
 	ctx := context.Background()
 	agent1ID := "test-cli-multi-1"
 	agent2ID := "test-cli-multi-2"
@@ -236,6 +244,10 @@ func TestCLI_LogsCommand(t *testing.T) {
 		t.Skip("DOCKER_HOST not set, skipping integration test")
 	}
 
+	if os.Getenv("ANTHROPIC_API_KEY") == "" {
+		t.Skip("ANTHROPIC_API_KEY not set, skipping integration test")
+	}
+
 	ctx := context.Background()
 	agentID := "test-cli-logs"
 
@@ -299,6 +311,10 @@ func TestCLI_SpawnWithEnvironment(t *testing.T) {
 
 	if os.Getenv("DOCKER_HOST") == "" {
 		t.Skip("DOCKER_HOST not set, skipping integration test")
+	}
+
+	if os.Getenv("ANTHROPIC_API_KEY") == "" {
+		t.Skip("ANTHROPIC_API_KEY not set, skipping integration test")
 	}
 
 	ctx := context.Background()
@@ -391,6 +407,10 @@ func TestCLI_SendCommand(t *testing.T) {
 
 	if os.Getenv("DOCKER_HOST") == "" {
 		t.Skip("DOCKER_HOST not set, skipping integration test")
+	}
+
+	if os.Getenv("ANTHROPIC_API_KEY") == "" {
+		t.Skip("ANTHROPIC_API_KEY not set, skipping integration test")
 	}
 
 	ctx := context.Background()

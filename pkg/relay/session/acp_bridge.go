@@ -170,6 +170,10 @@ func NewACPBridge(ctx context.Context, containerID, agentID string) (*ACPBridge,
 // The context is used for timeout/cancellation. If the context is canceled before
 // the response arrives, the pending request is marked as canceled and the eventual
 // late response will be discarded to prevent misalignment with future requests.
+//
+// Returns *acp.AgentMessage to match the ACPClient interface contract expected by
+// pkg/relay/server.go. The server performs a type assertion to *acp.AgentMessage,
+// so returning the raw interface{} would cause AGENT_MESSAGE_FAILED errors.
 func (b *ACPBridge) SendMessage(ctx context.Context, content string) (interface{}, error) {
 	// Generate unique request ID
 	reqID := generateRequestID()
@@ -219,11 +223,11 @@ func (b *ACPBridge) SendMessage(ctx context.Context, content string) (interface{
 		return nil, fmt.Errorf("agent error %d: %s", resp.Error.Code, resp.Error.Message)
 	}
 
-	// Unmarshal result into acp.AgentMessage to match the interface contract
-	// The ACPClient interface returns interface{} but server expects *acp.AgentMessage
+	// Parse result into typed AgentMessage (required for server type assertion)
+	// This matches the behavior of pkg/acp.Client.SendMessage which returns *acp.AgentMessage
 	var agentMsg acp.AgentMessage
 	if err := json.Unmarshal(resp.Result, &agentMsg); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal agent message: %w", err)
+		return nil, fmt.Errorf("failed to parse agent message: %w", err)
 	}
 
 	return &agentMsg, nil

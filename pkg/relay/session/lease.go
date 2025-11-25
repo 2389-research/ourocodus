@@ -248,6 +248,11 @@ func ReadLease(agentID string) (*Lease, error) {
 }
 
 // RenewLease extends the expiry time of an existing lease.
+// This uses an atomic write pattern to prevent race conditions:
+// 1. Read existing lease
+// 2. Update expiry
+// 3. Write to unique temp file
+// 4. Atomic rename temp -> original
 func RenewLease(agentID string) error {
 	// Validate agentID to prevent path traversal
 	if err := ValidateAgentID(agentID); err != nil {
@@ -263,13 +268,34 @@ func RenewLease(agentID string) error {
 	lease.ExpiresAt = time.Now().Add(LeaseTTL)
 
 	leasePath := filepath.Join(LeaseDir, agentID+".lease")
+
 	data, err := json.Marshal(lease)
 	if err != nil {
 		return fmt.Errorf("failed to marshal lease: %w", err)
 	}
 
-	if err := os.WriteFile(leasePath, data, 0o600); err != nil {
-		return fmt.Errorf("failed to write lease: %w", err)
+	// Write to unique temp file first (handles concurrent renewals)
+	tempFile, err := os.CreateTemp(LeaseDir, agentID+".lease.tmp.*")
+	if err != nil {
+		return fmt.Errorf("failed to create temp lease file: %w", err)
+	}
+	tempPath := tempFile.Name()
+
+	if _, err := tempFile.Write(data); err != nil {
+		_ = tempFile.Close()
+		_ = os.Remove(tempPath)
+		return fmt.Errorf("failed to write temp lease: %w", err)
+	}
+
+	if err := tempFile.Close(); err != nil {
+		_ = os.Remove(tempPath)
+		return fmt.Errorf("failed to close temp lease: %w", err)
+	}
+
+	// Atomic rename (on POSIX systems, this is atomic within same filesystem)
+	if err := os.Rename(tempPath, leasePath); err != nil {
+		_ = os.Remove(tempPath) // Cleanup temp file on error
+		return fmt.Errorf("failed to rename lease file: %w", err)
 	}
 
 	return nil

@@ -2,19 +2,27 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
+	"github.com/2389-research/ourocodus/cmd/agentd/internal/detect"
+	"github.com/2389-research/ourocodus/cmd/agentd/internal/output"
+	"github.com/2389-research/ourocodus/cmd/agentd/internal/theme"
+	"github.com/2389-research/ourocodus/pkg/labels"
+	"github.com/charmbracelet/lipgloss"
 	cerrdefs "github.com/containerd/errdefs"
 	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/client"
-	"github.com/fatih/color"
 	"github.com/spf13/cobra"
+)
 
-	"github.com/2389-research/ourocodus/pkg/relay/session"
+var (
+	stopJSON  bool
+	stopPlain bool
 )
 
 var stopCmd = &cobra.Command{
@@ -23,8 +31,6 @@ var stopCmd = &cobra.Command{
 	Long: `Stop gracefully shuts down agents and cleans up all resources:
   - Stops Docker container (30s graceful timeout)
   - Removes git worktree and branch
-  - Releases agent lease (detaches from any attached session)
-  - Deletes attach token
   - Cleans up credential files
 
 This command is idempotent - safe to call multiple times.`,
@@ -35,28 +41,64 @@ This command is idempotent - safe to call multiple times.`,
   agentd stop alice bob charlie
 
   # Idempotent - safe to retry
-  agentd stop alice  # Returns success even if already stopped`,
+  agentd stop alice  # Returns success even if already stopped
+
+  # JSON output for scripting
+  agentd stop alice --json
+
+  # Plain text output (no colors)
+  agentd stop alice --plain`,
 	Args: cobra.MinimumNArgs(1),
 	RunE: runStop,
 }
 
 func init() {
-	// Command registered in main.go
+	stopCmd.Flags().BoolVar(&stopJSON, "json", false, "Output in JSON format")
+	stopCmd.Flags().BoolVar(&stopPlain, "plain", false, "Output in plain text (no colors)")
+}
+
+// StopResult represents the output of a stop operation for JSON output
+type StopResult struct {
+	AgentID       string `json:"agentId"`
+	ContainerID   string `json:"containerId,omitempty"`
+	WorkspacePath string `json:"workspacePath,omitempty"`
+	Status        string `json:"status"` // "stopped", "not_found", "failed"
+	Error         string `json:"error,omitempty"`
+}
+
+// StopResults represents multiple stop results for JSON output
+type StopResults struct {
+	Results []StopResult `json:"results"`
+	Success bool         `json:"success"`
 }
 
 func runStop(cmd *cobra.Command, args []string) error {
-	ctx := context.Background()
+	ctx := cmd.Context()
 
-	// Stop each agent (no need for launcher - we query Docker directly)
+	// Detect output mode
+	shouldPlain := detect.ShouldUsePlainMode(stopJSON, stopPlain, os.Environ)
+	mode := output.DetectMode(stopJSON, stopPlain, shouldPlain)
+
+	// Collect results for JSON output
+	results := make([]StopResult, 0, len(args))
 	allSucceeded := true
+
 	for _, agentID := range args {
-		if err := stopAgent(ctx, nil, agentID); err != nil {
-			fmt.Fprintf(os.Stderr, "\n")
-			printError(fmt.Sprintf("Failed to stop '%s': %v", agentID, err))
-			fmt.Fprintf(os.Stderr, "\n")
+		result := stopAgentWithMode(ctx, agentID, mode)
+		results = append(results, result)
+		if result.Status == "failed" {
 			allSucceeded = false
-			continue
 		}
+	}
+
+	// Output results based on mode
+	if mode.IsJSON() {
+		encoder := json.NewEncoder(os.Stdout)
+		encoder.SetIndent("", "  ")
+		_ = encoder.Encode(StopResults{
+			Results: results,
+			Success: allSucceeded,
+		})
 	}
 
 	if !allSucceeded {
@@ -66,102 +108,147 @@ func runStop(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func stopAgent(ctx context.Context, _ interface{}, agentID string) error {
-	_, _ = color.New(color.FgYellow, color.Bold).Printf("🛑 Stopping agent '%s'...\n", agentID)
+// stopAgentWithMode stops an agent and returns a StopResult, with output based on mode
+func stopAgentWithMode(ctx context.Context, agentID string, mode output.Mode) StopResult {
+	result := StopResult{AgentID: agentID}
+	printStopProgress(agentID, mode)
 
-	// First, try to find the container in Docker by agent-id label
+	// Find the container
 	containerID, workspacePath, err := findAgentContainer(ctx, agentID)
 	if err != nil {
-		return fmt.Errorf("failed to find agent: %w", err)
+		return setStopFailed(&result, fmt.Sprintf("failed to find agent: %v", err), mode)
 	}
+	result.ContainerID = containerID
+	result.WorkspacePath = workspacePath
 
 	if containerID == "" {
-		// Agent doesn't exist - this is okay (idempotent)
-		// But still clean up leases/tokens in case they're stale
-		printSuccess(fmt.Sprintf("Agent '%s' not found (already stopped)", agentID))
-
-		// Clean up worktree if workspace path is known
-		if workspacePath != "" {
-			if err := removeWorktree(ctx, workspacePath); err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: failed to cleanup worktree: %v\n", err)
-			} else {
-				printSuccess("Cleaned up worktree")
-			}
-		}
-
-		// Attempt lease release (idempotent)
-		if err := session.ReleaseLease(agentID); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to release lease: %v\n", err)
-		} else {
-			printSuccess("Released agent lease")
-		}
-
-		// Attempt token deletion (idempotent)
-		if err := deleteAttachToken(agentID); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to delete attach token: %v\n", err)
-		} else {
-			printSuccess("Deleted attach token")
-		}
-
-		printSuccess("Cleaned up agent resources")
-		return nil
+		result.Status = "not_found"
+		printIfNotJSON(mode, func() { printStopNotFound(agentID, mode) })
+		return result
 	}
 
-	fmt.Println()
+	printIfNotJSON(mode, func() { fmt.Println() })
 
-	// Stop the container using Docker directly
+	// Stop the container
 	if err := stopContainer(ctx, containerID); err != nil {
-		return fmt.Errorf("failed to stop container: %w", err)
+		return setStopFailed(&result, fmt.Sprintf("failed to stop container: %v", err), mode)
 	}
-	printSuccess(fmt.Sprintf("Stopped container %s", formatContainerID(containerID)))
+	printIfNotJSON(mode, func() { printStopContainerSuccess(containerID, mode) })
 
 	// Remove the worktree if it exists
-	if workspacePath != "" {
-		if err := removeWorktree(ctx, workspacePath); err != nil {
-			// Log warning but don't fail - worktree might already be removed
-			fmt.Fprintf(os.Stderr, "Warning: failed to remove worktree: %v\n", err)
-		} else {
-			printSuccess(fmt.Sprintf("Removed worktree %s", formatWorkspace(workspacePath)))
-		}
-	}
+	cleanupWorktree(workspacePath, mode)
 
-	// Release lease if it exists (Phase 3: cleanup agent attachment state)
-	if err := session.ReleaseLease(agentID); err != nil {
-		// Log warning but don't fail - lease might not exist
-		fmt.Fprintf(os.Stderr, "Warning: failed to release lease: %v\n", err)
+	result.Status = "stopped"
+	printIfNotJSON(mode, func() {
+		printStopCleanupSuccess(agentID, mode)
+		fmt.Println()
+	})
+	return result
+}
+
+// printStopProgress prints the initial stopping message for non-JSON modes.
+func printStopProgress(agentID string, mode output.Mode) {
+	if mode.IsJSON() {
+		return
+	}
+	if mode.IsRich() {
+		th := theme.NewRetroTheme(theme.PaletteCGA)
+		headerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(string(th.Warning))).Bold(true)
+		fmt.Println(headerStyle.Render(fmt.Sprintf("🛑 Stopping agent '%s'...", agentID)))
 	} else {
-		printSuccess("Released agent lease")
+		fmt.Printf("Stopping agent '%s'...\n", agentID)
 	}
+}
 
-	// Remove attach token if it exists (Phase 4: cleanup security token)
-	if err := deleteAttachToken(agentID); err != nil {
-		// Log warning but don't fail - token might not exist
-		fmt.Fprintf(os.Stderr, "Warning: failed to delete attach token: %v\n", err)
+// setStopFailed sets the result to failed status with error message and prints if needed.
+func setStopFailed(result *StopResult, errMsg string, mode output.Mode) StopResult {
+	result.Status = "failed"
+	result.Error = errMsg
+	printIfNotJSON(mode, func() { printError(errMsg) })
+	return *result
+}
+
+// cleanupWorktree removes the worktree if it exists, logging warnings on failure.
+func cleanupWorktree(workspacePath string, mode output.Mode) {
+	if workspacePath == "" {
+		return
+	}
+	if err := removeWorktree(context.Background(), workspacePath); err != nil {
+		printIfNotJSON(mode, func() {
+			if mode.IsRich() {
+				fmt.Fprintf(os.Stderr, "Warning: failed to remove worktree: %v\n", err)
+			} else {
+				fmt.Printf("Warning: failed to remove worktree: %v\n", err)
+			}
+		})
 	} else {
-		printSuccess("Deleted attach token")
+		printIfNotJSON(mode, func() { printStopWorktreeSuccess(workspacePath, mode) })
 	}
+}
 
-	printSuccess("Cleaned up agent resources")
-	fmt.Println()
+// printIfNotJSON executes fn only if mode is not JSON.
+func printIfNotJSON(mode output.Mode, fn func()) {
+	if !mode.IsJSON() {
+		fn()
+	}
+}
 
-	return nil
+// printStopNotFound prints message when agent is not found
+func printStopNotFound(agentID string, mode output.Mode) {
+	if mode.IsRich() {
+		printSuccess(fmt.Sprintf("Agent '%s' not found (already stopped)", agentID))
+	} else {
+		fmt.Printf("Agent '%s' not found (already stopped)\n", agentID)
+	}
+}
+
+// printStopContainerSuccess prints container stop success
+func printStopContainerSuccess(containerID string, mode output.Mode) {
+	shortID := output.FormatContainerID(containerID)
+	if mode.IsRich() {
+		printSuccess(fmt.Sprintf("Stopped container %s", shortID))
+	} else {
+		fmt.Printf("Stopped container %s\n", shortID)
+	}
+}
+
+// printStopWorktreeSuccess prints worktree removal success
+func printStopWorktreeSuccess(workspacePath string, mode output.Mode) {
+	displayPath := workspacePath
+	if len(displayPath) > 60 {
+		displayPath = "..." + displayPath[len(displayPath)-57:]
+	}
+	if mode.IsRich() {
+		printSuccess(fmt.Sprintf("Removed worktree %s", displayPath))
+	} else {
+		fmt.Printf("Removed worktree %s\n", displayPath)
+	}
+}
+
+// printStopCleanupSuccess prints final cleanup success
+func printStopCleanupSuccess(agentID string, mode output.Mode) {
+	if mode.IsRich() {
+		th := theme.NewRetroTheme(theme.PaletteCGA)
+		successStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color(string(th.Success))).
+			Bold(true)
+		fmt.Println(successStyle.Render(fmt.Sprintf("✓ Agent %s stopped and cleaned up", agentID)))
+	} else {
+		fmt.Printf("Agent %s stopped and cleaned up\n", agentID)
+	}
 }
 
 func findAgentContainer(ctx context.Context, agentID string) (string, string, error) {
-	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	cli, err := newDockerClient()
 	if err != nil {
 		return "", "", err
 	}
 	defer func() { _ = cli.Close() }()
 
-	// Find container with matching agent-id label
-	filterArgs := filters.NewArgs()
-	filterArgs.Add("label", fmt.Sprintf("%s=true", LabelNamespace))
-	filterArgs.Add("label", fmt.Sprintf("%s=%s", LabelAgentID, agentID))
-
+	// Use centralized filter builder from pkg/labels
 	containers, err := cli.ContainerList(ctx, container.ListOptions{
 		All:     true,
-		Filters: filterArgs,
+		Filters: labels.FindAgentFilter(agentID),
 	})
 	if err != nil {
 		return "", "", err
@@ -184,15 +271,17 @@ func findAgentContainer(ctx context.Context, agentID string) (string, string, er
 }
 
 func stopContainer(ctx context.Context, containerID string) error {
-	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	cli, err := newDockerClient()
 	if err != nil {
 		return err
 	}
 	defer func() { _ = cli.Close() }()
 
 	// Stop the container with grace period
-	timeout := 30
-	if err := cli.ContainerStop(ctx, containerID, container.StopOptions{
+	timeout := 5
+	stopCtx, cancel := context.WithTimeout(ctx, time.Duration(timeout+3)*time.Second)
+	defer cancel()
+	if err := cli.ContainerStop(stopCtx, containerID, container.StopOptions{
 		Timeout: &timeout,
 	}); err != nil {
 		// If it's already stopped or gone, treat as non-fatal for idempotence
@@ -201,8 +290,23 @@ func stopContainer(ctx context.Context, containerID string) error {
 		}
 	}
 
+	// Wait briefly for container to stop; if not, send SIGKILL
+	if err := waitForStop(ctx, cli, containerID, 7*time.Second); err != nil {
+		killCtx, killCancel := context.WithTimeout(ctx, 3*time.Second)
+		defer killCancel()
+		if killErr := cli.ContainerKill(killCtx, containerID, "SIGKILL"); killErr != nil {
+			return fmt.Errorf("failed to stop container gracefully (%w) and kill failed (%v)", err, killErr)
+		}
+		if finalErr := waitForStop(ctx, cli, containerID, 3*time.Second); finalErr != nil {
+			return fmt.Errorf("container did not exit after SIGKILL: %w", finalErr)
+		}
+		return fmt.Errorf("container stop exceeded timeout; SIGKILL issued: %w", err)
+	}
+
 	// Remove the container to clean up artifacts (idempotent)
-	if err := cli.ContainerRemove(ctx, containerID, container.RemoveOptions{
+	removeCtx, removeCancel := context.WithTimeout(ctx, 5*time.Second)
+	defer removeCancel()
+	if err := cli.ContainerRemove(removeCtx, containerID, container.RemoveOptions{
 		Force:         true,
 		RemoveVolumes: true,
 	}); err != nil {
@@ -213,6 +317,31 @@ func stopContainer(ctx context.Context, containerID string) error {
 	}
 
 	return nil
+}
+
+// waitForStop polls Docker until the container is not running or timeout elapses.
+func waitForStop(ctx context.Context, cli *client.Client, containerID string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		// Use a short timeout for each poll to respect context cancellation
+		pollCtx, cancel := context.WithTimeout(ctx, time.Second)
+		inspect, err := cli.ContainerInspect(pollCtx, containerID)
+		cancel()
+
+		if err == nil && !inspect.State.Running {
+			return nil
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if time.Now().After(deadline) {
+			if err != nil {
+				return err
+			}
+			return fmt.Errorf("container still running after %s", timeout)
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
 }
 
 // removeWorktree removes a git worktree and its associated branch
@@ -268,11 +397,12 @@ func getWorktreeBranch(ctx context.Context, workspacePath string) (string, error
 // listWorktreesPorcelain returns the output of 'git worktree list --porcelain'
 func listWorktreesPorcelain(ctx context.Context) (string, error) {
 	cmd := exec.CommandContext(ctx, "git", "worktree", "list", "--porcelain")
-	output, err := cmd.Output()
+	cmd.Stderr = os.Stderr // Capture stderr for debugging
+	out, err := cmd.Output()
 	if err != nil {
 		return "", err
 	}
-	return string(output), nil
+	return string(out), nil
 }
 
 // parseBranchFromWorktreeList extracts the branch name for a worktree path from porcelain output
@@ -295,20 +425,12 @@ func deleteBranch(ctx context.Context, branchName string) error {
 	return cmd.Run()
 }
 
-// deleteAttachToken deletes the attach token file for an agent
-// Token files are stored in .agentd/session/{agent-id}.token
-func deleteAttachToken(agentID string) error {
-	// Validate agentID to prevent path traversal
-	if err := session.ValidateAgentID(agentID); err != nil {
-		return fmt.Errorf("invalid agent ID: %w", err)
-	}
-
-	tokenPath := fmt.Sprintf(".agentd/session/%s.token", agentID)
-	if err := os.Remove(tokenPath); err != nil {
-		if os.IsNotExist(err) {
-			return nil // Already deleted, idempotent
-		}
-		return fmt.Errorf("failed to remove token file: %w", err)
+// stopAgent is a test-compatible wrapper for stopAgentWithMode.
+// The second parameter is ignored (legacy signature for tests).
+func stopAgent(ctx context.Context, _ *cobra.Command, agentID string) error {
+	result := stopAgentWithMode(ctx, agentID, output.ModePlain)
+	if result.Status == "failed" {
+		return fmt.Errorf("%s", result.Error)
 	}
 	return nil
 }

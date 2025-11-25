@@ -1,17 +1,20 @@
 package main
 
 import (
-	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/2389-research/ourocodus/cmd/agentd/internal/detect"
+	"github.com/2389-research/ourocodus/cmd/agentd/internal/output"
+	"github.com/2389-research/ourocodus/cmd/agentd/internal/theme"
 	"github.com/2389-research/ourocodus/pkg/agent/container"
-	"github.com/fatih/color"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 )
 
@@ -20,6 +23,8 @@ var (
 	spawnImage     string
 	spawnEnv       []string
 	spawnAPIKey    string
+	spawnJSON      bool
+	spawnPlain     bool
 )
 
 var spawnCmd = &cobra.Command{
@@ -41,7 +46,13 @@ If no agent-id is provided, one will be generated automatically.`,
   agentd spawn bob --image ourocodus/agent:dev
 
   # Spawn with environment variables
-  agentd spawn charlie --env "DEBUG=1" --env "LOG_LEVEL=trace"`,
+  agentd spawn charlie --env "DEBUG=1" --env "LOG_LEVEL=trace"
+
+  # JSON output for scripting
+  agentd spawn --json
+
+  # Plain text output (no colors)
+  agentd spawn --plain`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runSpawn,
 }
@@ -51,10 +62,16 @@ func init() {
 	spawnCmd.Flags().StringVar(&spawnImage, "image", "ourocodus/agent:latest", "Docker image")
 	spawnCmd.Flags().StringArrayVar(&spawnEnv, "env", nil, "Environment variables (KEY=VALUE)")
 	spawnCmd.Flags().StringVar(&spawnAPIKey, "api-key", "", "Anthropic API key (or set ANTHROPIC_API_KEY env var)")
+	spawnCmd.Flags().BoolVar(&spawnJSON, "json", false, "Output in JSON format")
+	spawnCmd.Flags().BoolVar(&spawnPlain, "plain", false, "Output in plain text (no colors)")
 }
 
 func runSpawn(cmd *cobra.Command, args []string) error {
-	ctx := context.Background()
+	ctx := cmd.Context()
+
+	// Detect output mode
+	shouldPlain := detect.ShouldUsePlainMode(spawnJSON, spawnPlain, os.Environ)
+	mode := output.DetectMode(spawnJSON, spawnPlain, shouldPlain)
 
 	// Get or generate agent ID
 	agentID := generateAgentID(args)
@@ -68,7 +85,17 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("agent '%s' already exists\nUse 'agentd list' to see active agents or 'agentd stop %s' to remove it", agentID, agentID)
 	}
 
-	_, _ = color.New(color.FgCyan, color.Bold).Printf("✨ Creating isolated agent '%s'...\n\n", agentID)
+	// Only print progress for rich/plain mode, not JSON
+	if !mode.IsJSON() {
+		if mode.IsRich() {
+			th := theme.NewRetroTheme(theme.PaletteCGA)
+			headerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(string(th.Primary))).Bold(true)
+			fmt.Println(headerStyle.Render(fmt.Sprintf("✨ Creating isolated agent '%s'...", agentID)))
+			fmt.Println()
+		} else {
+			fmt.Printf("Creating agent '%s'...\n", agentID)
+		}
+	}
 
 	// Create launcher (wiring pkg/ components)
 	launcher, err := createLauncher()
@@ -98,13 +125,28 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 	// Generate attach token (Phase 4: Security Hardening)
 	token, err := generateAttachToken(agentID)
 	if err != nil {
-		// Non-fatal: agent is running, just warn about token
-		_, _ = color.New(color.FgYellow).Printf("⚠️  Warning: Failed to generate attach token: %v\n", err)
-		_, _ = color.New(color.FgYellow).Println("   Agent is running but attachments will not be secured")
+		// Non-fatal: agent is running, just warn about token (only for non-JSON)
+		if !mode.IsJSON() {
+			if mode.IsRich() {
+				th := theme.NewRetroTheme(theme.PaletteCGA)
+				warnStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(string(th.Warning)))
+				fmt.Println(warnStyle.Render(fmt.Sprintf("⚠️  Warning: Failed to generate attach token: %v", err)))
+				fmt.Println(warnStyle.Render("   Agent is running but attachments will not be secured"))
+			} else {
+				fmt.Printf("Warning: Failed to generate attach token: %v\n", err)
+			}
+		}
 	}
 
-	// Print success
-	printSpawnSuccess(handle, token)
+	// Print success based on output mode
+	switch {
+	case mode.IsJSON():
+		printSpawnSuccessJSON(handle, token)
+	case mode.IsPlain():
+		printSpawnSuccessPlain(handle, token)
+	default:
+		printSpawnSuccessRich(handle, token)
+	}
 
 	return nil
 }
@@ -209,7 +251,7 @@ func generateAttachToken(agentID string) (string, error) {
 	}
 
 	// Encode as base64url (URL-safe, no padding)
-	tokenStr := base64.URLEncoding.EncodeToString(tokenBytes)
+	tokenStr := base64.RawURLEncoding.EncodeToString(tokenBytes)
 
 	// Ensure session directory exists with secure permissions
 	sessionDir := filepath.Join(".agentd", "session")
@@ -226,42 +268,109 @@ func generateAttachToken(agentID string) (string, error) {
 	return tokenStr, nil
 }
 
-// printSpawnSuccess prints the successful spawn output with visual hierarchy
-func printSpawnSuccess(handle *container.AgentContainerHandle, attachToken string) {
+// SpawnResult represents the output of a successful spawn for JSON output
+type SpawnResult struct {
+	AgentID         string `json:"agentId"`
+	ContainerID     string `json:"containerId"`
+	WorkspacePath   string `json:"workspacePath"`
+	BranchName      string `json:"branchName"`
+	CredentialsPath string `json:"credentialsPath,omitempty"`
+	AttachToken     string `json:"attachToken,omitempty"`
+	Status          string `json:"status"`
+}
+
+// printSpawnSuccessJSON prints the successful spawn output as JSON
+func printSpawnSuccessJSON(handle *container.AgentContainerHandle, attachToken string) {
+	result := SpawnResult{
+		AgentID:       handle.AgentID(),
+		ContainerID:   handle.ContainerID(),
+		WorkspacePath: handle.WorkspacePath(),
+		BranchName:    handle.BranchName(),
+		AttachToken:   attachToken,
+		Status:        "running",
+	}
+
+	credPath := handle.CredentialsPath()
+	if credPath != "" && hasCredentialFiles(credPath) {
+		result.CredentialsPath = credPath
+	}
+
+	encoder := json.NewEncoder(os.Stdout)
+	encoder.SetIndent("", "  ")
+	_ = encoder.Encode(result)
+}
+
+// printSpawnSuccessPlain prints the successful spawn output in plain text
+func printSpawnSuccessPlain(handle *container.AgentContainerHandle, attachToken string) {
+	fmt.Printf("Agent: %s\n", handle.AgentID())
+	fmt.Printf("Container: %s (running)\n", handle.ContainerID())
+	fmt.Printf("Worktree: %s (branch: %s)\n", handle.WorkspacePath(), handle.BranchName())
+
+	credPath := handle.CredentialsPath()
+	if credPath != "" && hasCredentialFiles(credPath) {
+		fmt.Printf("Credentials: mounted at /root/.creds (read-only)\n")
+	} else {
+		fmt.Printf("Credentials: none\n")
+	}
+
+	if attachToken != "" {
+		fmt.Printf("\nAttach Token: %s\n", attachToken)
+	}
+
+	fmt.Printf("\nAgent %s ready\n", handle.AgentID())
+}
+
+// printSpawnSuccessRich prints the successful spawn output with colors and styling
+func printSpawnSuccessRich(handle *container.AgentContainerHandle, attachToken string) {
+	th := theme.NewRetroTheme(theme.PaletteCGA)
+
+	// Create styles
+	labelStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(string(th.Primary))).Bold(true)
+	valueStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(string(th.Accent)))
+	mutedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(string(th.Muted)))
+	successStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(string(th.Success)))
+
 	// Worktree
 	fmt.Print("🌳 ")
-	_, _ = infoColor.Printf("Worktree: ")
-	fmt.Printf("%s ", handle.WorkspacePath())
-	_, _ = color.New(color.FgHiBlack).Printf("(branch: %s)\n", handle.BranchName())
+	fmt.Print(labelStyle.Render("Worktree: "))
+	fmt.Print(valueStyle.Render(handle.WorkspacePath()) + " ")
+	fmt.Println(mutedStyle.Render(fmt.Sprintf("(branch: %s)", handle.BranchName())))
 
 	// Container
 	fmt.Print("📦 ")
-	_, _ = infoColor.Printf("Container: ")
-	fmt.Printf("%s ", handle.ContainerID())
-	_, _ = successColor.Printf("(running)\n")
+	fmt.Print(labelStyle.Render("Container: "))
+	fmt.Print(valueStyle.Render(handle.ContainerID()) + " ")
+	fmt.Println(successStyle.Render("(running)"))
 
 	// Credentials
 	fmt.Print("🔑 ")
-	_, _ = infoColor.Printf("Credentials: ")
+	fmt.Print(labelStyle.Render("Credentials: "))
 	credPath := handle.CredentialsPath()
 	if credPath != "" && hasCredentialFiles(credPath) {
-		fmt.Printf("mounted at /root/.creds ")
-		_, _ = color.New(color.FgHiBlack).Printf("(read-only)\n")
+		fmt.Print(valueStyle.Render("mounted at /root/.creds "))
+		fmt.Println(mutedStyle.Render("(read-only)"))
 	} else {
-		_, _ = color.New(color.FgHiBlack).Printf("(none)\n")
+		fmt.Println(mutedStyle.Render("(none)"))
 	}
 
 	// Attach token (Phase 4: Security Hardening)
 	if attachToken != "" {
 		fmt.Println()
 		fmt.Print("🔐 ")
-		_, _ = color.New(color.FgCyan, color.Bold).Printf("Attach Token:\n")
-		fmt.Printf("   %s\n", attachToken)
+		tokenLabel := lipgloss.NewStyle().Foreground(lipgloss.Color("#00F6FF")).Bold(true)
+		fmt.Println(tokenLabel.Render("Attach Token:"))
+		fmt.Printf("   %s\n", valueStyle.Render(attachToken))
 		fmt.Println()
-		_, _ = color.New(color.FgHiBlack).Println("   Use this token when attaching from PWA or relay:")
-		_, _ = color.New(color.FgHiBlack).Printf("   → agent:attach {\"agentId\": \"%s\", \"token\": \"<token>\"}\n", handle.AgentID())
+		fmt.Println(mutedStyle.Render("   Use this token when attaching from PWA or relay:"))
+		fmt.Println(mutedStyle.Render(fmt.Sprintf("   → agent:attach {\"agentId\": \"%s\", \"token\": \"<token>\"}", handle.AgentID())))
 	}
 
 	fmt.Println()
-	printSuccess(fmt.Sprintf("Agent %s ready", handle.AgentID()))
+
+	// Success message with box
+	successBox := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(string(th.Success))).
+		Bold(true).
+		Render(fmt.Sprintf("✓ Agent %s ready", handle.AgentID()))
+	fmt.Println(successBox)
 }

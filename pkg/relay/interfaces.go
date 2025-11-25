@@ -56,6 +56,9 @@ type SessionManagerInterface interface {
 	// Get retrieves a user session by ID
 	Get(userSessionID string) *session.UserSession
 
+	// List returns all sessions matching the filter (nil filter = all sessions)
+	List(filter *session.SessionFilter) []*session.UserSession
+
 	// TerminateAgent terminates a single agent in a user session
 	TerminateAgent(ctx context.Context, userSessionID, agentID string) error
 

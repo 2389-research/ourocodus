@@ -20,14 +20,20 @@ const (
 	ReaperInterval = 1 * time.Minute
 )
 
+// AgentDeathCallback is called when an agent's lease expires, indicating the agent
+// has stopped sending heartbeats and is likely dead or terminated.
+// The callback receives the agentID and userSessionID from the expired lease.
+type AgentDeathCallback func(agentID, userSessionID string)
+
 // HeartbeatMonitor monitors agent heartbeats and manages lease lifecycle
 type HeartbeatMonitor struct {
-	nats     *nats.Conn
-	sub      *nats.Subscription
-	lastSeen map[string]time.Time
-	mu       sync.RWMutex
-	logger   atomic.Value // *log.Logger
-	stopOnce sync.Once
+	nats         *nats.Conn
+	sub          *nats.Subscription
+	lastSeen     map[string]time.Time
+	mu           sync.RWMutex
+	logger       atomic.Value // *log.Logger
+	stopOnce     sync.Once
+	onAgentDeath AgentDeathCallback // optional callback for agent death notification
 }
 
 // NewHeartbeatMonitor creates a new heartbeat monitor.
@@ -158,6 +164,9 @@ func (h *HeartbeatMonitor) reapExpiredLeases(ctx context.Context) {
 //
 // In addition to removing expired lease files, this also prunes the lastSeen map to prevent
 // memory leaks from agents that no longer exist or have been detached.
+//
+// When a lease is successfully reaped, the onAgentDeath callback is invoked (if set)
+// to notify the relay server, which can then push agent:terminated to the PWA.
 func (h *HeartbeatMonitor) removeExpiredLeases() {
 	leases, err := ListLeases()
 	if err != nil {
@@ -175,12 +184,21 @@ func (h *HeartbeatMonitor) removeExpiredLeases() {
 			h.getLogger().Printf("Reaping expired lease for agent %s (attached to session %s)",
 				lease.AgentID, lease.UserSessionID)
 
-			if err := ReleaseLease(lease.AgentID); err != nil {
+			// Capture lease info before releasing (ReleaseLease deletes the file)
+			agentID := lease.AgentID
+			userSessionID := lease.UserSessionID
+
+			if err := ReleaseLease(agentID); err != nil {
 				h.getLogger().Printf("Failed to release expired lease for agent %s: %v",
-					lease.AgentID, err)
+					agentID, err)
 			} else {
 				// Successfully released, remove from active set
-				delete(activeAgents, lease.AgentID)
+				delete(activeAgents, agentID)
+
+				// Notify callback about agent death (allows relay to push to PWA)
+				if h.onAgentDeath != nil {
+					h.onAgentDeath(agentID, userSessionID)
+				}
 			}
 		}
 	}
@@ -192,7 +210,7 @@ func (h *HeartbeatMonitor) removeExpiredLeases() {
 
 	staleThreshold := time.Now().Add(-2 * LeaseTTL) // 10 minutes ago
 	for agentID, lastSeen := range h.lastSeen {
-		// Remove if agent has no lease or hasn't been seen in 10 minutes
+		// Remove if agent no longer has an active lease OR hasn't been seen in 10 minutes
 		if !activeAgents[agentID] || lastSeen.Before(staleThreshold) {
 			delete(h.lastSeen, agentID)
 		}
@@ -233,4 +251,17 @@ func (h *HeartbeatMonitor) SetLogger(logger *log.Logger) {
 		panic("logger cannot be nil")
 	}
 	h.logger.Store(logger)
+}
+
+// SetOnAgentDeath sets a callback that will be invoked when an agent's lease expires.
+// This allows the relay to push agent:terminated notifications to the PWA when
+// an agent is killed externally (via agentd stop, docker stop, or process crash).
+//
+// The callback is invoked synchronously from the reaper goroutine, so it should
+// complete quickly and not block. The callback receives the agentID and the
+// userSessionID from the expired lease.
+//
+// This method should be called before Start().
+func (h *HeartbeatMonitor) SetOnAgentDeath(callback AgentDeathCallback) {
+	h.onAgentDeath = callback
 }

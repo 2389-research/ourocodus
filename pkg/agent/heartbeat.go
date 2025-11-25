@@ -67,7 +67,7 @@ func NewHeartbeatPublisher(agentID, natsURL string) (*HeartbeatPublisher, error)
 // Start begins publishing heartbeats at regular intervals.
 // This method blocks until the context is cancelled.
 // It publishes an immediate heartbeat on start, then subsequent heartbeats
-// every 30 seconds (heartbeat.Interval).
+// every 5 seconds (heartbeat.Interval).
 //
 // The heartbeat publisher is designed to be resilient - publish failures
 // are logged but do not stop the publisher or crash the agent.

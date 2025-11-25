@@ -25,6 +25,7 @@ type DockerClient interface {
 		config container.ExecOptions) (container.ExecCreateResponse, error)
 	ContainerExecAttach(ctx context.Context, execID string,
 		config container.ExecAttachOptions) (types.HijackedResponse, error)
+	ContainerKill(ctx context.Context, containerID, signal string) error
 	ContainerList(ctx context.Context, options container.ListOptions) ([]container.Summary, error)
 	ContainerRemove(ctx context.Context, containerID string,
 		options container.RemoveOptions) error

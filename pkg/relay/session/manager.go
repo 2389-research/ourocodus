@@ -468,15 +468,16 @@ func (m *Manager) TerminateAgent(ctx context.Context, userSessionID, agentID str
 			// This should not happen (launcher exists but container mode disabled)
 			m.logger.Printf("WARN: Agent %s has launcher but container mode is disabled", agentID)
 		}
-	} else if agent.IsAdopted {
-		// CLI-spawned (attached) agent: ALWAYS stop container via Docker API
+	} else if agent.IsAdopted && agent.ContainerID != "" {
+		// CLI-spawned (attached) agent with known container: stop via Docker API
 		// (does not depend on relay's container mode)
 		m.logger.Printf("[SESSION] Agent %s is CLI-spawned (adopted) - stopping via Docker API", agentID)
 		if StopCLISpawnedContainer(ctx, agentID, m.logger) {
 			m.logger.Printf("WARN: Failed to stop CLI-spawned container: agentID=%s", agentID)
 		}
 	}
-	// else: relay-spawned agent without container mode (mock/test) - no container to stop
+	// else: adopted agent without containerID (unit test mock), or
+	// relay-spawned agent without container mode (mock/test) - no container to stop
 
 	// Close ACP client safely with context (fixes Issue #212)
 	_ = CloseACPClientSafely(agent, ctx, m.logger, userSessionID, agentID)
@@ -571,14 +572,15 @@ func (m *Manager) TerminateUserSession(ctx context.Context, userSessionID string
 						// This should not happen (launcher exists but container mode disabled)
 						m.logger.Printf("WARN: Agent %s has launcher but container mode is disabled", id)
 					}
-				} else if a.IsAdopted {
-					// CLI-spawned (attached) agent: ALWAYS stop container via Docker API
+				} else if a.IsAdopted && a.ContainerID != "" {
+					// CLI-spawned (attached) agent with known container: stop via Docker API
 					// (does not depend on relay's container mode)
 					m.logger.Printf("[SESSION] Agent %s is CLI-spawned (adopted) - stopping via Docker API", id)
 					if StopCLISpawnedContainer(shutdownCtx, id, m.logger) {
 						failed = true
 					}
 				}
+				// else: adopted agent without containerID (unit test mock) - no container to stop
 				// else: relay-spawned agent without container mode (mock/test) - no container to stop
 
 				// Security: Remove credentials from workspace

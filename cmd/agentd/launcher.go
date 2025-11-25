@@ -1,15 +1,15 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
-	"time"
 
 	"github.com/2389-research/ourocodus/pkg/agent/container"
 	"github.com/2389-research/ourocodus/pkg/containersession"
+	"github.com/2389-research/ourocodus/pkg/containersession/helpers"
 	"github.com/2389-research/ourocodus/pkg/worktree"
-	"github.com/docker/docker/client"
 )
 
 // createLauncher instantiates AgentContainerLauncher with all dependencies
@@ -23,19 +23,19 @@ func createLauncher() (*container.AgentContainerLauncher, error) {
 	// Build absolute path for worktrees base directory
 	worktreesBaseDir := fmt.Sprintf("%s/.agentd/worktrees", repoPath)
 
-	// Create Docker client
-	dockerClient, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	// Create Docker client with Colima fallback
+	dockerClient, err := helpers.CreateDockerClient(context.Background())
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Docker client: %w", err)
 	}
 
-	// Create container session manager
+	// Create container session manager with standard helpers
 	containerMgr := containersession.NewManager(
 		dockerClient,
-		&defaultIDGenerator{},
-		&defaultClock{},
-		&defaultLogger{},
-		worktreesBaseDir, // base workspace dir (absolute)
+		&helpers.UUIDGenerator{},
+		&helpers.SystemClock{},
+		&helpers.StdLogger{Logger: log.Default()},
+		worktreesBaseDir,
 	)
 
 	// Create worktree manager
@@ -56,30 +56,4 @@ func createLauncher() (*container.AgentContainerLauncher, error) {
 	)
 
 	return launcher, nil
-}
-
-// defaultIDGenerator implements containersession.IDGenerator
-type defaultIDGenerator struct{}
-
-func (g *defaultIDGenerator) Generate() string {
-	// Generate session ID: session-<shortid>
-	return fmt.Sprintf("session-%s", generateShortID())
-}
-
-// defaultClock implements containersession.Clock
-type defaultClock struct{}
-
-func (c *defaultClock) Now() time.Time {
-	return time.Now()
-}
-
-// defaultLogger implements containersession.Logger
-type defaultLogger struct{}
-
-func (l *defaultLogger) Printf(format string, v ...interface{}) {
-	log.Printf(format, v...)
-}
-
-func (l *defaultLogger) Println(v ...interface{}) {
-	log.Println(v...)
 }

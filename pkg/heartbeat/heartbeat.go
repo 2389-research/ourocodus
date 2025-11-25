@@ -9,7 +9,7 @@ import "time"
 const (
 	// Interval is the duration between heartbeat publishes.
 	// Agents publish heartbeats at this interval to signal liveness.
-	Interval = 30 * time.Second
+	Interval = 5 * time.Second
 
 	// SubjectPrefix is the NATS subject prefix for agent heartbeats.
 	// Individual agent subjects are: "agent.heartbeat.<agentID>"

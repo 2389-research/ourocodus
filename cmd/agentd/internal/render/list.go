@@ -24,6 +24,7 @@ type AgentInfo struct {
 	SpawnSource string
 	AttachedTo  string
 	CreatedAt   time.Time
+	LastBeat    time.Time
 }
 
 // RenderAgentList renders a list of agents in the specified output mode
@@ -73,7 +74,7 @@ func renderPlainTable(w io.Writer, agents []AgentInfo) error {
 
 	// Header
 	_, _ = fmt.Fprintln(tw)
-	_, _ = fmt.Fprintf(tw, "AGENT\tSTATUS\tSOURCE\tATTACHED TO\tWORKSPACE\tCREATED\n")
+	_, _ = fmt.Fprintf(tw, "AGENT\tSTATUS\tSOURCE\tATTACHED TO\tLAST BEAT\tWORKSPACE\tCREATED\n")
 
 	// Rows
 	for _, agent := range agents {
@@ -82,13 +83,14 @@ func renderPlainTable(w io.Writer, agents []AgentInfo) error {
 			attachedTo = formatShortID(agent.AttachedTo, 9)
 		}
 
-		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n",
+		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			agent.AgentID,
 			agent.Status,
 			agent.SpawnSource,
 			attachedTo,
+			formatLastBeat(agent.LastBeat),
 			formatWorkspace(agent.Workspace),
-			formatDuration(time.Since(agent.CreatedAt)),
+			output.FormatDurationHuman(time.Since(agent.CreatedAt)),
 		)
 	}
 
@@ -103,14 +105,16 @@ func renderRichTable(w io.Writer, agents []AgentInfo, th *theme.RetroTheme) erro
 	// Header with theme styling - rainbow gradient logo
 	logoText := theme.GetLogo(theme.LogoSmall)
 
-	// Apply pastel rainbow gradient to logo (line by line for color variation)
+	// Apply bright rainbow gradient to logo (line by line for color variation)
 	lines := strings.Split(logoText, "\n")
 	pastelColors := []lipgloss.Color{
-		lipgloss.Color("#FFB3BA"), // Pastel Pink
-		lipgloss.Color("#FFDFBA"), // Pastel Peach
-		lipgloss.Color("#FFFFBA"), // Pastel Yellow
-		lipgloss.Color("#BAFFC9"), // Pastel Mint
-		lipgloss.Color("#BAE1FF"), // Pastel Blue
+		lipgloss.Color("#FF5555"), // Red
+		lipgloss.Color("#FFB86C"), // Orange
+		lipgloss.Color("#F1FA8C"), // Yellow
+		lipgloss.Color("#50FA7B"), // Green
+		lipgloss.Color("#8BE9FD"), // Cyan
+		lipgloss.Color("#6272A4"), // Blue
+		lipgloss.Color("#BD93F9"), // Purple
 	}
 
 	var coloredLines []string
@@ -136,6 +140,7 @@ func renderRichTable(w io.Writer, agents []AgentInfo, th *theme.RetroTheme) erro
 		{Title: "STATUS", Width: 15},
 		{Title: "SOURCE", Width: 12},
 		{Title: "ATTACHED TO", Width: 15},
+		{Title: "LAST BEAT", Width: 13},
 		{Title: "CREATED", Width: 12},
 	}
 
@@ -156,7 +161,8 @@ func renderRichTable(w io.Writer, agents []AgentInfo, th *theme.RetroTheme) erro
 			statusIcon + " " + agent.Status,
 			agent.SpawnSource,
 			attachedTo,
-			formatDuration(time.Since(agent.CreatedAt)),
+			formatLastBeat(agent.LastBeat),
+			output.FormatDurationHuman(time.Since(agent.CreatedAt)),
 		})
 	}
 
@@ -222,15 +228,22 @@ func formatWorkspace(path string) string {
 	return path
 }
 
-func formatDuration(d time.Duration) string {
-	if d < time.Minute {
-		return "just now"
+func formatLastBeat(t time.Time) string {
+	if t.IsZero() {
+		return "–"
 	}
-	if d < time.Hour {
-		return fmt.Sprintf("%dm ago", int(d.Minutes()))
+	diff := time.Since(t)
+	if diff < time.Second {
+		return "now"
 	}
-	if d < 24*time.Hour {
-		return fmt.Sprintf("%dh ago", int(d.Hours()))
+	if diff < time.Minute {
+		return fmt.Sprintf("%ds ago", int(diff.Seconds()))
 	}
-	return fmt.Sprintf("%dd ago", int(d.Hours()/24))
+	if diff < time.Hour {
+		return fmt.Sprintf("%dm ago", int(diff.Minutes()))
+	}
+	if diff < 24*time.Hour {
+		return fmt.Sprintf("%dh ago", int(diff.Hours()))
+	}
+	return fmt.Sprintf("%dd ago", int(diff.Hours()/24))
 }

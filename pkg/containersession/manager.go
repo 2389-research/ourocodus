@@ -764,13 +764,33 @@ func (m *Manager) StopContainerSession(ctx context.Context, sessionID string) er
 
 	// Stop container with configured timeout (graceful shutdown)
 	timeout := m.stopTimeout
-	err := m.dockerClient.ContainerStop(ctx, containerID, container.StopOptions{
+	stopCtx, cancel := context.WithTimeout(ctx, time.Duration(timeout+3)*time.Second)
+	defer cancel()
+	err := m.dockerClient.ContainerStop(stopCtx, containerID, container.StopOptions{
 		Timeout: &timeout,
 	})
 	if err != nil {
 		session.SetError(err.Error())
 		m.logger.Printf("Container stop failed: session=%s container=%s error=%v", sessionID, containerID, err)
 		return fmt.Errorf("failed to stop container: %w", err)
+	}
+
+	// Wait for container to report stopped; if it doesn't, force kill
+	waitErr := m.waitForContainerStopped(ctx, containerID, 7*time.Second)
+	if waitErr != nil {
+		m.logger.Printf("[WARN] Container still running after stop timeout, sending SIGKILL: id=%s", containerID)
+		killCtx, killCancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer killCancel()
+		if killErr := m.dockerClient.ContainerKill(killCtx, containerID, "SIGKILL"); killErr != nil {
+			session.SetError(fmt.Sprintf("container kill failed: %v (after stop timeout: %v)", killErr, waitErr))
+			return fmt.Errorf("failed to stop container gracefully (then kill): %w; kill error: %v", waitErr, killErr)
+		}
+		if finalErr := m.waitForContainerStopped(context.Background(), containerID, 3*time.Second); finalErr != nil {
+			session.SetError(fmt.Sprintf("container remained running after SIGKILL: %v", finalErr))
+			return fmt.Errorf("container did not exit after SIGKILL: %w", finalErr)
+		}
+		// If we had to kill, surface the timeout as warning to caller
+		return fmt.Errorf("container stop exceeded timeout; SIGKILL issued: %w", waitErr)
 	}
 
 	// Wait for output handler goroutine with 5-second timeout
@@ -814,4 +834,27 @@ func (m *Manager) ListContainerSessions() []*ContainerSession {
 // GetDockerClient returns the Docker client used by this manager
 func (m *Manager) GetDockerClient() DockerClient {
 	return m.dockerClient
+}
+
+// waitForContainerStopped polls the Docker API until the container is no longer running
+// or the timeout elapses. Returns nil if the container is stopped, error otherwise.
+func (m *Manager) waitForContainerStopped(ctx context.Context, containerID string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		inspect, err := m.dockerClient.ContainerInspect(ctx, containerID)
+		if err == nil && !inspect.State.Running {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			if err != nil {
+				return fmt.Errorf("inspect timeout; last error: %w", err)
+			}
+			return fmt.Errorf("container still running after %s", timeout)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(200 * time.Millisecond):
+		}
+	}
 }
