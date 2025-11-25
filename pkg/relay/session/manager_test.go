@@ -159,6 +159,24 @@ func setupManager() (*Manager, *mockIDGenerator, *mockClock, *mockCleaner, *mock
 	return manager, idGen, clock, cleaner, logger, clientFactory
 }
 
+// setupManagerWithLeaseIsolation creates a manager with an isolated lease directory.
+// Returns a cleanup function that must be called (typically via defer) to restore the original LeaseDir.
+// Use this for tests that spawn agents, as lease files can interfere between tests.
+func setupManagerWithLeaseIsolation(t *testing.T) (*Manager, *mockIDGenerator, *mockClock, *mockCleaner, *mockLogger, *mockClientFactory, func()) {
+	t.Helper()
+	// Create isolated lease directory
+	tmpDir := t.TempDir()
+	oldLeaseDir := LeaseDir
+	LeaseDir = tmpDir
+
+	manager, idGen, clock, cleaner, logger, clientFactory := setupManager()
+
+	cleanup := func() {
+		LeaseDir = oldLeaseDir
+	}
+	return manager, idGen, clock, cleaner, logger, clientFactory, cleanup
+}
+
 // --- Tests ---
 
 func TestCreateUserSession_EmptySession(t *testing.T) {
@@ -197,7 +215,8 @@ func TestCreateUserSession_EmptySession(t *testing.T) {
 }
 
 func TestSpawnAgent_SingleAgent(t *testing.T) {
-	manager, _, _, _, logger, clientFactory := setupManager()
+	manager, _, _, _, logger, clientFactory, cleanup := setupManagerWithLeaseIsolation(t)
+	defer cleanup()
 	ctx := context.Background()
 	ws := &mockWebSocket{}
 
@@ -240,7 +259,8 @@ func TestSpawnAgent_SingleAgent(t *testing.T) {
 }
 
 func TestSpawnAgent_MultipleAgents(t *testing.T) {
-	manager, _, _, _, _, clientFactory := setupManager()
+	manager, _, _, _, _, clientFactory, cleanup := setupManagerWithLeaseIsolation(t)
+	defer cleanup()
 	ctx := context.Background()
 	ws := &mockWebSocket{}
 
@@ -283,7 +303,8 @@ func TestSpawnAgent_MultipleAgents(t *testing.T) {
 }
 
 func TestSpawnAgent_FailureDoesNotAffectSession(t *testing.T) {
-	manager, _, _, _, logger, _ := setupManager()
+	manager, _, _, _, logger, _, cleanup := setupManagerWithLeaseIsolation(t)
+	defer cleanup()
 	ctx := context.Background()
 	ws := &mockWebSocket{}
 
@@ -331,7 +352,8 @@ func TestSpawnAgent_FailureDoesNotAffectSession(t *testing.T) {
 }
 
 func TestSpawnAgent_DuplicateRole(t *testing.T) {
-	manager, _, _, _, _, _ := setupManager()
+	manager, _, _, _, _, _, cleanup := setupManagerWithLeaseIsolation(t)
+	defer cleanup()
 	ctx := context.Background()
 	ws := &mockWebSocket{}
 
@@ -358,7 +380,8 @@ func TestSpawnAgent_DuplicateRole(t *testing.T) {
 }
 
 func TestTerminateAgent_SingleAgent(t *testing.T) {
-	manager, _, _, _, logger, _ := setupManager()
+	manager, _, _, _, logger, _, cleanup := setupManagerWithLeaseIsolation(t)
+	defer cleanup()
 	ctx := context.Background()
 	ws := &mockWebSocket{}
 
@@ -395,7 +418,8 @@ func TestTerminateAgent_SingleAgent(t *testing.T) {
 }
 
 func TestTerminateAgent_OtherAgentsUnaffected(t *testing.T) {
-	manager, _, _, _, _, _ := setupManager()
+	manager, _, _, _, _, _, cleanup := setupManagerWithLeaseIsolation(t)
+	defer cleanup()
 	ctx := context.Background()
 	ws := &mockWebSocket{}
 
@@ -440,7 +464,8 @@ func TestTerminateAgent_OtherAgentsUnaffected(t *testing.T) {
 }
 
 func TestTerminateUserSession_AllAgentsTerminated(t *testing.T) {
-	manager, _, _, cleaner, logger, _ := setupManager()
+	manager, _, _, cleaner, logger, _, cleanup := setupManagerWithLeaseIsolation(t)
+	defer cleanup()
 	ctx := context.Background()
 	ws := &mockWebSocket{}
 
@@ -547,7 +572,8 @@ func TestTerminateUserSession_DoesNotCloseWebSocket(t *testing.T) {
 }
 
 func TestTerminateAgent_Idempotent(t *testing.T) {
-	manager, _, _, _, _, _ := setupManager()
+	manager, _, _, _, _, _, cleanup := setupManagerWithLeaseIsolation(t)
+	defer cleanup()
 	ctx := context.Background()
 	ws := &mockWebSocket{}
 
@@ -583,7 +609,8 @@ func TestSpawnAgent_SessionNotFound(t *testing.T) {
 }
 
 func TestListAgents(t *testing.T) {
-	manager, _, _, _, _, _ := setupManager()
+	manager, _, _, _, _, _, cleanup := setupManagerWithLeaseIsolation(t)
+	defer cleanup()
 	ctx := context.Background()
 	ws := &mockWebSocket{}
 
@@ -615,7 +642,8 @@ func TestListAgents(t *testing.T) {
 }
 
 func TestGetAgent(t *testing.T) {
-	manager, _, _, _, _, _ := setupManager()
+	manager, _, _, _, _, _, cleanup := setupManagerWithLeaseIsolation(t)
+	defer cleanup()
 	ctx := context.Background()
 	ws := &mockWebSocket{}
 
@@ -776,7 +804,8 @@ func TestSpawnAgent_AcceptsValidPaths(t *testing.T) {
 }
 
 func TestGetAgentHistory(t *testing.T) {
-	manager, _, clock, _, _, _ := setupManager()
+	manager, _, clock, _, _, _, cleanup := setupManagerWithLeaseIsolation(t)
+	defer cleanup()
 	ctx := context.Background()
 	ws := &mockWebSocket{}
 

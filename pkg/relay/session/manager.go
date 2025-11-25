@@ -452,26 +452,31 @@ func (m *Manager) TerminateAgent(ctx context.Context, userSessionID, agentID str
 	m.logger.Printf("[SESSION] Terminating agent: session=%s agentID=%s", userSessionID, agentID)
 
 	// Stop container - check if it's a relay-spawned or CLI-spawned agent
-	if m.isContainerModeEnabled() {
-		// First check if this agent has a launcher (relay-spawned)
-		key := launcherKey(userSessionID, agentID)
-		m.launchersMu.RLock()
-		hasLauncher := m.launchers[key] != nil
-		m.launchersMu.RUnlock()
+	// First check if this agent has a launcher (relay-spawned with container mode)
+	key := launcherKey(userSessionID, agentID)
+	m.launchersMu.RLock()
+	hasLauncher := m.launchers[key] != nil
+	m.launchersMu.RUnlock()
 
-		if hasLauncher {
-			// Relay-spawned agent: use launcher to stop
+	if hasLauncher {
+		// Relay-spawned agent with launcher: requires container mode to be enabled
+		if m.isContainerModeEnabled() {
 			if StopContainerAndCleanupLauncher(ctx, m, userSessionID, agentID, m.logger) {
 				m.logger.Printf("WARN: Failed to stop container and cleanup launcher: session=%s agentID=%s", userSessionID, agentID)
 			}
 		} else {
-			// CLI-spawned (attached) agent: stop container directly via Docker API
-			m.logger.Printf("[SESSION] Agent %s is CLI-spawned (no launcher) - stopping via Docker API", agentID)
-			if StopCLISpawnedContainer(ctx, agentID, m.logger) {
-				m.logger.Printf("WARN: Failed to stop CLI-spawned container: agentID=%s", agentID)
-			}
+			// This should not happen (launcher exists but container mode disabled)
+			m.logger.Printf("WARN: Agent %s has launcher but container mode is disabled", agentID)
+		}
+	} else if agent.IsAdopted {
+		// CLI-spawned (attached) agent: ALWAYS stop container via Docker API
+		// (does not depend on relay's container mode)
+		m.logger.Printf("[SESSION] Agent %s is CLI-spawned (adopted) - stopping via Docker API", agentID)
+		if StopCLISpawnedContainer(ctx, agentID, m.logger) {
+			m.logger.Printf("WARN: Failed to stop CLI-spawned container: agentID=%s", agentID)
 		}
 	}
+	// else: relay-spawned agent without container mode (mock/test) - no container to stop
 
 	// Close ACP client safely with context (fixes Issue #212)
 	_ = CloseACPClientSafely(agent, ctx, m.logger, userSessionID, agentID)
@@ -550,14 +555,14 @@ func (m *Manager) TerminateUserSession(ctx context.Context, userSessionID string
 				}
 
 				// Stop container - check if it's a relay-spawned or CLI-spawned agent
-				// First check if this agent has a launcher (relay-spawned)
+				// First check if this agent has a launcher (relay-spawned with container mode)
 				key := launcherKey(userSessionID, id)
 				m.launchersMu.RLock()
 				hasLauncher := m.launchers[key] != nil
 				m.launchersMu.RUnlock()
 
 				if hasLauncher {
-					// Relay-spawned agent: requires container mode to be enabled
+					// Relay-spawned agent with launcher: requires container mode to be enabled
 					if m.isContainerModeEnabled() {
 						if StopContainerAndCleanupLauncher(shutdownCtx, m, userSessionID, id, m.logger) {
 							failed = true
@@ -566,14 +571,15 @@ func (m *Manager) TerminateUserSession(ctx context.Context, userSessionID string
 						// This should not happen (launcher exists but container mode disabled)
 						m.logger.Printf("WARN: Agent %s has launcher but container mode is disabled", id)
 					}
-				} else {
+				} else if a.IsAdopted {
 					// CLI-spawned (attached) agent: ALWAYS stop container via Docker API
 					// (does not depend on relay's container mode)
-					m.logger.Printf("[SESSION] Agent %s is CLI-spawned (no launcher) - stopping via Docker API", id)
+					m.logger.Printf("[SESSION] Agent %s is CLI-spawned (adopted) - stopping via Docker API", id)
 					if StopCLISpawnedContainer(shutdownCtx, id, m.logger) {
 						failed = true
 					}
 				}
+				// else: relay-spawned agent without container mode (mock/test) - no container to stop
 
 				// Security: Remove credentials from workspace
 				removeCredentialFile(a.Workspace, m.logger)
