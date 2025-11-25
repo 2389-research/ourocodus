@@ -11,7 +11,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/2389-research/ourocodus/cmd/agentd/internal/theme"
+	doctortui "github.com/2389-research/ourocodus/cmd/agentd/internal/tui/doctor"
+	"github.com/2389-research/ourocodus/pkg/tui/theme"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/docker/docker/api/types/container"
 	"github.com/spf13/cobra"
@@ -41,26 +43,26 @@ Run this before spawning agents to catch configuration issues early.`,
 
 type Check struct {
 	Name string
-	Run  func(context.Context) error
+	Run  func(context.Context) (string, error) // Returns (message, error)
 }
 
 // doctorTheme provides consistent styling for doctor output
-var doctorTheme = theme.NewRetroTheme(theme.PaletteCGA)
+var doctorTheme = theme.Default()
 
 func printSuccess(msg string) {
-	style := lipgloss.NewStyle().Foreground(lipgloss.Color(string(doctorTheme.Success)))
+	style := lipgloss.NewStyle().Foreground(doctorTheme.Success)
 	fmt.Print(style.Render("✓ "))
 	fmt.Println(msg)
 }
 
 func printError(msg string) {
-	style := lipgloss.NewStyle().Foreground(lipgloss.Color(string(doctorTheme.Error)))
+	style := lipgloss.NewStyle().Foreground(doctorTheme.Error)
 	fmt.Print(style.Render("× "))
 	fmt.Println(msg)
 }
 
 func printInfo(msg string) {
-	style := lipgloss.NewStyle().Foreground(lipgloss.Color(string(doctorTheme.Primary)))
+	style := lipgloss.NewStyle().Foreground(doctorTheme.Primary)
 	fmt.Println(style.Render(msg))
 }
 
@@ -77,90 +79,122 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 		{"Spawn smoke test", checkSpawnSmokeTest},
 	}
 
-	allPassed := true
-	for _, check := range checks {
-		if err := check.Run(ctx); err != nil {
-			printError(fmt.Sprintf("%s: %v", check.Name, err))
-			allPassed = false
-		}
-	}
-
-	fmt.Println()
-	if allPassed {
-		fmt.Println()
-		successStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(string(doctorTheme.Success))).Bold(true)
-		mutedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(string(doctorTheme.Muted)))
-		fmt.Print(successStyle.Render("✨ Environment ready!"))
-		fmt.Println(mutedStyle.Render(" All systems go for spawning agents."))
-		fmt.Println()
-		return nil
-	}
-
-	return fmt.Errorf("environment validation failed")
+	// Use TUI
+	return runDoctorTUI(ctx, checks)
 }
 
-func checkDockerDaemon(ctx context.Context) error {
+// runDoctorTUI runs the doctor command with a Bubble Tea TUI.
+func runDoctorTUI(ctx context.Context, checks []Check) error {
+	checkNames := make([]string, len(checks))
+	for i, c := range checks {
+		checkNames[i] = c.Name
+	}
+
+	m := doctortui.New(checkNames)
+	p := tea.NewProgram(m)
+
+	// Channel to receive final result
+	resultCh := make(chan bool, 1)
+
+	// Run checks in background
+	go func() {
+		allPassed := true
+
+		for i, check := range checks {
+			p.Send(doctortui.CheckStartMsg{Index: i})
+			time.Sleep(50 * time.Millisecond)
+
+			msg, err := check.Run(ctx)
+			if err != nil {
+				// Check if it's a skip (error message contains "skipped")
+				errStr := err.Error()
+				if strings.Contains(strings.ToLower(errStr), "skip") || strings.Contains(errStr, "skipped") {
+					p.Send(doctortui.CheckSkipMsg{Index: i, Message: msg})
+				} else {
+					p.Send(doctortui.CheckFailMsg{Index: i, Error: errStr})
+					allPassed = false
+				}
+			} else {
+				p.Send(doctortui.CheckPassMsg{Index: i, Message: msg})
+			}
+		}
+
+		p.Send(doctortui.AllChecksCompleteMsg{AllPassed: allPassed})
+		resultCh <- allPassed
+	}()
+
+	// Run TUI
+	if _, err := p.Run(); err != nil {
+		return err
+	}
+
+	// Get result
+	allPassed := <-resultCh
+	if !allPassed {
+		return fmt.Errorf("environment validation failed")
+	}
+
+	return nil
+}
+
+func checkDockerDaemon(ctx context.Context) (string, error) {
 	cli, err := newDockerClient()
 	if err != nil {
-		return fmt.Errorf("docker client creation failed: %w", err)
+		return "", fmt.Errorf("docker client creation failed: %w", err)
 	}
 	defer func() { _ = cli.Close() }()
 
 	if _, err := cli.Ping(ctx); err != nil {
-		return fmt.Errorf("docker daemon not running: start Docker Desktop and retry")
+		return "", fmt.Errorf("docker daemon not running: start Docker Desktop and retry")
 	}
 
 	// Get version for display
 	version, err := cli.ServerVersion(ctx)
 	if err != nil {
-		printSuccess("Docker daemon running")
-		return nil
+		return "running", nil
 	}
 
-	printSuccess(fmt.Sprintf("Docker daemon running (v%s)", version.Version))
-	return nil
+	return fmt.Sprintf("v%s", version.Version), nil
 }
 
-func checkDockerVersion(ctx context.Context) error {
+func checkDockerVersion(ctx context.Context) (string, error) {
 	cli, err := newDockerClient()
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer func() { _ = cli.Close() }()
 
 	version, err := cli.ServerVersion(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to get Docker version: %w", err)
+		return "", fmt.Errorf("failed to get Docker version: %w", err)
 	}
 
 	// Check if version >= 20.10 (numeric comparison for correct ordering)
 	versionParts := strings.Split(version.Version, ".")
 	if len(versionParts) < 2 {
-		return fmt.Errorf("unexpected version format: %s", version.Version)
+		return "", fmt.Errorf("unexpected version format: %s", version.Version)
 	}
 
 	// Parse major version number
 	major := versionParts[0]
 	majorInt, err := strconv.Atoi(major)
 	if err != nil || majorInt < 20 {
-		return fmt.Errorf("docker version %s is too old (need >= 20.10)", version.Version)
+		return "", fmt.Errorf("docker version %s is too old (need >= 20.10)", version.Version)
 	}
 
-	printSuccess("Docker version supported (>= 20.10)")
-	return nil
+	return ">= 20.10", nil
 }
 
-func checkFileSharingMacOS(ctx context.Context) error {
+func checkFileSharingMacOS(_ context.Context) (string, error) {
 	// Only check on macOS
 	if runtime.GOOS != "darwin" {
-		printSuccess("File sharing check (skipped on non-macOS)")
-		return nil
+		return "skipped on non-macOS", fmt.Errorf("skipped")
 	}
 
 	// Get current working directory
 	cwd, err := os.Getwd()
 	if err != nil {
-		return fmt.Errorf("failed to get working directory: %w", err)
+		return "", fmt.Errorf("failed to get working directory: %w", err)
 	}
 
 	// On macOS, we'll just warn if the path isn't in typical shared locations
@@ -175,17 +209,16 @@ func checkFileSharingMacOS(ctx context.Context) error {
 	}
 
 	if !isShared {
-		return fmt.Errorf("current directory may not be shared with Docker.\nAdd %s to Docker Desktop file sharing settings", cwd)
+		return "", fmt.Errorf("current directory may not be shared with Docker.\nAdd %s to Docker Desktop file sharing settings", cwd)
 	}
 
-	printSuccess(fmt.Sprintf("File sharing enabled: %s", cwd))
-	return nil
+	return "enabled", nil
 }
 
-func checkImagePresence(ctx context.Context) error {
+func checkImagePresence(ctx context.Context) (string, error) {
 	cli, err := newDockerClient()
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer func() { _ = cli.Close() }()
 
@@ -195,53 +228,48 @@ func checkImagePresence(ctx context.Context) error {
 	_, err = cli.ImageInspect(ctx, imageName)
 	if err != nil {
 		// Image not present - offer guidance
-		printInfo(fmt.Sprintf("Image %s not found locally", imageName))
-		fmt.Println("  Run: docker pull ourocodus/agent:latest")
-		return fmt.Errorf("image not present (pull required)")
+		return "", fmt.Errorf("image not present (run: docker pull %s)", imageName)
 	}
 
-	printSuccess(fmt.Sprintf("Image present: %s", imageName))
-	return nil
+	return imageName, nil
 }
 
-func checkGitWorktreeSupport(ctx context.Context) error {
+func checkGitWorktreeSupport(ctx context.Context) (string, error) {
 	// Check if git command exists
 	if _, err := exec.LookPath("git"); err != nil {
-		return fmt.Errorf("git not found in PATH")
+		return "", fmt.Errorf("git not found in PATH")
 	}
 
 	// Run git worktree list to verify support
 	cmd := exec.CommandContext(ctx, "git", "worktree", "list")
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("git worktree not supported (need git >= 2.5)")
+		return "", fmt.Errorf("git worktree not supported (need git >= 2.5)")
 	}
 
-	printSuccess("Git worktree support confirmed")
-	return nil
+	return "supported", nil
 }
 
-func checkDiskSpace(ctx context.Context) error {
+func checkDiskSpace(_ context.Context) (string, error) {
 	// Skip on Windows - syscall.Statfs doesn't exist there
 	if runtime.GOOS == "windows" {
-		printSuccess("Disk space check (skipped on Windows)")
-		return nil
+		return "skipped on Windows", fmt.Errorf("skipped")
 	}
 
 	// Get disk space for current directory
 	cwd, err := os.Getwd()
 	if err != nil {
-		return fmt.Errorf("failed to get working directory: %w", err)
+		return "", fmt.Errorf("failed to get working directory: %w", err)
 	}
 
 	var stat syscall.Statfs_t
 	if err := syscall.Statfs(cwd, &stat); err != nil {
-		return fmt.Errorf("failed to check disk space: %w", err)
+		return "", fmt.Errorf("failed to check disk space: %w", err)
 	}
 
 	// Validate block size before conversion (gosec G115)
 	// On some platforms stat.Bsize may be signed
 	if stat.Bsize <= 0 {
-		return fmt.Errorf("invalid block size reported by filesystem: %d", stat.Bsize)
+		return "", fmt.Errorf("invalid block size reported by filesystem: %d", stat.Bsize)
 	}
 
 	// Available space in bytes
@@ -251,17 +279,16 @@ func checkDiskSpace(ctx context.Context) error {
 	// Require at least 1GB free
 	minGB := 1.0
 	if availableGB < minGB {
-		return fmt.Errorf("insufficient disk space: %.1fGB available (need >= %.1fGB)", availableGB, minGB)
+		return "", fmt.Errorf("insufficient disk space: %.1fGB available (need >= %.1fGB)", availableGB, minGB)
 	}
 
-	printSuccess(fmt.Sprintf("Disk space: %.1fGB available", availableGB))
-	return nil
+	return fmt.Sprintf("%.1fGB available", availableGB), nil
 }
 
-func checkSpawnSmokeTest(ctx context.Context) error {
+func checkSpawnSmokeTest(ctx context.Context) (string, error) {
 	cli, err := newDockerClient()
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer func() { _ = cli.Close() }()
 
@@ -273,9 +300,7 @@ func checkSpawnSmokeTest(ctx context.Context) error {
 	_, err = cli.ImageInspect(ctx, testImage)
 	if err != nil {
 		// Image not present, skip smoke test
-		printInfo("  Smoke test skipped (alpine:latest not available)")
-		printSuccess("Spawn smoke test (skipped)")
-		return nil
+		return "alpine:latest not available", fmt.Errorf("skipped")
 	}
 
 	// Create container with auto-generated name (empty string) to prevent name collision
@@ -288,7 +313,7 @@ func checkSpawnSmokeTest(ctx context.Context) error {
 		},
 	}, nil, nil, nil, "")
 	if err != nil {
-		return fmt.Errorf("failed to create test container: %w", err)
+		return "", fmt.Errorf("failed to create test container: %w", err)
 	}
 
 	// Clean up the container
@@ -299,6 +324,5 @@ func checkSpawnSmokeTest(ctx context.Context) error {
 		_ = cli.ContainerRemove(cleanupCtx, resp.ID, container.RemoveOptions{Force: true})
 	}()
 
-	printSuccess("Spawn smoke test passed")
-	return nil
+	return "passed", nil
 }
