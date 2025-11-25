@@ -1,10 +1,8 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"net/url"
@@ -13,10 +11,10 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 
+	relaytui "github.com/2389-research/ourocodus/cmd/relay/internal/tui"
 	"github.com/2389-research/ourocodus/internal/webapp"
 	"github.com/2389-research/ourocodus/pkg/agent"
 	"github.com/2389-research/ourocodus/pkg/agent/container"
@@ -25,7 +23,7 @@ import (
 	"github.com/2389-research/ourocodus/pkg/relay"
 	"github.com/2389-research/ourocodus/pkg/relay/session"
 	"github.com/2389-research/ourocodus/pkg/worktree"
-	"github.com/charmbracelet/lipgloss"
+	tea "github.com/charmbracelet/bubbletea"
 	dockercontainer "github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/client"
@@ -43,118 +41,11 @@ const (
 // wsSemaphore limits concurrent WebSocket upgrade requests to prevent DoS
 var wsSemaphore = make(chan struct{}, maxConcurrentWSUpgrades)
 
-// initLogBuffer captures log output during initialization so the banner displays first.
-// After init, logs are colorized.
-type initLogBuffer struct {
-	mu          sync.Mutex
-	buf         bytes.Buffer
-	active      bool
-	colorWriter *colorLogWriter
-}
+// tuiProgram is the global Bubble Tea program for the relay TUI
+var tuiProgram *tea.Program
 
-var initLogs = &initLogBuffer{
-	active:      true,
-	colorWriter: &colorLogWriter{out: os.Stderr},
-}
-
-// Write implements io.Writer, buffering logs during init, then colorizing after
-func (b *initLogBuffer) Write(p []byte) (n int, err error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if b.active {
-		return b.buf.Write(p)
-	}
-	// After init, colorize output
-	return b.colorWriter.Write(p)
-}
-
-// Flush writes all buffered logs to stderr (colorized) and disables buffering
-func (b *initLogBuffer) Flush() {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if b.buf.Len() > 0 {
-		// Colorize each line of buffered output
-		lines := strings.Split(b.buf.String(), "\n")
-		for _, line := range lines {
-			if line != "" {
-				colored := colorizeLogLine(line + "\n")
-				_, _ = os.Stderr.Write([]byte(colored))
-			}
-		}
-		b.buf.Reset()
-	}
-	b.active = false
-}
-
-// colorLogWriter is a log writer that colorizes log output based on tags like [INIT], [ERROR], etc.
-type colorLogWriter struct {
-	out io.Writer
-}
-
-// Write implements io.Writer with log colorization
-func (c *colorLogWriter) Write(p []byte) (n int, err error) {
-	line := string(p)
-
-	// Extract and colorize the tag if present
-	colored := colorizeLogLine(line)
-	return c.out.Write([]byte(colored))
-}
-
-// colorizeLogLine applies colors to a log line based on its tag
-func colorizeLogLine(line string) string {
-	// Color definitions - ordered by specificity (longer/more specific tags first)
-	// so that [RELAY→SESSION] is matched before [RELAY] and [SESSION]
-	type tagDef struct {
-		tag   string
-		color lipgloss.Color
-	}
-	tagColors := []tagDef{
-		// More specific tags first (contain arrows or compound forms)
-		{"[RELAY→SESSION]", colorSecondary}, // Magenta - relay-to-session routing
-		{"[ACP→ATTACH]", colorSuccess},      // Green - ACP attach operations
-		// Main subsystem tags
-		{"[INIT]", colorSuccess},      // Green - initialization
-		{"[SHUTDOWN]", colorWarning},  // Amber - shutdown
-		{"[NATS]", colorPrimary},      // Cyan - NATS messages
-		{"[CLEANUP]", colorMuted},     // Gray - cleanup
-		{"[HEARTBEAT]", colorPrimary}, // Cyan - heartbeat
-		{"[RELAY]", colorPrimary},     // Cyan - relay messages
-		{"[SESSION]", colorSecondary}, // Magenta - session management
-		{"[CONTAINER]", colorAccent},  // Yellow - container operations
-		{"[ACP]", colorSuccess},       // Green - ACP protocol
-		{"[LEASE]", colorAccent},      // Yellow - lease management
-		{"[AUDIT]", colorMuted},       // Gray - audit logs
-		{"[SERVER]", colorPrimary},    // Cyan - HTTP server
-		{"[RATELIMIT]", colorWarning}, // Amber - rate limiting
-		{"[SECURITY]", colorWarning},  // Amber - security
-	}
-
-	// Check each tag (ordered by specificity, more specific first)
-	for _, td := range tagColors {
-		if strings.Contains(line, td.tag) {
-			// Find the tag position and colorize it
-			tagStyle := lipgloss.NewStyle().Foreground(td.color).Bold(true)
-			coloredTag := tagStyle.Render(td.tag)
-
-			// Check if this is a warning or error line
-			if strings.Contains(line, "WARN:") || strings.Contains(line, "ERROR:") || strings.Contains(line, "failed") {
-				// Make the whole line amber for warnings
-				warnStyle := lipgloss.NewStyle().Foreground(colorWarning)
-				line = strings.Replace(line, td.tag, coloredTag, 1)
-				// Color "WARN:" or "ERROR:" specially
-				if strings.Contains(line, "WARN:") {
-					warnLabel := lipgloss.NewStyle().Foreground(colorWarning).Bold(true).Render("WARN:")
-					line = strings.Replace(line, "WARN:", warnLabel, 1)
-				}
-				return warnStyle.Render(strings.Replace(line, coloredTag, td.tag, 1))
-			}
-
-			return strings.Replace(line, td.tag, coloredTag, 1)
-		}
-	}
-
-	return line
-}
+// tuiLogWriter is the log writer that sends logs to the TUI
+var tuiLogWriter *relaytui.LogWriter
 
 // clockAdapter adapts relay.Clock to containersession.Clock
 type clockAdapter struct {
@@ -186,8 +77,9 @@ func (l *loggerAdapter) Printf(format string, v ...interface{}) {
 }
 
 func main() {
-	// Buffer log output during initialization so banner appears first
-	log.SetOutput(initLogs)
+	// Create log writer for TUI (program set later)
+	tuiLogWriter = relaytui.NewLogWriter(nil)
+	log.SetOutput(tuiLogWriter)
 	log.SetFlags(log.Ldate | log.Ltime)
 
 	// Create dependencies
@@ -216,7 +108,8 @@ func main() {
 	// Create session manager with launcher factory and container manager
 	sessionManager, err := relay.NewSessionManager(logger, clock, idGen, natsClient, launcherFactory, containerManager)
 	if err != nil {
-		log.Fatalf("Failed to create session manager: %v", err)
+		fmt.Fprintf(os.Stderr, "Failed to create session manager: %v\n", err)
+		os.Exit(1)
 	}
 
 	// Cleanup expired leases from previous runs (issue #247)
@@ -261,7 +154,8 @@ func main() {
 	// Serve PWA static files from embedded filesystem
 	webFS, err := webapp.GetFS()
 	if err != nil {
-		log.Fatalf("Failed to create web filesystem: %v", err)
+		fmt.Fprintf(os.Stderr, "Failed to create web filesystem: %v\n", err)
+		os.Exit(1)
 	}
 	mux.Handle("/", http.FileServer(http.FS(webFS)))
 
@@ -271,48 +165,58 @@ func main() {
 		ReadHeaderTimeout: 10 * time.Second, // Prevent Slowloris attacks
 	}
 
-	// Print beautiful startup banner FIRST, then flush buffered logs
-	printStartupBanner(natsClient != nil)
-	initLogs.Flush()
-
-	// Start stats reporter goroutine (updates status line periodically)
-	statsCtx, statsCancel := context.WithCancel(ctx)
-	go runStatsReporter(statsCtx, sessionManager)
-
 	// Start server in goroutine
 	go func() {
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Server error: %v", err)
+			log.Printf("[SERVER] Error: %v", err)
 		}
 	}()
 
-	// Wait for shutdown signal
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-	<-sigChan
+	// Create and run the TUI
+	tuiModel := relaytui.New(relaytui.Config{
+		Port:           port,
+		NATSConnected:  natsClient != nil,
+		DockerOK:       true, // we got this far, Docker is OK
+		SessionManager: sessionManager,
+	})
 
-	// Stop stats reporter
-	statsCancel()
+	tuiProgram = tea.NewProgram(tuiModel, tea.WithAltScreen())
+	tuiLogWriter.SetProgram(tuiProgram)
 
-	// Print shutdown banner
-	printShutdownBanner()
+	// Handle shutdown signals
+	go func() {
+		sigChan := make(chan os.Signal, 1)
+		signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+		<-sigChan
 
-	// Stop HeartbeatMonitor if running
-	if heartbeatMonitor != nil {
-		log.Println("[SHUTDOWN] Stopping HeartbeatMonitor...")
-		heartbeatCancel() // Stop the reaper goroutine
-		heartbeatMonitor.Stop()
-		log.Println("[SHUTDOWN] HeartbeatMonitor stopped")
-		_ = heartbeatCtx // Ensure ctx is used (lint)
-	}
+		// Signal TUI to show shutdown state
+		tuiProgram.Send(relaytui.ShutdownMsg{})
 
-	// Execute graceful shutdown sequence
-	if err := gracefulShutdown(httpServer, sessionManager, natsClient); err != nil {
-		log.Printf("[SHUTDOWN] Server stopped with errors: %v", err)
+		// Stop HeartbeatMonitor if running
+		if heartbeatMonitor != nil {
+			log.Println("[SHUTDOWN] Stopping HeartbeatMonitor...")
+			heartbeatCancel()
+			heartbeatMonitor.Stop()
+			log.Println("[SHUTDOWN] HeartbeatMonitor stopped")
+			_ = heartbeatCtx
+		}
+
+		// Execute graceful shutdown sequence
+		if err := gracefulShutdown(httpServer, sessionManager, natsClient); err != nil {
+			log.Printf("[SHUTDOWN] Server stopped with errors: %v", err)
+		} else {
+			log.Println("[SHUTDOWN] Server stopped successfully")
+		}
+
+		// Quit TUI
+		tuiProgram.Quit()
+	}()
+
+	// Run TUI (blocks until quit)
+	if _, err := tuiProgram.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error running TUI: %v\n", err)
 		os.Exit(1)
 	}
-
-	log.Println("[SHUTDOWN] Server stopped successfully")
 }
 
 // gracefulShutdown performs a phased shutdown of all server components.
@@ -757,154 +661,4 @@ func initializeHeartbeatMonitor(ctx context.Context, server *relay.Server, _ *re
 
 	log.Println("[HEARTBEAT] HeartbeatMonitor started (agent death detection enabled)")
 	return monitor, monitorCtx, monitorCancel
-}
-
-// Banner colors (matching CGA theme from agentd)
-var (
-	colorPrimary   = lipgloss.Color("#00F6FF") // Cyan
-	colorSecondary = lipgloss.Color("#FF63D8") // Magenta
-	colorAccent    = lipgloss.Color("#FFEF5C") // Soft yellow
-	colorSuccess   = lipgloss.Color("#39FF14") // Green
-	colorWarning   = lipgloss.Color("#F8C537") // Amber
-	colorMuted     = lipgloss.Color("#9CA3AF") // Light gray
-)
-
-// Rainbow gradient colors for logo
-var rainbowColors = []lipgloss.Color{
-	lipgloss.Color("#FF5555"), // Red
-	lipgloss.Color("#FFB86C"), // Orange
-	lipgloss.Color("#F1FA8C"), // Yellow
-	lipgloss.Color("#50FA7B"), // Green
-	lipgloss.Color("#8BE9FD"), // Cyan
-	lipgloss.Color("#6272A4"), // Blue
-	lipgloss.Color("#BD93F9"), // Purple
-}
-
-// ASCII art logo (medium size)
-const relayLogo = ` ▄▄ ▗  ▖▗▄▄  ▄▄  ▗▄  ▄▄ ▗▄▖ ▗  ▖ ▄▄
-▗▘▝▖▐  ▌▐ ▝▌▗▘▝▖▗▘ ▘▗▘▝▖▐ ▝▖▐  ▌▐▘ ▘
-▐  ▌▐  ▌▐▄▄▘▐  ▌▐   ▐  ▌▐  ▌▐  ▌▝▙▄
-▐  ▌▐  ▌▐▗▖ ▐  ▌▐   ▐  ▌▐  ▌▐  ▌  ▝▖
-▝▙▟▘▝▄▄▘▐ ▝▖▝▙▟▘▝▙▄▐▝▙▟▘▐▄▟▘▝▄▄▘▝▄▟▘
-
-Multi-Agent Coordination Platform`
-
-// printStartupBanner prints a beautiful ASCII art banner on relay startup
-func printStartupBanner(natsConnected bool) {
-	// Apply rainbow gradient to logo (line by line)
-	lines := strings.Split(relayLogo, "\n")
-
-	var coloredLines []string
-	for i, line := range lines {
-		color := rainbowColors[i%len(rainbowColors)]
-		coloredLine := lipgloss.NewStyle().Foreground(color).Render(line)
-		coloredLines = append(coloredLines, coloredLine)
-	}
-	coloredLogo := strings.Join(coloredLines, "\n")
-
-	// Create the logo box
-	logoBox := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(colorPrimary).
-		Padding(1, 2).
-		Align(lipgloss.Center).
-		Render(coloredLogo)
-
-	fmt.Println(logoBox)
-	fmt.Println()
-
-	// Status section with styled labels
-	labelStyle := lipgloss.NewStyle().Foreground(colorMuted).Width(12)
-	urlStyle := lipgloss.NewStyle().Foreground(colorPrimary).Bold(true)
-	successStyle := lipgloss.NewStyle().Foreground(colorSuccess)
-	warningStyle := lipgloss.NewStyle().Foreground(colorWarning)
-
-	// Server info
-	fmt.Printf("  %s %s\n", labelStyle.Render("PWA:"), urlStyle.Render(fmt.Sprintf("http://localhost:%d/", port)))
-	fmt.Printf("  %s %s\n", labelStyle.Render("WebSocket:"), urlStyle.Render(fmt.Sprintf("ws://localhost:%d/ws", port)))
-
-	// NATS status
-	natsStatus := warningStyle.Render("disabled")
-	if natsConnected {
-		natsStatus = successStyle.Render("connected")
-	}
-	fmt.Printf("  %s %s\n", labelStyle.Render("NATS:"), natsStatus)
-
-	// Docker status (assumed connected if we got this far)
-	fmt.Printf("  %s %s\n", labelStyle.Render("Docker:"), successStyle.Render("connected"))
-
-	fmt.Println()
-
-	// Ready message
-	readyBox := lipgloss.NewStyle().
-		Foreground(colorSuccess).
-		Bold(true).
-		Render("✓ Relay server ready")
-
-	fmt.Printf("  %s\n", readyBox)
-	fmt.Println()
-
-	// Help hint
-	hintStyle := lipgloss.NewStyle().Foreground(colorMuted).Italic(true)
-	fmt.Printf("  %s\n", hintStyle.Render("Press Ctrl+C to stop"))
-	fmt.Println()
-
-	// Divider
-	dividerStyle := lipgloss.NewStyle().Foreground(colorMuted)
-	fmt.Println(dividerStyle.Render(strings.Repeat("─", 50)))
-	fmt.Println()
-}
-
-// printShutdownBanner prints a styled shutdown message
-func printShutdownBanner() {
-	// Clear the status line before printing shutdown banner
-	fmt.Print("\r\033[K") // Clear current line
-	fmt.Println()
-	dividerStyle := lipgloss.NewStyle().Foreground(colorMuted)
-	fmt.Println(dividerStyle.Render(strings.Repeat("─", 50)))
-
-	shutdownStyle := lipgloss.NewStyle().
-		Foreground(colorWarning).
-		Bold(true)
-
-	fmt.Printf("\n  %s\n\n", shutdownStyle.Render("⏹  Shutting down gracefully..."))
-}
-
-// runStatsReporter periodically updates a status line showing session and agent counts.
-// It runs until the context is cancelled.
-func runStatsReporter(ctx context.Context, sm relay.SessionManagerInterface) {
-	ticker := time.NewTicker(2 * time.Second)
-	defer ticker.Stop()
-
-	// Styles for status line
-	labelStyle := lipgloss.NewStyle().Foreground(colorMuted)
-	countStyle := lipgloss.NewStyle().Foreground(colorPrimary).Bold(true)
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			// Get stats
-			sessions := sm.List(nil) // nil filter = all sessions
-			sessionCount := len(sessions)
-
-			// Count total agents across all sessions
-			agentCount := 0
-			for _, s := range sessions {
-				agentCount += s.AgentCount()
-			}
-
-			// Build status line
-			status := fmt.Sprintf("  %s %s  %s %s",
-				labelStyle.Render("Sessions:"),
-				countStyle.Render(fmt.Sprintf("%d", sessionCount)),
-				labelStyle.Render("Agents:"),
-				countStyle.Render(fmt.Sprintf("%d", agentCount)),
-			)
-
-			// Update the status line (carriage return to beginning of line)
-			fmt.Print("\r\033[K" + status) // \033[K clears to end of line
-		}
-	}
 }
