@@ -11,9 +11,9 @@ import (
 
 	"github.com/2389-research/ourocodus/cmd/agentd/internal/detect"
 	"github.com/2389-research/ourocodus/cmd/agentd/internal/output"
-	"github.com/2389-research/ourocodus/cmd/agentd/internal/theme"
+	stoptui "github.com/2389-research/ourocodus/cmd/agentd/internal/tui/stop"
 	"github.com/2389-research/ourocodus/pkg/labels"
-	"github.com/charmbracelet/lipgloss"
+	tea "github.com/charmbracelet/bubbletea"
 	cerrdefs "github.com/containerd/errdefs"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
@@ -79,11 +79,103 @@ func runStop(cmd *cobra.Command, args []string) error {
 	shouldPlain := detect.ShouldUsePlainMode(stopJSON, stopPlain, os.Environ)
 	mode := output.DetectMode(stopJSON, stopPlain, shouldPlain)
 
+	// Use TUI for rich mode
+	if mode.IsRich() {
+		return runStopTUI(ctx, args)
+	}
+
+	// Non-TUI mode (JSON or plain)
+	return runStopLegacy(ctx, args, mode)
+}
+
+// runStopTUI runs the stop command with a Bubble Tea TUI.
+func runStopTUI(ctx context.Context, agentIDs []string) error {
+	m := stoptui.New(agentIDs)
+	p := tea.NewProgram(m)
+
+	// Channel to receive final result
+	resultCh := make(chan bool, 1)
+
+	// Run stop operations in background
+	go func() {
+		allSucceeded := true
+
+		for _, agentID := range agentIDs {
+			p.Send(stoptui.AgentStartMsg{AgentID: agentID})
+
+			// Step 1: Find container
+			p.Send(stoptui.StepStartMsg{AgentID: agentID, Step: stoptui.StepFindContainer})
+			time.Sleep(50 * time.Millisecond)
+
+			containerID, workspacePath, err := findAgentContainer(ctx, agentID)
+			if err != nil {
+				p.Send(stoptui.StepErrorMsg{AgentID: agentID, Step: stoptui.StepFindContainer, Error: err})
+				p.Send(stoptui.AgentCompleteMsg{AgentID: agentID, Status: "failed"})
+				allSucceeded = false
+				continue
+			}
+
+			if containerID == "" {
+				p.Send(stoptui.StepSkipMsg{AgentID: agentID, Step: stoptui.StepFindContainer, Reason: "not found"})
+				p.Send(stoptui.StepSkipMsg{AgentID: agentID, Step: stoptui.StepStopContainer, Reason: "no container"})
+				p.Send(stoptui.StepSkipMsg{AgentID: agentID, Step: stoptui.StepRemoveWorktree, Reason: "no worktree"})
+				p.Send(stoptui.AgentCompleteMsg{AgentID: agentID, Status: "not_found"})
+				continue
+			}
+
+			p.Send(stoptui.StepCompleteMsg{AgentID: agentID, Step: stoptui.StepFindContainer, ContainerID: containerID, Workspace: workspacePath})
+
+			// Step 2: Stop container
+			p.Send(stoptui.StepStartMsg{AgentID: agentID, Step: stoptui.StepStopContainer})
+
+			if err := stopContainer(ctx, containerID); err != nil {
+				p.Send(stoptui.StepErrorMsg{AgentID: agentID, Step: stoptui.StepStopContainer, Error: err})
+				p.Send(stoptui.AgentCompleteMsg{AgentID: agentID, Status: "failed"})
+				allSucceeded = false
+				continue
+			}
+			p.Send(stoptui.StepCompleteMsg{AgentID: agentID, Step: stoptui.StepStopContainer, ContainerID: "", Workspace: ""})
+
+			// Step 3: Remove worktree
+			p.Send(stoptui.StepStartMsg{AgentID: agentID, Step: stoptui.StepRemoveWorktree})
+
+			if workspacePath == "" {
+				p.Send(stoptui.StepSkipMsg{AgentID: agentID, Step: stoptui.StepRemoveWorktree, Reason: "no worktree"})
+			} else if err := removeWorktree(ctx, workspacePath); err != nil {
+				// Non-fatal warning
+				p.Send(stoptui.StepCompleteMsg{AgentID: agentID, Step: stoptui.StepRemoveWorktree, ContainerID: "", Workspace: ""})
+			} else {
+				p.Send(stoptui.StepCompleteMsg{AgentID: agentID, Step: stoptui.StepRemoveWorktree, ContainerID: "", Workspace: ""})
+			}
+
+			p.Send(stoptui.AgentCompleteMsg{AgentID: agentID, Status: "stopped"})
+		}
+
+		p.Send(stoptui.AllCompleteMsg{})
+		resultCh <- allSucceeded
+	}()
+
+	// Run TUI
+	if _, err := p.Run(); err != nil {
+		return err
+	}
+
+	// Get result
+	allSucceeded := <-resultCh
+	if !allSucceeded {
+		return fmt.Errorf("one or more agents failed to stop")
+	}
+
+	return nil
+}
+
+// runStopLegacy runs the stop command without TUI (JSON or plain mode).
+func runStopLegacy(ctx context.Context, agentIDs []string, mode output.Mode) error {
 	// Collect results for JSON output
-	results := make([]StopResult, 0, len(args))
+	results := make([]StopResult, 0, len(agentIDs))
 	allSucceeded := true
 
-	for _, agentID := range args {
+	for _, agentID := range agentIDs {
 		result := stopAgentWithMode(ctx, agentID, mode)
 		results = append(results, result)
 		if result.Status == "failed" {
@@ -146,18 +238,12 @@ func stopAgentWithMode(ctx context.Context, agentID string, mode output.Mode) St
 	return result
 }
 
-// printStopProgress prints the initial stopping message for non-JSON modes.
+// printStopProgress prints the initial stopping message for plain mode.
 func printStopProgress(agentID string, mode output.Mode) {
 	if mode.IsJSON() {
 		return
 	}
-	if mode.IsRich() {
-		th := theme.NewRetroTheme(theme.PaletteCGA)
-		headerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(string(th.Warning))).Bold(true)
-		fmt.Println(headerStyle.Render(fmt.Sprintf("🛑 Stopping agent '%s'...", agentID)))
-	} else {
-		fmt.Printf("Stopping agent '%s'...\n", agentID)
-	}
+	fmt.Printf("Stopping agent '%s'...\n", agentID)
 }
 
 // setStopFailed sets the result to failed status with error message and prints if needed.
@@ -175,11 +261,7 @@ func cleanupWorktree(workspacePath string, mode output.Mode) {
 	}
 	if err := removeWorktree(context.Background(), workspacePath); err != nil {
 		printIfNotJSON(mode, func() {
-			if mode.IsRich() {
-				fmt.Fprintf(os.Stderr, "Warning: failed to remove worktree: %v\n", err)
-			} else {
-				fmt.Printf("Warning: failed to remove worktree: %v\n", err)
-			}
+			fmt.Printf("Warning: failed to remove worktree: %v\n", err)
 		})
 	} else {
 		printIfNotJSON(mode, func() { printStopWorktreeSuccess(workspacePath, mode) })
@@ -194,48 +276,28 @@ func printIfNotJSON(mode output.Mode, fn func()) {
 }
 
 // printStopNotFound prints message when agent is not found
-func printStopNotFound(agentID string, mode output.Mode) {
-	if mode.IsRich() {
-		printSuccess(fmt.Sprintf("Agent '%s' not found (already stopped)", agentID))
-	} else {
-		fmt.Printf("Agent '%s' not found (already stopped)\n", agentID)
-	}
+func printStopNotFound(agentID string, _ output.Mode) {
+	fmt.Printf("Agent '%s' not found (already stopped)\n", agentID)
 }
 
 // printStopContainerSuccess prints container stop success
-func printStopContainerSuccess(containerID string, mode output.Mode) {
+func printStopContainerSuccess(containerID string, _ output.Mode) {
 	shortID := output.FormatContainerID(containerID)
-	if mode.IsRich() {
-		printSuccess(fmt.Sprintf("Stopped container %s", shortID))
-	} else {
-		fmt.Printf("Stopped container %s\n", shortID)
-	}
+	fmt.Printf("Stopped container %s\n", shortID)
 }
 
 // printStopWorktreeSuccess prints worktree removal success
-func printStopWorktreeSuccess(workspacePath string, mode output.Mode) {
+func printStopWorktreeSuccess(workspacePath string, _ output.Mode) {
 	displayPath := workspacePath
 	if len(displayPath) > 60 {
 		displayPath = "..." + displayPath[len(displayPath)-57:]
 	}
-	if mode.IsRich() {
-		printSuccess(fmt.Sprintf("Removed worktree %s", displayPath))
-	} else {
-		fmt.Printf("Removed worktree %s\n", displayPath)
-	}
+	fmt.Printf("Removed worktree %s\n", displayPath)
 }
 
 // printStopCleanupSuccess prints final cleanup success
-func printStopCleanupSuccess(agentID string, mode output.Mode) {
-	if mode.IsRich() {
-		th := theme.NewRetroTheme(theme.PaletteCGA)
-		successStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color(string(th.Success))).
-			Bold(true)
-		fmt.Println(successStyle.Render(fmt.Sprintf("✓ Agent %s stopped and cleaned up", agentID)))
-	} else {
-		fmt.Printf("Agent %s stopped and cleaned up\n", agentID)
-	}
+func printStopCleanupSuccess(agentID string, _ output.Mode) {
+	fmt.Printf("Agent %s stopped and cleaned up\n", agentID)
 }
 
 func findAgentContainer(ctx context.Context, agentID string) (string, string, error) {
