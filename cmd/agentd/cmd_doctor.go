@@ -12,19 +12,13 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/2389-research/ourocodus/cmd/agentd/internal/detect"
-	"github.com/2389-research/ourocodus/cmd/agentd/internal/output"
 	doctortui "github.com/2389-research/ourocodus/cmd/agentd/internal/tui/doctor"
+	"github.com/2389-research/ourocodus/pkg/cli"
 	"github.com/2389-research/ourocodus/pkg/tui/theme"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/docker/docker/api/types/container"
 	"github.com/spf13/cobra"
-)
-
-var (
-	doctorJSON  bool
-	doctorPlain bool
 )
 
 var doctorCmd = &cobra.Command{
@@ -49,11 +43,6 @@ Run this before spawning agents to catch configuration issues early.`,
 	RunE: runDoctor,
 }
 
-func init() {
-	doctorCmd.Flags().BoolVar(&doctorJSON, "json", false, "Output in JSON format")
-	doctorCmd.Flags().BoolVar(&doctorPlain, "plain", false, "Output in plain text (no colors)")
-}
-
 type Check struct {
 	Name string
 	Run  func(context.Context) (string, error) // Returns (message, error)
@@ -74,7 +63,7 @@ func printError(msg string) {
 	fmt.Println(msg)
 }
 
-func runDoctor(cmd *cobra.Command, args []string) error {
+func runDoctor(cmd *cobra.Command, _ []string) error {
 	ctx := cmd.Context()
 
 	checks := []Check{
@@ -87,15 +76,18 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 		{"Spawn smoke test", checkSpawnSmokeTest},
 	}
 
-	// Detect output mode
-	shouldPlain := detect.ShouldUsePlainMode(doctorJSON, doctorPlain, os.Environ)
-	mode := output.DetectMode(doctorJSON, doctorPlain, shouldPlain)
+	// Get mode from AppContext (set by cli.App wrapper)
+	appCtx := cli.FromContext(ctx)
+	if appCtx == nil {
+		// Fallback for tests or direct cobra execution
+		return runDoctorLegacy(ctx, checks, cli.ModePlain)
+	}
 
 	// Use TUI for rich mode, legacy for others
-	if mode.IsRich() {
+	if appCtx.Mode.IsRich() {
 		return runDoctorTUI(ctx, checks)
 	}
-	return runDoctorLegacy(ctx, checks, mode)
+	return runDoctorLegacy(ctx, checks, appCtx.Mode)
 }
 
 // runDoctorTUI runs the doctor command with a Bubble Tea TUI.
@@ -167,7 +159,7 @@ type DoctorResults struct {
 }
 
 // runDoctorLegacy runs doctor checks without TUI (for JSON/plain mode).
-func runDoctorLegacy(ctx context.Context, checks []Check, mode output.Mode) error {
+func runDoctorLegacy(ctx context.Context, checks []Check, mode cli.Mode) error {
 	results := make([]DoctorResult, 0, len(checks))
 	allPassed := true
 
@@ -227,18 +219,18 @@ func runDoctorLegacy(ctx context.Context, checks []Check, mode output.Mode) erro
 }
 
 func checkDockerDaemon(ctx context.Context) (string, error) {
-	cli, err := newDockerClient()
+	dockerCli, err := newDockerClient()
 	if err != nil {
 		return "", fmt.Errorf("docker client creation failed: %w", err)
 	}
-	defer func() { _ = cli.Close() }()
+	defer func() { _ = dockerCli.Close() }()
 
-	if _, err := cli.Ping(ctx); err != nil {
+	if _, err := dockerCli.Ping(ctx); err != nil {
 		return "", fmt.Errorf("docker daemon not running: start Docker Desktop and retry")
 	}
 
 	// Get version for display
-	version, err := cli.ServerVersion(ctx)
+	version, err := dockerCli.ServerVersion(ctx)
 	if err != nil {
 		return "running", nil
 	}
@@ -247,13 +239,13 @@ func checkDockerDaemon(ctx context.Context) (string, error) {
 }
 
 func checkDockerVersion(ctx context.Context) (string, error) {
-	cli, err := newDockerClient()
+	dockerCli, err := newDockerClient()
 	if err != nil {
 		return "", err
 	}
-	defer func() { _ = cli.Close() }()
+	defer func() { _ = dockerCli.Close() }()
 
-	version, err := cli.ServerVersion(ctx)
+	version, err := dockerCli.ServerVersion(ctx)
 	if err != nil {
 		return "", fmt.Errorf("failed to get Docker version: %w", err)
 	}
@@ -305,16 +297,16 @@ func checkFileSharingMacOS(_ context.Context) (string, error) {
 }
 
 func checkImagePresence(ctx context.Context) (string, error) {
-	cli, err := newDockerClient()
+	dockerCli, err := newDockerClient()
 	if err != nil {
 		return "", err
 	}
-	defer func() { _ = cli.Close() }()
+	defer func() { _ = dockerCli.Close() }()
 
 	imageName := "ourocodus/agent:latest"
 
 	// Try to inspect the image
-	_, err = cli.ImageInspect(ctx, imageName)
+	_, err = dockerCli.ImageInspect(ctx, imageName)
 	if err != nil {
 		// Image not present - offer guidance
 		return "", fmt.Errorf("image not present (run: docker pull %s)", imageName)
@@ -375,18 +367,18 @@ func checkDiskSpace(_ context.Context) (string, error) {
 }
 
 func checkSpawnSmokeTest(ctx context.Context) (string, error) {
-	cli, err := newDockerClient()
+	dockerCli, err := newDockerClient()
 	if err != nil {
 		return "", err
 	}
-	defer func() { _ = cli.Close() }()
+	defer func() { _ = dockerCli.Close() }()
 
 	// Create a simple test container
 	// Use alpine since it's tiny and likely to be cached
 	testImage := "alpine:latest"
 
 	// Pull image if needed
-	_, err = cli.ImageInspect(ctx, testImage)
+	_, err = dockerCli.ImageInspect(ctx, testImage)
 	if err != nil {
 		// Image not present, skip smoke test
 		return "alpine:latest not available", fmt.Errorf("skipped")
@@ -394,7 +386,7 @@ func checkSpawnSmokeTest(ctx context.Context) (string, error) {
 
 	// Create container with auto-generated name (empty string) to prevent name collision
 	// from crashed prior runs. Cleanup uses container ID, not name.
-	resp, err := cli.ContainerCreate(ctx, &container.Config{
+	resp, err := dockerCli.ContainerCreate(ctx, &container.Config{
 		Image: testImage,
 		Cmd:   []string{"echo", "test"},
 		Labels: map[string]string{
@@ -410,7 +402,7 @@ func checkSpawnSmokeTest(ctx context.Context) (string, error) {
 		// Use a fresh context with timeout for cleanup
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		_ = cli.ContainerRemove(cleanupCtx, resp.ID, container.RemoveOptions{Force: true})
+		_ = dockerCli.ContainerRemove(cleanupCtx, resp.ID, container.RemoveOptions{Force: true})
 	}()
 
 	return "passed", nil

@@ -1,9 +1,9 @@
 package main
 
 import (
-	"fmt"
 	"os"
 
+	"github.com/2389-research/ourocodus/pkg/cli"
 	"github.com/2389-research/ourocodus/pkg/tui/theme"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
@@ -26,10 +26,8 @@ var rootCmd = &cobra.Command{
 }
 
 func main() {
-	if err := rootCmd.Execute(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
+	app := cli.NewApp(rootCmd)
+	os.Exit(app.Execute())
 }
 
 func init() {
