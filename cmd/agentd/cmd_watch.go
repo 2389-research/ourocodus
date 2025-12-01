@@ -12,10 +12,10 @@ import (
 
 	"github.com/2389-research/ourocodus/cmd/agentd/internal/detect"
 	"github.com/2389-research/ourocodus/cmd/agentd/internal/output"
-	"github.com/2389-research/ourocodus/pkg/tui/theme"
 	watchtui "github.com/2389-research/ourocodus/cmd/agentd/internal/tui/watch"
 	"github.com/2389-research/ourocodus/pkg/heartbeat"
 	"github.com/2389-research/ourocodus/pkg/relay/session"
+	"github.com/2389-research/ourocodus/pkg/tui/theme"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/docker/docker/api/types/container"

@@ -5,8 +5,8 @@ import (
 	"io"
 	"strings"
 
-	"github.com/2389-research/ourocodus/pkg/tui/theme"
 	uirepl "github.com/2389-research/ourocodus/cmd/agentd/internal/tui/repl"
+	"github.com/2389-research/ourocodus/pkg/tui/theme"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/pkg/stdcopy"

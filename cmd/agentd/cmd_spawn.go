@@ -437,4 +437,3 @@ func printSpawnSuccessPlain(handle *container.AgentContainerHandle, attachToken 
 
 	fmt.Printf("\nAgent %s ready\n", handle.AgentID())
 }
-

@@ -74,7 +74,7 @@ type Model struct {
 // keyMap defines key bindings.
 type keyMap struct {
 	keys.Navigation
-	Clear   key.Binding
+	Clear        key.Binding
 	ToggleFollow key.Binding
 }
 

@@ -74,11 +74,6 @@ func printError(msg string) {
 	fmt.Println(msg)
 }
 
-func printInfo(msg string) {
-	style := lipgloss.NewStyle().Foreground(doctorTheme.Primary)
-	fmt.Println(style.Render(msg))
-}
-
 func runDoctor(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 

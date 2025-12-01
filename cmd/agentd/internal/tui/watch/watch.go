@@ -34,8 +34,8 @@ type (
 
 	// LogLineMsg is sent when a log line is received.
 	LogLineMsg struct {
-		Line   string
-		IsErr  bool
+		Line  string
+		IsErr bool
 	}
 
 	// ErrorMsg is sent on errors.

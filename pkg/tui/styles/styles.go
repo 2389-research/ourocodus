@@ -28,7 +28,7 @@ type Styles struct {
 	HelpValue lipgloss.Style
 
 	// Box styles
-	Box       lipgloss.Style
+	Box        lipgloss.Style
 	SuccessBox lipgloss.Style
 	ErrorBox   lipgloss.Style
 	WarningBox lipgloss.Style
