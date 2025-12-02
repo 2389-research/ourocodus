@@ -1,6 +1,12 @@
 #!/bin/bash
 set -e
 
+# Cleanup PID file on exit
+cleanup() {
+    rm -f /tmp/claude-code.pid
+}
+trap cleanup EXIT
+
 # Credential sourcing with fallback
 # Priority: 1) .creds/.env file  2) ~/.claude directory  3) Error
 #

@@ -19,10 +19,13 @@ RUN npm install -g @zed-industries/claude-code-acp@0.10.10
 COPY scripts/claude-code-entry.sh /usr/local/bin/claude-code-entry.sh
 RUN chmod +x /usr/local/bin/claude-code-entry.sh
 
-# Health check: verify process is running via PID file
-# Note: pgrep is fragile; PID file check is more reliable
+# Copy health check script
+COPY scripts/healthcheck.sh /usr/local/bin/healthcheck.sh
+RUN chmod +x /usr/local/bin/healthcheck.sh
+
+# Health check: verify process is running and is claude-code-acp
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD test -f /tmp/claude-code.pid && kill -0 $(cat /tmp/claude-code.pid) 2>/dev/null || exit 1
+    CMD /usr/local/bin/healthcheck.sh
 
 # Switch to non-root user
 USER node
