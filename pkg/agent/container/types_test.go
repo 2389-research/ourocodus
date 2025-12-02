@@ -166,24 +166,15 @@ func TestCredentialFiles_EmptyFields(t *testing.T) {
 }
 
 func TestSpawnConfig_RuntimeHardening(t *testing.T) {
-	config := SpawnConfig{
-		AgentID:   "test-agent",
-		ImageName: "ourocodus/agent:latest",
-		Command:   []string{"/usr/local/bin/claude-code-entry.sh"},
-		RuntimeHardening: RuntimeHardening{
-			ReadOnlyRootfs:   true,
-			DropAllCaps:      true,
-			NoNewPrivileges:  true,
-			MemoryLimitMB:    2048,
-			CPULimit:         2.0,
-			TmpfsSizeMB:      100,
-		},
+	hardening := RuntimeHardening{
+		ReadOnlyRootfs: true,
+		MemoryLimitMB:  2048,
 	}
 
-	if !config.RuntimeHardening.ReadOnlyRootfs {
+	if !hardening.ReadOnlyRootfs {
 		t.Error("expected ReadOnlyRootfs to be true")
 	}
-	if config.RuntimeHardening.MemoryLimitMB != 2048 {
-		t.Errorf("expected MemoryLimitMB=2048, got %d", config.RuntimeHardening.MemoryLimitMB)
+	if hardening.MemoryLimitMB != 2048 {
+		t.Errorf("expected MemoryLimitMB=2048, got %d", hardening.MemoryLimitMB)
 	}
 }
