@@ -174,9 +174,9 @@ func (a *containerLauncherAdapter) Spawn(ctx context.Context, config *SpawnConfi
 		// - AGENT_CPU_LIMIT: CPU cores (default: 2.0)
 		// - AGENT_TMPFS_SIZE_MB: tmpfs size in MB (default: 256)
 		RuntimeHardening: container.RuntimeHardening{
-			ReadOnlyRootfs:  true,                                  // Make root filesystem read-only
-			DropAllCaps:     true,                                  // Drop all Linux capabilities
-			NoNewPrivileges: true,                                  // Prevent privilege escalation
+			ReadOnlyRootfs:  true,                                       // Make root filesystem read-only
+			DropAllCaps:     true,                                       // Drop all Linux capabilities
+			NoNewPrivileges: true,                                       // Prevent privilege escalation
 			MemoryLimitMB:   getEnvInt64("AGENT_MEMORY_LIMIT_MB", 2048), // 2GB memory limit (configurable)
 			CPULimit:        getEnvFloat64("AGENT_CPU_LIMIT", 2.0),      // 2 CPU cores (configurable)
 			TmpfsSizeMB:     getEnvInt64("AGENT_TMPFS_SIZE_MB", 256),    // 256MB tmpfs for /tmp (configurable, increased from 100MB)
