@@ -7,6 +7,28 @@ import (
 	"github.com/2389-research/ourocodus/pkg/worktree"
 )
 
+// RuntimeHardening contains security hardening options for containers.
+// These settings reduce attack surface and limit container capabilities.
+type RuntimeHardening struct {
+	// ReadOnlyRootfs makes the container's root filesystem read-only
+	ReadOnlyRootfs bool
+
+	// DropAllCaps drops all Linux capabilities
+	DropAllCaps bool
+
+	// NoNewPrivileges prevents privilege escalation
+	NoNewPrivileges bool
+
+	// MemoryLimitMB sets memory limit in megabytes (0 = no limit)
+	MemoryLimitMB int64
+
+	// CPULimit sets CPU limit as number of cores (0 = no limit)
+	CPULimit float64
+
+	// TmpfsSizeMB sets tmpfs size for /tmp in megabytes (0 = no tmpfs)
+	TmpfsSizeMB int64
+}
+
 // SpawnConfig contains configuration for spawning an agent container.
 type SpawnConfig struct {
 	// AgentID is the unique identifier for this agent (e.g., "coder-abc123", "reviewer-xyz789")
@@ -37,6 +59,10 @@ type SpawnConfig struct {
 	// Labels are custom Docker labels to add to the container (optional)
 	// These are merged with default labels (ourocodus.agent=true, agent-id=<id>)
 	Labels map[string]string
+
+	// RuntimeHardening contains security hardening options (optional)
+	// If not set, containers run with default (less secure) settings
+	RuntimeHardening RuntimeHardening
 }
 
 // AgentContainerHandle represents a running agent container with workspace and credentials.
