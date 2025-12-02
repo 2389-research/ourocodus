@@ -22,5 +22,9 @@ RUN mkdir -p /workspace /home/node/.creds /home/node/.claude \
 # Set working directory
 WORKDIR /workspace
 
+# Switch to non-root user for safety
+# Child images can switch back to root if needed for package installation
+USER node
+
 # Use tini as init
 ENTRYPOINT ["/usr/bin/tini", "--"]

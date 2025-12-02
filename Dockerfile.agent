@@ -11,6 +11,9 @@
 
 FROM ourocodus/claude-code-base:latest
 
+# Switch back to root for package installation
+USER root
+
 # Install claude-code-acp globally
 # Pin to specific version for reproducibility
 RUN npm install -g @zed-industries/claude-code-acp@0.10.10

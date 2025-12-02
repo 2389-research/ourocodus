@@ -840,6 +840,22 @@ Closes #XXX"
 
 This implementation was completed with the following key changes from the original plan:
 
+### User Account: `node` (UID 1000)
+
+The container uses the existing `node` user from the `node:22-bookworm-slim` base image instead of creating a dedicated `agent` user. This was a pragmatic decision that:
+
+1. **Avoids UID conflicts** - The base image already has `node` at UID 1000
+2. **Maintains compatibility** - UID 1000 is standard for non-root containers
+3. **Simplifies volume permissions** - Host directories owned by UID 1000 work seamlessly
+
+**Important:** All credential mounts and file operations assume UID 1000:
+- `/home/node/.creds/.env` - API credentials
+- `/home/node/.ssh/` - SSH keys
+- `/home/node/.claude/` - Claude CLI credentials
+- `/workspace` - Working directory
+
+If the upstream `node` base image changes its default user UID, the container configuration must be updated accordingly.
+
 ### User Account Strategy
 
 **Original Plan:** Create a new `agent` user (UID 1000) in the base image.

@@ -73,3 +73,89 @@ docker run --rm -it \
   -v /tmp/test-creds:/home/node/.creds:ro \
   ourocodus/agent:latest
 ```
+
+## Kubernetes Deployment
+
+### Example Pod Specification
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: claude-code-agent
+  labels:
+    app: claude-code
+spec:
+  securityContext:
+    runAsUser: 1000
+    runAsGroup: 1000
+    fsGroup: 1000
+    runAsNonRoot: true
+  containers:
+  - name: agent
+    image: ghcr.io/ourocodus/agent:latest
+    securityContext:
+      readOnlyRootFilesystem: true
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop:
+          - ALL
+    resources:
+      requests:
+        memory: "512Mi"
+        cpu: "500m"
+      limits:
+        memory: "2Gi"
+        cpu: "2"
+    volumeMounts:
+    - name: tmp
+      mountPath: /tmp
+    - name: workspace
+      mountPath: /workspace
+    - name: credentials
+      mountPath: /home/node/.creds
+      readOnly: true
+    livenessProbe:
+      exec:
+        command:
+        - /usr/local/bin/healthcheck.sh
+      initialDelaySeconds: 5
+      periodSeconds: 30
+    readinessProbe:
+      exec:
+        command:
+        - /usr/local/bin/healthcheck.sh
+      initialDelaySeconds: 5
+      periodSeconds: 10
+  volumes:
+  - name: tmp
+    emptyDir:
+      medium: Memory
+      sizeLimit: 256Mi
+  - name: workspace
+    emptyDir: {}
+  - name: credentials
+    secret:
+      secretName: claude-credentials
+      defaultMode: 0400
+```
+
+### Creating the Credentials Secret
+
+```bash
+kubectl create secret generic claude-credentials \
+  --from-literal=ANTHROPIC_API_KEY=sk-ant-... \
+  --dry-run=client -o yaml > claude-credentials.yaml
+
+# Apply the secret
+kubectl apply -f claude-credentials.yaml
+```
+
+### Security Notes
+
+- `runAsNonRoot: true` enforces non-root execution at the Pod level
+- `readOnlyRootFilesystem: true` prevents filesystem modifications
+- `allowPrivilegeEscalation: false` blocks setuid/setgid
+- `capabilities.drop: ALL` removes all Linux capabilities
+- `emptyDir` with `medium: Memory` creates tmpfs for /tmp
+- Credentials mounted with `0400` permissions for security
