@@ -1,14 +1,12 @@
 # Claude Code Container Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
+> **Status:** Implemented
 
 **Goal:** Replace the echo-agent placeholder with official claude-code-acp running in Docker containers with proper credential handling and runtime hardening.
 
 **Architecture:** Two-layer Docker image (base + agent), entry script with credential sourcing, PID-file health check, runtime hardening flags. Integrates with existing `AgentContainerLauncher` and credential infrastructure.
 
 **Tech Stack:** Docker, Node.js 22, tini, @zed-industries/claude-code-acp@0.10.10, Go container package
-
-**Design Document:** `docs/plans/2025-12-02-claude-code-container-design.md`
 
 ---
 
@@ -835,3 +833,60 @@ Closes #XXX"
 
 **Estimated commits:** 11
 **Key dependencies:** Docker, claude-code-acp npm package, ANTHROPIC_API_KEY for testing
+
+---
+
+## Implementation Notes
+
+This implementation was completed with the following key changes from the original plan:
+
+### User Account Strategy
+
+**Original Plan:** Create a new `agent` user (UID 1000) in the base image.
+
+**Implementation:** Used the existing `node` user (UID 1000) that comes with the `node:22-bookworm-slim` base image. This:
+- Avoided redundant user creation
+- Maintained the same UID (1000) for compatibility
+- Leveraged Node.js's existing user setup
+
+### Credential Path Updates
+
+All credential mount paths were updated from `/root/` to `/home/node/`:
+- `.creds/.env` mounted to `/home/node/.creds/.env`
+- SSH keys mounted to `/home/node/.ssh/id_ed25519`
+- GitHub tokens mounted to `/home/node/.github-token`
+- Claude credentials directory at `/home/node/.claude`
+
+### RuntimeHardening Implementation
+
+The `RuntimeHardening` struct was implemented across multiple packages:
+- `pkg/agent/container/types.go` - Core struct definition
+- `pkg/containersession/config.go` - Container session configuration
+- `pkg/agent/container/launcher.go` - Hardening option passthrough
+- `pkg/agent/factory.go` - Default hardening for Claude Code agents
+
+Default hardening settings:
+- Read-only root filesystem (`ReadOnlyRootfs: true`)
+- All Linux capabilities dropped (`DropAllCaps: true`)
+- No privilege escalation (`NoNewPrivileges: true`)
+- 2GB memory limit (`MemoryLimitMB: 2048`)
+- 2 CPU cores limit (`CPULimit: 2.0`)
+- 100MB tmpfs for /tmp (`TmpfsSizeMB: 100`)
+
+### Security Considerations
+
+The entry script sources `.env` files which exposes environment variables to the process. This is acceptable because:
+- The container runs with a read-only root filesystem
+- All Linux capabilities are dropped
+- The `no-new-privileges` security option prevents privilege escalation
+- Credentials are mounted read-only
+- The container runs as a non-root user (UID 1000)
+
+### Testing
+
+Integration tests were added but are gated behind:
+- Build tag: `//go:build integration`
+- Environment variable: `RUN_INTEGRATION_TESTS=true`
+- API key requirement: `ANTHROPIC_API_KEY` must be set
+
+This allows CI/CD to skip tests when Docker or API keys are not available.
