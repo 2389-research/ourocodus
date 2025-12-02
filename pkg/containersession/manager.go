@@ -280,6 +280,28 @@ func (m *Manager) CreateContainerSessionWithConfig(ctx context.Context, config C
 		Mounts: mounts,
 	}
 
+	// Apply runtime hardening if specified
+	if config.RuntimeHardening.ReadOnlyRootfs {
+		hostConfig.ReadonlyRootfs = true
+	}
+	if config.RuntimeHardening.DropAllCaps {
+		hostConfig.CapDrop = []string{"ALL"}
+	}
+	if config.RuntimeHardening.NoNewPrivileges {
+		hostConfig.SecurityOpt = append(hostConfig.SecurityOpt, "no-new-privileges")
+	}
+	if config.RuntimeHardening.MemoryLimitMB > 0 {
+		hostConfig.Memory = config.RuntimeHardening.MemoryLimitMB * 1024 * 1024
+	}
+	if config.RuntimeHardening.CPULimit > 0 {
+		hostConfig.NanoCPUs = int64(config.RuntimeHardening.CPULimit * 1e9)
+	}
+	if config.RuntimeHardening.TmpfsSizeMB > 0 {
+		hostConfig.Tmpfs = map[string]string{
+			"/tmp": fmt.Sprintf("size=%dm,noexec,nosuid", config.RuntimeHardening.TmpfsSizeMB),
+		}
+	}
+
 	resp, err := m.dockerClient.ContainerCreate(ctx, containerConfig, hostConfig, nil, nil, "")
 	if err != nil {
 		// Remove session from map on failure
