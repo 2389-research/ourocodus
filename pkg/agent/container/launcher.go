@@ -245,6 +245,14 @@ func (l *AgentContainerLauncher) createContainerWithMounts(
 		Env:               config.Env,
 		Labels:            containerLabels,   // Use labels from builder
 		SkipOutputLogging: skipOutputLogging, // Skip if using container attach mode
+		RuntimeHardening: containersession.RuntimeHardening{
+			ReadOnlyRootfs:  config.RuntimeHardening.ReadOnlyRootfs,
+			DropAllCaps:     config.RuntimeHardening.DropAllCaps,
+			NoNewPrivileges: config.RuntimeHardening.NoNewPrivileges,
+			MemoryLimitMB:   config.RuntimeHardening.MemoryLimitMB,
+			CPULimit:        config.RuntimeHardening.CPULimit,
+			TmpfsSizeMB:     config.RuntimeHardening.TmpfsSizeMB,
+		},
 	})
 	if err != nil {
 		return nil, err
