@@ -81,8 +81,8 @@
 //	/workspaces/agent-{id}/        (git worktree)
 //	/credentials/agent-{id}/       (read-only credentials)
 //	/workspace/                    (container mount point)
-//	/root/.ssh/id_ed25519         (container credential mount)
-//	/root/.github-token           (container credential mount)
+//	/home/node/.ssh/id_ed25519    (container credential mount)
+//	/home/node/.github-token      (container credential mount)
 //
 // Each AgentSession gets an AgentContainerHandle that coordinates all isolation layers,
 // enabling concurrent agents to work safely on the same repository.

@@ -168,13 +168,13 @@ func TestAgentCredentialMounter_GetMounts(t *testing.T) {
 		// Verify SSH key mount
 		sshMount := mounts[0]
 		assert.Equal(t, "/path/to/ssh/key", sshMount.Source)
-		assert.Equal(t, "/root/.ssh/id_ed25519", sshMount.Target)
+		assert.Equal(t, "/home/node/.ssh/id_ed25519", sshMount.Target)
 		assert.True(t, sshMount.ReadOnly, "SSH key should be read-only")
 
 		// Verify token mount
 		tokenMount := mounts[1]
 		assert.Equal(t, "/path/to/token", tokenMount.Source)
-		assert.Equal(t, "/root/.github-token", tokenMount.Target)
+		assert.Equal(t, "/home/node/.github-token", tokenMount.Target)
 		assert.True(t, tokenMount.ReadOnly, "Token should be read-only")
 	})
 
@@ -186,7 +186,7 @@ func TestAgentCredentialMounter_GetMounts(t *testing.T) {
 
 		mounts := mounter.GetMounts(files)
 		require.Len(t, mounts, 1)
-		assert.Equal(t, "/root/.ssh/id_ed25519", mounts[0].Target)
+		assert.Equal(t, "/home/node/.ssh/id_ed25519", mounts[0].Target)
 	})
 
 	t.Run("OnlyToken", func(t *testing.T) {
@@ -197,7 +197,7 @@ func TestAgentCredentialMounter_GetMounts(t *testing.T) {
 
 		mounts := mounter.GetMounts(files)
 		require.Len(t, mounts, 1)
-		assert.Equal(t, "/root/.github-token", mounts[0].Target)
+		assert.Equal(t, "/home/node/.github-token", mounts[0].Target)
 	})
 
 	t.Run("NoCredentials", func(t *testing.T) {
