@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"sort"
+	"strconv"
 	"sync"
 
 	"github.com/2389-research/ourocodus/pkg/agent/container"
@@ -19,6 +21,26 @@ var ErrFactoryNotReady = errors.New("launcher factory not ready: missing require
 
 // ErrEmptyAgentID is returned when agentID is empty
 var ErrEmptyAgentID = errors.New("agentID cannot be empty")
+
+// getEnvInt64 retrieves an int64 value from an environment variable, returning the default if not set or invalid
+func getEnvInt64(key string, defaultVal int64) int64 {
+	if val := os.Getenv(key); val != "" {
+		if i, err := strconv.ParseInt(val, 10, 64); err == nil {
+			return i
+		}
+	}
+	return defaultVal
+}
+
+// getEnvFloat64 retrieves a float64 value from an environment variable, returning the default if not set or invalid
+func getEnvFloat64(key string, defaultVal float64) float64 {
+	if val := os.Getenv(key); val != "" {
+		if f, err := strconv.ParseFloat(val, 64); err == nil {
+			return f
+		}
+	}
+	return defaultVal
+}
 
 // LauncherFactory creates AgentLauncher instances based on agent type and configuration.
 type LauncherFactory interface {
@@ -147,13 +169,17 @@ func (a *containerLauncherAdapter) Spawn(ctx context.Context, config *SpawnConfi
 		Env:         env,
 		Labels:      config.Labels, // Pass through custom labels (including spawn-source)
 		// Default security hardening for Claude Code agents
+		// Resource limits can be overridden via environment variables:
+		// - AGENT_MEMORY_LIMIT_MB: Memory limit in MB (default: 2048)
+		// - AGENT_CPU_LIMIT: CPU cores (default: 2.0)
+		// - AGENT_TMPFS_SIZE_MB: tmpfs size in MB (default: 256)
 		RuntimeHardening: container.RuntimeHardening{
-			ReadOnlyRootfs:  true, // Make root filesystem read-only
-			DropAllCaps:     true, // Drop all Linux capabilities
-			NoNewPrivileges: true, // Prevent privilege escalation
-			MemoryLimitMB:   2048, // 2GB memory limit
-			CPULimit:        2.0,  // 2 CPU cores
-			TmpfsSizeMB:     100,  // 100MB tmpfs for /tmp
+			ReadOnlyRootfs:  true,                                  // Make root filesystem read-only
+			DropAllCaps:     true,                                  // Drop all Linux capabilities
+			NoNewPrivileges: true,                                  // Prevent privilege escalation
+			MemoryLimitMB:   getEnvInt64("AGENT_MEMORY_LIMIT_MB", 2048), // 2GB memory limit (configurable)
+			CPULimit:        getEnvFloat64("AGENT_CPU_LIMIT", 2.0),      // 2 CPU cores (configurable)
+			TmpfsSizeMB:     getEnvInt64("AGENT_TMPFS_SIZE_MB", 256),    // 256MB tmpfs for /tmp (configurable, increased from 100MB)
 		},
 	}
 
