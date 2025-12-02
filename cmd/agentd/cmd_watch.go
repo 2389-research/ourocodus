@@ -10,14 +10,13 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/2389-research/ourocodus/cmd/agentd/internal/detect"
-	"github.com/2389-research/ourocodus/cmd/agentd/internal/output"
 	watchtui "github.com/2389-research/ourocodus/cmd/agentd/internal/tui/watch"
+	"github.com/2389-research/ourocodus/pkg/cli"
+	"github.com/2389-research/ourocodus/pkg/cli/format"
 	"github.com/2389-research/ourocodus/pkg/heartbeat"
 	"github.com/2389-research/ourocodus/pkg/relay/session"
 	"github.com/2389-research/ourocodus/pkg/tui/theme"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/nats-io/nats.go"
@@ -25,8 +24,6 @@ import (
 )
 
 var (
-	watchJSON    bool
-	watchPlain   bool
 	watchNATSURL string
 	watchLogs    bool
 )
@@ -81,8 +78,6 @@ easy to debug agent liveness and adoption status.`,
 }
 
 func init() {
-	watchCmd.Flags().BoolVar(&watchJSON, "json", false, "Output JSON events")
-	watchCmd.Flags().BoolVar(&watchPlain, "plain", false, "Output plain text (no colors)")
 	watchCmd.Flags().StringVar(&watchNATSURL, "nats", "nats://localhost:4222", "NATS server URL")
 	watchCmd.Flags().BoolVar(&watchLogs, "logs", true, "Stream container stdout/stderr for the agent")
 }
@@ -91,7 +86,12 @@ func runWatch(cmd *cobra.Command, args []string) error {
 	agentID := args[0]
 	ctx := cmd.Context()
 
-	mode := detectWatchOutputMode()
+	// Get mode from AppContext (set by cli.App wrapper)
+	appCtx := cli.FromContext(ctx)
+	if appCtx == nil {
+		return cli.ContextError()
+	}
+	mode := appCtx.Mode
 
 	// Setup signal handling for clean exit on Ctrl+C
 	ctx, cancel := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
@@ -99,17 +99,17 @@ func runWatch(cmd *cobra.Command, args []string) error {
 
 	// For rich mode, use the Bubble Tea TUI
 	if mode.IsRich() {
-		return runWatchTUI(ctx, agentID)
+		return runWatchTUI(ctx, agentID, appCtx)
 	}
 
 	// For JSON/plain modes, use the legacy streaming output
 	// Print header
 	if !mode.IsJSON() {
-		printWatchHeader(agentID, mode)
+		printWatchHeader(agentID, appCtx)
 	}
 
 	// Setup NATS subscription
-	_, msgChan, subject, cleanup, err := setupNATSSubscription(agentID)
+	msgChan, subject, cleanup, err := setupNATSSubscription(agentID)
 	if err != nil {
 		return err
 	}
@@ -117,28 +117,34 @@ func runWatch(cmd *cobra.Command, args []string) error {
 
 	// Print subscription info
 	if !mode.IsJSON() {
-		printWatchSubscribed(subject, mode)
+		if appCtx.Mode.IsRich() {
+			fmt.Println(appCtx.Theme.SuccessText.Render(fmt.Sprintf("✓ Subscribed to: %s", subject)))
+			fmt.Println()
+		} else {
+			appCtx.Output.Success(fmt.Sprintf("Subscribed to: %s", subject))
+			fmt.Println()
+		}
 	}
 
 	// Start background monitors
 	leaseChan := startLeaseMonitor(ctx, agentID)
 	logCancel := startLogStreamer(ctx, agentID, mode)
 
-	runWatchEventLoop(ctx, mode, msgChan, leaseChan, logCancel)
+	runWatchEventLoop(ctx, appCtx, msgChan, leaseChan, logCancel)
 	return nil
 }
 
 // runWatchTUI runs the watch command with Bubble Tea TUI.
-func runWatchTUI(ctx context.Context, agentID string) error {
+func runWatchTUI(ctx context.Context, agentID string, appCtx *cli.AppContext) error {
 	// Setup NATS subscription
-	_, msgChan, subject, cleanup, err := setupNATSSubscription(agentID)
+	msgChan, subject, cleanup, err := setupNATSSubscription(agentID)
 	if err != nil {
 		return err
 	}
 	defer cleanup()
 
 	// Create TUI
-	m := watchtui.New(agentID)
+	m := watchtui.New(agentID, appCtx.Theme)
 	p := tea.NewProgram(m, tea.WithAltScreen())
 
 	// Start background goroutines to feed events to TUI
@@ -239,28 +245,14 @@ func streamAgentLogsTUI(ctx context.Context, agentID string, p *tea.Program) {
 	}
 }
 
-// detectWatchOutputMode determines the output mode based on flags and TTY.
-// For watch, we only care about explicit flags and TTY,
-// not terminal size (watch is simple streaming output, doesn't need 80x24).
-func detectWatchOutputMode() output.Mode {
-	switch {
-	case watchJSON:
-		return output.ModeJSON
-	case watchPlain:
-		return output.ModePlain
-	case !detect.IsTTY():
-		return output.ModePlain
-	default:
-		return output.ModeRich
-	}
-}
+// detectWatchOutputMode removed - now using cli.Mode from AppContext
 
 // setupNATSSubscription connects to NATS and subscribes to the agent's heartbeat subject.
-// Returns the connection, message channel, subject name, cleanup function, and any error.
-func setupNATSSubscription(agentID string) (*nats.Conn, <-chan *nats.Msg, string, func(), error) {
+// Returns the message channel, subject name, cleanup function, and any error.
+func setupNATSSubscription(agentID string) (<-chan *nats.Msg, string, func(), error) {
 	nc, err := connectNATS(watchNATSURL)
 	if err != nil {
-		return nil, nil, "", nil, fmt.Errorf("failed to connect to NATS: %w", err)
+		return nil, "", nil, cli.IOError("failed to connect to NATS: " + err.Error())
 	}
 
 	subject := fmt.Sprintf("%s.%s", heartbeat.SubjectPrefix, agentID)
@@ -269,7 +261,7 @@ func setupNATSSubscription(agentID string) (*nats.Conn, <-chan *nats.Msg, string
 	sub, err := nc.ChanSubscribe(subject, msgChan)
 	if err != nil {
 		nc.Close()
-		return nil, nil, "", nil, fmt.Errorf("failed to subscribe to heartbeats: %w", err)
+		return nil, "", nil, cli.IOError("failed to subscribe to heartbeats: " + err.Error())
 	}
 
 	cleanup := func() {
@@ -277,7 +269,7 @@ func setupNATSSubscription(agentID string) (*nats.Conn, <-chan *nats.Msg, string
 		nc.Close()
 	}
 
-	return nc, msgChan, subject, cleanup, nil
+	return msgChan, subject, cleanup, nil
 }
 
 // startLeaseMonitor starts a background goroutine to monitor lease changes.
@@ -291,7 +283,7 @@ func startLeaseMonitor(ctx context.Context, agentID string) <-chan *session.Leas
 
 // startLogStreamer starts a background goroutine to stream container logs if enabled.
 // Returns a cancel function that should be called on shutdown, or nil if streaming is disabled.
-func startLogStreamer(ctx context.Context, agentID string, mode output.Mode) context.CancelFunc {
+func startLogStreamer(ctx context.Context, agentID string, mode cli.Mode) context.CancelFunc {
 	if !watchLogs {
 		return nil
 	}
@@ -302,67 +294,45 @@ func startLogStreamer(ctx context.Context, agentID string, mode output.Mode) con
 
 // runWatchEventLoop runs the main event loop, processing heartbeats and lease changes.
 // Returns when the context is cancelled.
-func runWatchEventLoop(ctx context.Context, mode output.Mode, msgChan <-chan *nats.Msg, leaseChan <-chan *session.Lease, logCancel context.CancelFunc) {
+func runWatchEventLoop(ctx context.Context, appCtx *cli.AppContext, msgChan <-chan *nats.Msg, leaseChan <-chan *session.Lease, logCancel context.CancelFunc) {
 	for {
 		select {
 		case <-ctx.Done():
 			if logCancel != nil {
 				logCancel()
 			}
-			if !mode.IsJSON() {
-				printWatchStopped(mode)
+			if !appCtx.Mode.IsJSON() {
+				fmt.Println()
+				if appCtx.Mode.IsRich() {
+					fmt.Println(appCtx.Theme.WarningText.Render("Stopped watching."))
+				} else {
+					appCtx.Output.Info("Stopped watching.")
+				}
 			}
 			return
 
 		case msg := <-msgChan:
-			if err := handleHeartbeat(msg, mode); err != nil && !mode.IsJSON() {
-				fmt.Printf("Error handling heartbeat: %v\n", err)
+			if err := handleHeartbeat(msg, appCtx.Mode, appCtx.Theme); err != nil && !appCtx.Mode.IsJSON() {
+				appCtx.Output.Error(err)
 			}
 
 		case lease := <-leaseChan:
-			handleLeaseChange(lease, mode)
+			handleLeaseChange(lease, appCtx.Mode, appCtx.Theme)
 		}
 	}
 }
 
-// printWatchHeader prints the watch header based on mode
-func printWatchHeader(agentID string, mode output.Mode) {
-	if mode.IsRich() {
-		th := theme.NewRetroTheme(theme.PaletteCGA)
-		headerStyle := lipgloss.NewStyle().Foreground(th.Primary).Bold(true)
-		mutedStyle := lipgloss.NewStyle().Foreground(th.Muted)
-		fmt.Println(headerStyle.Render(fmt.Sprintf("👁️  Watching agent: %s", agentID)))
-		fmt.Println(mutedStyle.Render("Press Ctrl+C to stop..."))
+// printWatchHeader prints the watch header based on mode.
+// This is complex (themed box with multiple lines) so kept custom instead of using Output interface.
+func printWatchHeader(agentID string, appCtx *cli.AppContext) {
+	if appCtx.Mode.IsRich() {
+		fmt.Println(appCtx.Theme.Title.Render(fmt.Sprintf("👁️  Watching agent: %s", agentID)))
+		fmt.Println(appCtx.Theme.MutedText.Render("Press Ctrl+C to stop..."))
 		fmt.Println()
 	} else {
 		fmt.Printf("Watching agent: %s\n", agentID)
 		fmt.Println("Press Ctrl+C to stop...")
 		fmt.Println()
-	}
-}
-
-// printWatchSubscribed prints the subscription info based on mode
-func printWatchSubscribed(subject string, mode output.Mode) {
-	if mode.IsRich() {
-		th := theme.NewRetroTheme(theme.PaletteCGA)
-		successStyle := lipgloss.NewStyle().Foreground(th.Success)
-		fmt.Println(successStyle.Render(fmt.Sprintf("✓ Subscribed to: %s", subject)))
-		fmt.Println()
-	} else {
-		fmt.Printf("Subscribed to: %s\n", subject)
-		fmt.Println()
-	}
-}
-
-// printWatchStopped prints the stopped message based on mode
-func printWatchStopped(mode output.Mode) {
-	fmt.Println()
-	if mode.IsRich() {
-		th := theme.NewRetroTheme(theme.PaletteCGA)
-		warningStyle := lipgloss.NewStyle().Foreground(th.Warning)
-		fmt.Println(warningStyle.Render("Stopped watching."))
-	} else {
-		fmt.Println("Stopped watching.")
 	}
 }
 
@@ -379,10 +349,10 @@ func connectNATS(url string) (*nats.Conn, error) {
 }
 
 // handleHeartbeat processes a heartbeat message
-func handleHeartbeat(msg *nats.Msg, mode output.Mode) error {
+func handleHeartbeat(msg *nats.Msg, mode cli.Mode, th *theme.Theme) error {
 	var hb heartbeat.Message
 	if err := json.Unmarshal(msg.Data, &hb); err != nil {
-		return fmt.Errorf("failed to unmarshal heartbeat: %w", err)
+		return cli.IOError("failed to unmarshal heartbeat: " + err.Error())
 	}
 
 	timestamp := time.Now().Format("15:04:05")
@@ -401,16 +371,14 @@ func handleHeartbeat(msg *nats.Msg, mode output.Mode) error {
 	case mode.IsPlain():
 		fmt.Printf("[%s] Heartbeat received (lag=%s, status=%s)\n",
 			timestamp,
-			output.FormatDurationShort(lag),
+			format.FormatDurationShort(lag),
 			hb.Status,
 		)
 	default: // Rich mode
-		th := theme.NewRetroTheme(theme.PaletteCGA)
-		successStyle := lipgloss.NewStyle().Foreground(th.Success)
 		fmt.Printf("[%s] %s Heartbeat received (lag=%s, status=%s)\n",
 			timestamp,
-			successStyle.Render("💓"),
-			output.FormatDurationShort(lag),
+			th.SuccessText.Render("💓"),
+			format.FormatDurationShort(lag),
 			hb.Status,
 		)
 	}
@@ -419,7 +387,7 @@ func handleHeartbeat(msg *nats.Msg, mode output.Mode) error {
 }
 
 // handleLeaseChange processes a lease change event
-func handleLeaseChange(lease *session.Lease, mode output.Mode) {
+func handleLeaseChange(lease *session.Lease, mode cli.Mode, th *theme.Theme) {
 	timestamp := time.Now().Format("15:04:05")
 
 	// Handle lease detach (nil lease)
@@ -433,11 +401,9 @@ func handleLeaseChange(lease *session.Lease, mode output.Mode) {
 		case mode.IsPlain():
 			fmt.Printf("[%s] Lease detached\n", timestamp)
 		default: // Rich mode
-			th := theme.NewRetroTheme(theme.PaletteCGA)
-			warningStyle := lipgloss.NewStyle().Foreground(th.Warning)
 			fmt.Printf("[%s] %s Lease detached\n",
 				timestamp,
-				warningStyle.Render("🔓"),
+				th.WarningText.Render("🔓"),
 			)
 		}
 		return
@@ -459,17 +425,15 @@ func handleLeaseChange(lease *session.Lease, mode output.Mode) {
 	case mode.IsPlain():
 		fmt.Printf("[%s] Lease renewed (expires in %s, session=%s)\n",
 			timestamp,
-			output.FormatDurationShort(timeUntil),
-			output.FormatSessionID(lease.UserSessionID),
+			format.FormatDurationShort(timeUntil),
+			format.FormatSessionID(lease.UserSessionID),
 		)
 	default: // Rich mode
-		th := theme.NewRetroTheme(theme.PaletteCGA)
-		cyanStyle := lipgloss.NewStyle().Foreground(th.Primary)
 		fmt.Printf("[%s] %s Lease renewed (expires in %s, session=%s)\n",
 			timestamp,
-			cyanStyle.Render("🔐"),
-			output.FormatDurationShort(timeUntil),
-			output.FormatSessionID(lease.UserSessionID),
+			th.PrimaryText.Render("🔐"),
+			format.FormatDurationShort(timeUntil),
+			format.FormatSessionID(lease.UserSessionID),
 		)
 	}
 }
@@ -521,7 +485,7 @@ func monitorLease(ctx context.Context, agentID string, lastState *session.Lease,
 
 // streamAgentLogs streams container stdout/stderr to the console to show agent messages.
 // Falls back silently if the container cannot be found.
-func streamAgentLogs(ctx context.Context, agentID string, mode output.Mode) {
+func streamAgentLogs(ctx context.Context, agentID string, mode cli.Mode) {
 	// Don't stream logs in JSON mode to avoid mixing formats
 	if mode.IsJSON() {
 		return

@@ -44,7 +44,7 @@ func main() {
 		originalPath := filepath.Join(webDir, filename)
 
 		// Read file and compute hash
-		file, err := os.Open(originalPath) // nolint:gosec // G304: CLI tool operates on web asset files
+		file, err := os.Open(originalPath) //nolint:gosec // G304: CLI tool operates on web asset files
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error opening %s: %v\n", filename, err)
 			continue
@@ -141,13 +141,13 @@ func discoverAssets(dir string) ([]string, error) {
 }
 
 func copyFile(src, dst string) error {
-	sourceFile, err := os.Open(src) // nolint:gosec // G304: CLI tool copies asset files
+	sourceFile, err := os.Open(src) //nolint:gosec // G304: CLI tool copies asset files
 	if err != nil {
 		return err
 	}
 	defer func() { _ = sourceFile.Close() }()
 
-	destFile, err := os.Create(dst) // nolint:gosec // G304: CLI tool creates asset files
+	destFile, err := os.Create(dst) //nolint:gosec // G304: CLI tool creates asset files
 	if err != nil {
 		return err
 	}

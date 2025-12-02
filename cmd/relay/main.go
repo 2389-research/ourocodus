@@ -18,6 +18,7 @@ import (
 	"github.com/2389-research/ourocodus/internal/webapp"
 	"github.com/2389-research/ourocodus/pkg/agent"
 	"github.com/2389-research/ourocodus/pkg/agent/container"
+	"github.com/2389-research/ourocodus/pkg/cli"
 	"github.com/2389-research/ourocodus/pkg/containersession"
 	"github.com/2389-research/ourocodus/pkg/nats"
 	"github.com/2389-research/ourocodus/pkg/relay"
@@ -27,6 +28,7 @@ import (
 	dockercontainer "github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/client"
+	"github.com/spf13/cobra"
 )
 
 const (
@@ -46,6 +48,168 @@ var tuiProgram *tea.Program
 
 // tuiLogWriter is the log writer that sends logs to the TUI
 var tuiLogWriter *relaytui.LogWriter
+
+// Version is set by ldflags at build time
+var Version = "dev"
+
+// headlessFlag is set via --headless flag
+var headlessFlag bool
+
+var rootCmd = &cobra.Command{
+	Use:   "relay",
+	Short: "🔄 relay - Ourocodus WebSocket relay and PWA server",
+	Long: `relay is the WebSocket relay server for Ourocodus.
+
+It provides:
+  🔄 WebSocket API for PWA↔Agent communication
+  🌐 Static file hosting for the PWA
+  📦 Container session management
+  💓 Agent heartbeat monitoring via NATS
+
+Environment variables:
+  RELAY_NO_TUI=1        Run in headless mode (no TUI)
+  NATS_URL              NATS server URL (default: nats://localhost:4222)
+  WORKSPACE_DIR         Agent workspace directory (default: ./workspaces)
+  REPO_PATH             Repository path (default: .)
+  AGENT_IMAGE           Docker image for agents (default: ourocodus/agent:latest)
+  AGENT_CPU_CORES       CPU cores per agent (default: 2)
+  AGENT_MEMORY_MB       Memory per agent in MB (default: 4096)`,
+	Version: Version,
+	RunE:    runRelay,
+}
+
+func init() {
+	rootCmd.Flags().BoolVar(&headlessFlag, "headless", false, "Run without TUI (same as RELAY_NO_TUI=1)")
+}
+
+func main() {
+	app := cli.NewApp(rootCmd)
+	os.Exit(app.Execute())
+}
+
+// runRelay is the main entry point for the relay server
+func runRelay(cmd *cobra.Command, _ []string) error {
+	// Check for headless mode (flag or environment)
+	headlessMode := headlessFlag || os.Getenv("RELAY_NO_TUI") != ""
+
+	if !headlessMode {
+		// Create log writer for TUI (program set later)
+		tuiLogWriter = relaytui.NewLogWriter(nil)
+		log.SetOutput(tuiLogWriter)
+	} else {
+		// In headless mode, log to stderr for debugging
+		log.SetOutput(os.Stderr)
+	}
+	log.SetFlags(log.Ldate | log.Ltime)
+
+	// Create dependencies
+	logger := &relay.StdLogger{}
+	clock := &relay.SystemClock{}
+	idGen := &relay.UUIDGenerator{}
+
+	ctx := cmd.Context()
+
+	// Initialize Docker and agent dependencies
+	dockerClient, launcherFactory, containerManager := initializeAgentInfrastructure(ctx, logger, clock, idGen)
+	defer func() { _ = dockerClient.Close() }()
+
+	// Default ACP runtime to container when available so web-spawned agents appear in Docker-backed tools (agentd list)
+	if os.Getenv("OUROCODUS_ACP_RUNTIME") == "" && containerManager != nil {
+		_ = os.Setenv("OUROCODUS_ACP_RUNTIME", "container")
+		logger.Printf("[INIT] OUROCODUS_ACP_RUNTIME not set; defaulting to container for ACP processes")
+	}
+	if containerManager != nil {
+		containerManager.SetStopTimeout(5) // faster shutdown for agent containers
+	}
+
+	// Initialize NATS client if configured
+	natsClient := initializeNATS()
+
+	// Create session manager with launcher factory and container manager
+	sessionManager, err := relay.NewSessionManager(logger, clock, idGen, natsClient, launcherFactory, containerManager)
+	if err != nil {
+		return cli.IOError(fmt.Sprintf("failed to create session manager: %v", err))
+	}
+
+	// Cleanup expired leases from previous runs (issue #247)
+	// This prevents orphaned lease files from blocking agent attachments
+	if err := cleanupExpiredLeases(logger); err != nil {
+		log.Printf("[CLEANUP] WARN: Failed to cleanup expired leases: %v", err)
+	}
+
+	// Create relay server with dependency injection
+	server := relay.NewServer(
+		idGen,
+		logger,
+		clock,
+		relay.NewGorillaUpgrader(createOriginChecker(logger)),
+		sessionManager,
+	)
+
+	// Initialize HeartbeatMonitor if NATS is available
+	// This enables detection of externally killed agents and PWA notification
+	var heartbeatMonitor *session.HeartbeatMonitor
+	var heartbeatCancel context.CancelFunc
+	if natsClient != nil {
+		heartbeatMonitor, _, heartbeatCancel = initializeHeartbeatMonitor(ctx, server, logger)
+	}
+
+	// Create HTTP server
+	mux := http.NewServeMux()
+
+	// Rate-limited WebSocket endpoint to prevent connection exhaustion
+	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case wsSemaphore <- struct{}{}:
+			defer func() { <-wsSemaphore }()
+			server.HandleWebSocket(w, r)
+		default:
+			logger.Printf("[RATELIMIT] WebSocket upgrade rejected: too many concurrent connections")
+			http.Error(w, "Too many connections", http.StatusTooManyRequests)
+		}
+	})
+
+	// Serve PWA static files from embedded filesystem
+	webFS, err := webapp.GetFS()
+	if err != nil {
+		return cli.IOError(fmt.Sprintf("failed to create web filesystem: %v", err))
+	}
+	mux.Handle("/", http.FileServer(http.FS(webFS)))
+
+	httpServer := &http.Server{
+		Addr:              fmt.Sprintf(":%d", port),
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second, // Prevent Slowloris attacks
+	}
+
+	// Start server in goroutine
+	go func() {
+		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Printf("[SERVER] Error: %v", err)
+		}
+	}()
+
+	// Handle shutdown signals (common to both modes)
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+
+	// Construct shutdown context for cleanup functions
+	shutdownCtx := shutdownContext{
+		httpServer:       httpServer,
+		sessionManager:   sessionManager,
+		natsClient:       natsClient,
+		heartbeatMonitor: heartbeatMonitor,
+		heartbeatCancel:  heartbeatCancel,
+	}
+
+	if headlessMode {
+		runHeadlessMode(sigChan, shutdownCtx)
+	} else {
+		runTUIMode(sigChan, shutdownCtx, sessionManager, natsClient)
+	}
+
+	return nil
+}
 
 // clockAdapter adapts relay.Clock to containersession.Clock
 type clockAdapter struct {
@@ -76,103 +240,30 @@ func (l *loggerAdapter) Printf(format string, v ...interface{}) {
 	l.logger.Printf(format, v...)
 }
 
-func main() {
-	// Create log writer for TUI (program set later)
-	tuiLogWriter = relaytui.NewLogWriter(nil)
-	log.SetOutput(tuiLogWriter)
-	log.SetFlags(log.Ldate | log.Ltime)
+// shutdownContext bundles all resources that need cleanup during shutdown
+type shutdownContext struct {
+	httpServer       *http.Server
+	sessionManager   relay.SessionManagerInterface
+	natsClient       nats.Client
+	heartbeatMonitor *session.HeartbeatMonitor
+	heartbeatCancel  context.CancelFunc
+}
 
-	// Create dependencies
-	logger := &relay.StdLogger{}
-	clock := &relay.SystemClock{}
-	idGen := &relay.UUIDGenerator{}
+// runHeadlessMode runs the server without TUI, logging to stderr
+func runHeadlessMode(sigChan <-chan os.Signal, ctx shutdownContext) {
+	log.Printf("[SERVER] Relay server running in headless mode on port %d", port)
+	log.Printf("[SERVER] PWA: http://localhost:%d/", port)
+	log.Printf("[SERVER] WebSocket: ws://localhost:%d/ws", port)
 
-	ctx := context.Background()
+	<-sigChan
+	log.Println("[SHUTDOWN] Received shutdown signal")
 
-	// Initialize Docker and agent dependencies
-	dockerClient, launcherFactory, containerManager := initializeAgentInfrastructure(ctx, logger, clock, idGen)
-	defer func() { _ = dockerClient.Close() }()
+	stopHeartbeatMonitor(ctx.heartbeatMonitor, ctx.heartbeatCancel)
+	executeGracefulShutdown(ctx)
+}
 
-	// Default ACP runtime to container when available so web-spawned agents appear in Docker-backed tools (agentd list)
-	if os.Getenv("OUROCODUS_ACP_RUNTIME") == "" && containerManager != nil {
-		_ = os.Setenv("OUROCODUS_ACP_RUNTIME", "container")
-		logger.Printf("[INIT] OUROCODUS_ACP_RUNTIME not set; defaulting to container for ACP processes")
-	}
-	if containerManager != nil {
-		containerManager.SetStopTimeout(5) // faster shutdown for agent containers
-	}
-
-	// Initialize NATS client if configured
-	natsClient := initializeNATS()
-
-	// Create session manager with launcher factory and container manager
-	sessionManager, err := relay.NewSessionManager(logger, clock, idGen, natsClient, launcherFactory, containerManager)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to create session manager: %v\n", err)
-		os.Exit(1)
-	}
-
-	// Cleanup expired leases from previous runs (issue #247)
-	// This prevents orphaned lease files from blocking agent attachments
-	if err := cleanupExpiredLeases(logger); err != nil {
-		log.Printf("[CLEANUP] WARN: Failed to cleanup expired leases: %v", err)
-	}
-
-	// Create relay server with dependency injection
-	server := relay.NewServer(
-		idGen,
-		logger,
-		clock,
-		relay.NewGorillaUpgrader(createOriginChecker(logger)),
-		sessionManager,
-	)
-
-	// Initialize HeartbeatMonitor if NATS is available
-	// This enables detection of externally killed agents and PWA notification
-	var heartbeatMonitor *session.HeartbeatMonitor
-	var heartbeatCtx context.Context
-	var heartbeatCancel context.CancelFunc
-	if natsClient != nil {
-		heartbeatMonitor, heartbeatCtx, heartbeatCancel = initializeHeartbeatMonitor(ctx, server, logger)
-	}
-
-	// Create HTTP server
-	mux := http.NewServeMux()
-
-	// Rate-limited WebSocket endpoint to prevent connection exhaustion
-	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
-		select {
-		case wsSemaphore <- struct{}{}:
-			defer func() { <-wsSemaphore }()
-			server.HandleWebSocket(w, r)
-		default:
-			logger.Printf("[RATELIMIT] WebSocket upgrade rejected: too many concurrent connections")
-			http.Error(w, "Too many connections", http.StatusTooManyRequests)
-		}
-	})
-
-	// Serve PWA static files from embedded filesystem
-	webFS, err := webapp.GetFS()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to create web filesystem: %v\n", err)
-		os.Exit(1)
-	}
-	mux.Handle("/", http.FileServer(http.FS(webFS)))
-
-	httpServer := &http.Server{
-		Addr:              fmt.Sprintf(":%d", port),
-		Handler:           mux,
-		ReadHeaderTimeout: 10 * time.Second, // Prevent Slowloris attacks
-	}
-
-	// Start server in goroutine
-	go func() {
-		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Printf("[SERVER] Error: %v", err)
-		}
-	}()
-
-	// Create and run the TUI
+// runTUIMode runs the server with Bubble Tea TUI
+func runTUIMode(sigChan <-chan os.Signal, ctx shutdownContext, sessionManager relay.SessionManagerInterface, natsClient nats.Client) {
 	tuiModel := relaytui.New(relaytui.Config{
 		Port:           port,
 		NATSConnected:  natsClient != nil,
@@ -183,30 +274,15 @@ func main() {
 	tuiProgram = tea.NewProgram(tuiModel, tea.WithAltScreen())
 	tuiLogWriter.SetProgram(tuiProgram)
 
-	// Handle shutdown signals
+	// Handle shutdown signals in TUI mode
 	go func() {
-		sigChan := make(chan os.Signal, 1)
-		signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 		<-sigChan
 
 		// Signal TUI to show shutdown state
 		tuiProgram.Send(relaytui.ShutdownMsg{})
 
-		// Stop HeartbeatMonitor if running
-		if heartbeatMonitor != nil {
-			log.Println("[SHUTDOWN] Stopping HeartbeatMonitor...")
-			heartbeatCancel()
-			heartbeatMonitor.Stop()
-			log.Println("[SHUTDOWN] HeartbeatMonitor stopped")
-			_ = heartbeatCtx
-		}
-
-		// Execute graceful shutdown sequence
-		if err := gracefulShutdown(httpServer, sessionManager, natsClient); err != nil {
-			log.Printf("[SHUTDOWN] Server stopped with errors: %v", err)
-		} else {
-			log.Println("[SHUTDOWN] Server stopped successfully")
-		}
+		stopHeartbeatMonitor(ctx.heartbeatMonitor, ctx.heartbeatCancel)
+		executeGracefulShutdown(ctx)
 
 		// Quit TUI
 		tuiProgram.Quit()
@@ -216,6 +292,26 @@ func main() {
 	if _, err := tuiProgram.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error running TUI: %v\n", err)
 		os.Exit(1)
+	}
+}
+
+// stopHeartbeatMonitor stops the heartbeat monitor if it's running
+func stopHeartbeatMonitor(monitor *session.HeartbeatMonitor, cancel context.CancelFunc) {
+	if monitor == nil {
+		return
+	}
+	log.Println("[SHUTDOWN] Stopping HeartbeatMonitor...")
+	cancel()
+	monitor.Stop()
+	log.Println("[SHUTDOWN] HeartbeatMonitor stopped")
+}
+
+// executeGracefulShutdown performs the graceful shutdown sequence
+func executeGracefulShutdown(ctx shutdownContext) {
+	if err := gracefulShutdown(ctx.httpServer, ctx.sessionManager, ctx.natsClient); err != nil {
+		log.Printf("[SHUTDOWN] Server stopped with errors: %v", err)
+	} else {
+		log.Println("[SHUTDOWN] Server stopped successfully")
 	}
 }
 

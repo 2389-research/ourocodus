@@ -13,7 +13,7 @@ import (
 type RichOutput struct {
 	stdout  io.Writer
 	stderr  io.Writer
-	theme   *theme.RetroTheme
+	theme   *theme.Theme
 	quiet   bool
 	noColor bool
 
@@ -25,7 +25,7 @@ type RichOutput struct {
 }
 
 // NewRichOutput creates a new rich output writer with the given theme.
-func NewRichOutput(th *theme.RetroTheme, quiet, noColor bool) *RichOutput {
+func NewRichOutput(th *theme.Theme, quiet, noColor bool) *RichOutput {
 	r := &RichOutput{
 		stdout:  os.Stdout,
 		stderr:  os.Stderr,
@@ -38,7 +38,7 @@ func NewRichOutput(th *theme.RetroTheme, quiet, noColor bool) *RichOutput {
 }
 
 // NewRichOutputWithWriters creates a new rich output with custom writers.
-func NewRichOutputWithWriters(stdout, stderr io.Writer, th *theme.RetroTheme, quiet, noColor bool) *RichOutput {
+func NewRichOutputWithWriters(stdout, stderr io.Writer, th *theme.Theme, quiet, noColor bool) *RichOutput {
 	r := &RichOutput{
 		stdout:  stdout,
 		stderr:  stderr,

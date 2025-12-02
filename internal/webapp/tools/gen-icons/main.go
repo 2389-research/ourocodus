@@ -64,7 +64,7 @@ func generateIcon(filename string, size int) error {
 	drawCircle(img, center, center, innerRadius, bgColor)
 
 	// Write to file
-	file, err := os.Create(filename) // nolint:gosec // G304: CLI tool creates icon files
+	file, err := os.Create(filename) //nolint:gosec // G304: CLI tool creates icon files
 	if err != nil {
 		return err
 	}

@@ -14,12 +14,34 @@ import (
 
 // RelayServer manages the relay server process
 type RelayServer struct {
-	cmd    *exec.Cmd
-	cancel context.CancelFunc
+	cmd      *exec.Cmd
+	cancel   context.CancelFunc
+	pty      *os.File // PTY master for TUI interaction
+	leaseDir string   // Temporary lease directory for E2E tests
 }
 
-// StartRelay starts the relay server as a background process
+// RelayConfig contains configuration options for starting the relay server
+type RelayConfig struct {
+	BinaryPath string
+	Port       string
+	LeaseDir   string // If empty, a temp directory is created and cleaned up on Stop
+}
+
+// StartRelay starts the relay server as a background process with PTY support
+// for the Bubble Tea TUI. The PTY allows the TUI to run properly in test environments.
+// Deprecated: Use StartRelayWithConfig for better isolation between test runs.
 func StartRelay(ctx context.Context, binaryPath string, port string) (*RelayServer, error) {
+	return StartRelayWithConfig(ctx, RelayConfig{
+		BinaryPath: binaryPath,
+		Port:       port,
+		LeaseDir:   "", // Will create temp directory
+	})
+}
+
+// StartRelayWithConfig starts the relay server with the given configuration.
+// If LeaseDir is empty, a temporary directory is created and automatically
+// cleaned up when Stop() is called. This ensures test isolation.
+func StartRelayWithConfig(ctx context.Context, config RelayConfig) (*RelayServer, error) {
 	// Find project root
 	projectRoot, err := FindProjectRoot()
 	if err != nil {
@@ -27,46 +49,77 @@ func StartRelay(ctx context.Context, binaryPath string, port string) (*RelayServ
 	}
 
 	// Make binary path absolute if it's not already
+	binaryPath := config.BinaryPath
 	if !filepath.IsAbs(binaryPath) {
 		binaryPath = filepath.Join(projectRoot, binaryPath)
 	}
 
+	// Create or use lease directory
+	leaseDir := config.LeaseDir
+	ownLeaseDir := false
+	if leaseDir == "" {
+		// Create a temp directory for this test run's leases
+		leaseDir, err = os.MkdirTemp("", "ourocodus-e2e-leases-*")
+		if err != nil {
+			return nil, fmt.Errorf("failed to create temp lease directory: %w", err)
+		}
+		ownLeaseDir = true
+		fmt.Printf("[Server] Using temp lease directory: %s\n", leaseDir)
+	}
+
 	fmt.Printf("[Server] Starting relay server: %s\n", binaryPath)
 	fmt.Printf("[Server] Working directory: %s\n", projectRoot)
-	fmt.Printf("[Server] Port: %s\n", port)
+	fmt.Printf("[Server] Port: %s\n", config.Port)
+	fmt.Printf("[Server] Lease directory: %s\n", leaseDir)
 
 	// Create a context with cancel for the server process
 	serverCtx, cancel := context.WithCancel(ctx)
 
-	// Start the relay server
+	// Start the relay server in headless mode
+	// #nosec G204 -- binaryPath is constructed from trusted sources (project root + config)
 	cmd := exec.CommandContext(serverCtx, binaryPath)
 	cmd.Env = append(os.Environ(),
-		fmt.Sprintf("PORT=%s", port),
+		fmt.Sprintf("PORT=%s", config.Port),
 		// Base directory for agent workspaces, relative to relay's CWD (project root)
 		// Agent workspace paths (e.g., "agent/role") must be under this directory
 		// See workspaceBase constant in e2e_test.go
+		// Note: Relay reads WORKSPACE_BASE_DIR (not WORKSPACE_DIR)
 		"WORKSPACE_BASE_DIR=./agent",
+		// Run relay in headless mode for E2E testing (no TUI, logs to stderr)
+		"RELAY_NO_TUI=1",
+		// Use isolated lease directory for this test run
+		fmt.Sprintf("OUROCODUS_LEASE_DIR=%s", leaseDir),
 	)
 
 	// Set working directory to project root so relay can find ./web and ./agent
 	cmd.Dir = projectRoot
 
-	// Capture stdout/stderr for debugging
+	// In headless mode (RELAY_NO_TUI=1), we don't need PTY
+	// Start the process and capture output directly
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
 	if err := cmd.Start(); err != nil {
 		cancel()
+		// Clean up temp directory on failure if we created it
+		if ownLeaseDir {
+			_ = os.RemoveAll(leaseDir)
+		}
 		return nil, fmt.Errorf("failed to start relay server: %w", err)
 	}
 
 	server := &RelayServer{
-		cmd:    cmd,
-		cancel: cancel,
+		cmd:      cmd,
+		cancel:   cancel,
+		pty:      nil, // No PTY needed in headless mode
+		leaseDir: "",  // Only set if we own it
+	}
+	if ownLeaseDir {
+		server.leaseDir = leaseDir
 	}
 
 	// Wait for server to be ready (shorter timeout for faster failure)
-	if err := server.WaitForHealth(fmt.Sprintf("http://localhost:%s", port), 10*time.Second); err != nil {
+	if err := server.WaitForHealth(fmt.Sprintf("http://localhost:%s", config.Port), 10*time.Second); err != nil {
 		if stopErr := server.Stop(); stopErr != nil {
 			return nil, fmt.Errorf("relay server failed to become healthy: %w; additionally failed to stop cleanly: %v", err, stopErr)
 		}
@@ -106,8 +159,15 @@ func (s *RelayServer) WaitForHealth(baseURL string, timeout time.Duration) error
 	return fmt.Errorf("timeout waiting for relay server health at %s after %d attempts", healthURL, attempts)
 }
 
-// Stop gracefully stops the relay server
+// Stop gracefully stops the relay server and cleans up resources
 func (s *RelayServer) Stop() error {
+	var stopErr error
+
+	// Close PTY first to signal TUI shutdown
+	if s.pty != nil {
+		_ = s.pty.Close()
+	}
+
 	if s.cancel != nil {
 		s.cancel()
 	}
@@ -123,9 +183,10 @@ func (s *RelayServer) Stop() error {
 		case <-time.After(5 * time.Second):
 			// Force kill if graceful shutdown takes too long
 			if err := s.cmd.Process.Kill(); err != nil {
-				return fmt.Errorf("failed to kill relay process: %w", err)
+				stopErr = fmt.Errorf("failed to kill relay process: %w", err)
+			} else {
+				stopErr = fmt.Errorf("relay process killed after timeout")
 			}
-			return fmt.Errorf("relay process killed after timeout")
 		case err := <-done:
 			// Process exited
 			if err != nil {
@@ -137,19 +198,27 @@ func (s *RelayServer) Stop() error {
 					code := exitErr.ExitCode()
 					if code != 0 && code != -1 {
 						// Exited with non-zero, non-signal code - this is an error
-						return fmt.Errorf("relay process exited with error code %d: %w", code, err)
+						stopErr = fmt.Errorf("relay process exited with error code %d: %w", code, err)
 					}
 					// Exit code is 0 (graceful) or -1 (killed by signal) - both are expected
 				} else {
 					// Not an ExitError - treat as unexpected error
-					return fmt.Errorf("relay process exited with error: %w", err)
+					stopErr = fmt.Errorf("relay process exited with error: %w", err)
 				}
 			}
-			return nil
 		}
 	}
 
-	return nil
+	// Clean up temp lease directory if we created one
+	if s.leaseDir != "" {
+		fmt.Printf("[Server] Cleaning up temp lease directory: %s\n", s.leaseDir)
+		if err := os.RemoveAll(s.leaseDir); err != nil {
+			// Log but don't fail - cleanup is best effort
+			fmt.Printf("[Server] Warning: Failed to clean up lease directory: %v\n", err)
+		}
+	}
+
+	return stopErr
 }
 
 // FindProjectRoot finds the project root by looking for go.mod

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/2389-research/ourocodus/pkg/relay"
+	"github.com/2389-research/ourocodus/pkg/tui/components/header"
 	"github.com/2389-research/ourocodus/pkg/tui/keys"
 	"github.com/2389-research/ourocodus/pkg/tui/theme"
 	"github.com/charmbracelet/bubbles/help"
@@ -112,16 +113,16 @@ type Config struct {
 	NATSConnected  bool
 	DockerOK       bool
 	SessionManager relay.SessionManagerInterface
+	Theme          *theme.Theme // Theme from AppContext (nil-safe via Ensure)
 }
 
 // New creates a new relay TUI model.
+// If cfg.Theme is nil, the default theme is used.
 func New(cfg Config) Model {
-	th := theme.Default()
+	th := theme.Ensure(cfg.Theme)
 
 	vp := viewport.New(80, 20)
-	vp.Style = lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(th.Primary)
+	vp.Style = th.ViewportBorder
 
 	return Model{
 		th:             th,
@@ -248,28 +249,23 @@ func (m *Model) updateViewport() {
 }
 
 func (m *Model) formatLogEntry(entry LogEntry) string {
-	timeStyle := lipgloss.NewStyle().Foreground(m.th.Muted)
-
 	var tagStyle lipgloss.Style
 	switch entry.Tag {
+	// Semantic colors for important system tags
 	case "INIT", "ACP":
-		tagStyle = lipgloss.NewStyle().Foreground(m.th.Success).Bold(true)
+		tagStyle = m.th.SuccessText.Bold(true)
 	case "SHUTDOWN":
-		tagStyle = lipgloss.NewStyle().Foreground(m.th.Warning).Bold(true)
+		tagStyle = m.th.WarningText.Bold(true)
 	case "ERROR":
-		tagStyle = lipgloss.NewStyle().Foreground(m.th.Error).Bold(true)
-	case "NATS", "HEARTBEAT", "RELAY", "SERVER":
-		tagStyle = lipgloss.NewStyle().Foreground(m.th.Primary).Bold(true)
-	case "SESSION":
-		tagStyle = lipgloss.NewStyle().Foreground(m.th.Secondary).Bold(true)
-	case "CONTAINER", "LEASE":
-		tagStyle = lipgloss.NewStyle().Foreground(m.th.Accent).Bold(true)
-	case "CLEANUP", "AUDIT":
-		tagStyle = lipgloss.NewStyle().Foreground(m.th.Muted).Bold(true)
+		tagStyle = m.th.ErrorText
 	case "RATELIMIT", "SECURITY":
-		tagStyle = lipgloss.NewStyle().Foreground(m.th.Warning).Bold(true)
+		tagStyle = m.th.WarningText.Bold(true)
+	case "":
+		tagStyle = m.th.MutedText
 	default:
-		tagStyle = lipgloss.NewStyle().Foreground(m.th.Muted)
+		// Use tag palette for all other tags - consistent color per tag name
+		tagColor := m.getTagColor(entry.Tag)
+		tagStyle = lipgloss.NewStyle().Foreground(tagColor).Bold(true)
 	}
 
 	timestamp := entry.Time.Format("15:04:05")
@@ -279,10 +275,24 @@ func (m *Model) formatLogEntry(entry LogEntry) string {
 	}
 
 	return fmt.Sprintf("%s %s%s",
-		timeStyle.Render(timestamp),
+		m.th.MutedText.Render(timestamp),
 		tag,
 		entry.Message,
 	)
+}
+
+// getTagColor returns a consistent color for a tag name using the theme's tag palette.
+// The same tag name always gets the same color via hash-based indexing.
+func (m *Model) getTagColor(tag string) lipgloss.Color {
+	// Simple hash to get consistent color for same tag
+	hash := 0
+	for _, c := range tag {
+		hash = hash*31 + int(c)
+	}
+	if hash < 0 {
+		hash = -hash
+	}
+	return m.th.GetTagColor(hash)
 }
 
 // View renders the TUI.
@@ -316,96 +326,53 @@ func (m Model) View() string {
 }
 
 func (m Model) renderHeader() string {
-	// Rainbow logo
-	logo := ` ▄▄ ▗  ▖▗▄▄  ▄▄  ▗▄  ▄▄ ▗▄▖ ▗  ▖ ▄▄
-▗▘▝▖▐  ▌▐ ▝▌▗▘▝▖▗▘ ▘▗▘▝▖▐ ▝▖▐  ▌▐▘ ▘
-▐  ▌▐  ▌▐▄▄▘▐  ▌▐   ▐  ▌▐  ▌▐  ▌▝▙▄
-▐  ▌▐  ▌▐▗▖ ▐  ▌▐   ▐  ▌▐  ▌▐  ▌  ▝▖
-▝▙▟▘▝▄▄▘▐ ▝▖▝▙▟▘▝▙▄▐▝▙▟▘▐▄▟▘▝▄▄▘▝▄▟▘`
-
-	rainbowColors := []lipgloss.Color{
-		lipgloss.Color("#FF5555"),
-		lipgloss.Color("#FFB86C"),
-		lipgloss.Color("#F1FA8C"),
-		lipgloss.Color("#50FA7B"),
-		lipgloss.Color("#8BE9FD"),
-	}
-
-	lines := strings.Split(logo, "\n")
-	var coloredLines []string
-	for i, line := range lines {
-		color := rainbowColors[i%len(rainbowColors)]
-		coloredLine := lipgloss.NewStyle().Foreground(color).Render(line)
-		coloredLines = append(coloredLines, coloredLine)
-	}
-
-	logoBox := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(m.th.Primary).
-		Padding(0, 1).
-		Render(strings.Join(coloredLines, "\n"))
-
-	// Status info
+	// Build status info to display next to logo
+	// Note: labelStyle has extra Width(12), keeping it custom
 	labelStyle := lipgloss.NewStyle().Foreground(m.th.Muted).Width(12)
-	urlStyle := lipgloss.NewStyle().Foreground(m.th.Primary).Bold(true)
-	successStyle := lipgloss.NewStyle().Foreground(m.th.Success)
-	warningStyle := lipgloss.NewStyle().Foreground(m.th.Warning)
 
 	var status strings.Builder
 	status.WriteString(fmt.Sprintf("%s %s\n",
 		labelStyle.Render("PWA:"),
-		urlStyle.Render(fmt.Sprintf("http://localhost:%d/", m.port))))
+		m.th.URLText.Render(fmt.Sprintf("http://localhost:%d/", m.port))))
 	status.WriteString(fmt.Sprintf("%s %s\n",
 		labelStyle.Render("WebSocket:"),
-		urlStyle.Render(fmt.Sprintf("ws://localhost:%d/ws", m.port))))
+		m.th.URLText.Render(fmt.Sprintf("ws://localhost:%d/ws", m.port))))
 
-	natsStatus := warningStyle.Render("disabled")
+	natsStatus := m.th.WarningText.Render("disabled")
 	if m.natsConnected {
-		natsStatus = successStyle.Render("connected")
+		natsStatus = m.th.SuccessText.Render("connected")
 	}
 	status.WriteString(fmt.Sprintf("%s %s\n", labelStyle.Render("NATS:"), natsStatus))
 
-	dockerStatus := warningStyle.Render("error")
+	dockerStatus := m.th.WarningText.Render("error")
 	if m.dockerOK {
-		dockerStatus = successStyle.Render("connected")
+		dockerStatus = m.th.SuccessText.Render("connected")
 	}
 	status.WriteString(fmt.Sprintf("%s %s", labelStyle.Render("Docker:"), dockerStatus))
 
-	// Combine logo and status side by side
-	return lipgloss.JoinHorizontal(lipgloss.Top,
-		logoBox,
-		"  ",
-		status.String(),
-	)
+	// Use centralized header component with status content
+	return header.RenderWithContent(m.th, status.String())
 }
 
 func (m Model) renderStatusBar() string {
-	labelStyle := lipgloss.NewStyle().Foreground(m.th.Muted)
-	valueStyle := lipgloss.NewStyle().Foreground(m.th.Primary).Bold(true)
-
 	status := fmt.Sprintf("%s %s  │  %s %s  │  %s %s",
-		labelStyle.Render("Sessions:"),
-		valueStyle.Render(fmt.Sprintf("%d", m.sessionCount)),
-		labelStyle.Render("Agents:"),
-		valueStyle.Render(fmt.Sprintf("%d", m.agentCount)),
-		labelStyle.Render("Logs:"),
-		valueStyle.Render(fmt.Sprintf("%d", len(m.logs))),
+		m.th.MutedText.Render("Sessions:"),
+		m.th.Title.Render(fmt.Sprintf("%d", m.sessionCount)),
+		m.th.MutedText.Render("Agents:"),
+		m.th.Title.Render(fmt.Sprintf("%d", m.agentCount)),
+		m.th.MutedText.Render("Logs:"),
+		m.th.Title.Render(fmt.Sprintf("%d", len(m.logs))),
 	)
 
 	if m.shuttingDown {
-		shutdownStyle := lipgloss.NewStyle().Foreground(m.th.Warning).Bold(true)
-		status += "  │  " + shutdownStyle.Render("⏹ SHUTTING DOWN")
+		status += "  │  " + m.th.WarningText.Bold(true).Render("⏹ SHUTTING DOWN")
 	}
 
 	return status
 }
 
 func (m Model) renderShutdown() string {
-	shutdownStyle := lipgloss.NewStyle().
-		Foreground(m.th.Warning).
-		Bold(true)
-
-	return fmt.Sprintf("\n  %s\n\n", shutdownStyle.Render("⏹  Shutting down gracefully..."))
+	return fmt.Sprintf("\n  %s\n\n", m.th.WarningText.Bold(true).Render("⏹  Shutting down gracefully..."))
 }
 
 // AddLog adds a log entry to the TUI. Thread-safe via tea.Cmd.

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/2389-research/ourocodus/cmd/agentd/internal/output"
+	"github.com/2389-research/ourocodus/pkg/cli"
 	"github.com/2389-research/ourocodus/pkg/tui/theme"
 	"github.com/stretchr/testify/assert"
 )
@@ -22,13 +22,13 @@ func TestRenderAgentList_Plain(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := RenderAgentList(&buf, agents, output.ModePlain, nil)
+	err := RenderAgentList(&buf, agents, cli.ModePlain, nil)
 
 	assert.NoError(t, err)
-	output := buf.String()
-	assert.Contains(t, output, "test-agent")
-	assert.Contains(t, output, "running")
-	assert.Contains(t, output, "cli")
+	out := buf.String()
+	assert.Contains(t, out, "test-agent")
+	assert.Contains(t, out, "running")
+	assert.Contains(t, out, "cli")
 }
 
 func TestRenderAgentList_JSON(t *testing.T) {
@@ -42,14 +42,14 @@ func TestRenderAgentList_JSON(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := RenderAgentList(&buf, agents, output.ModeJSON, nil)
+	err := RenderAgentList(&buf, agents, cli.ModeJSON, nil)
 
 	assert.NoError(t, err)
-	output := buf.String()
-	assert.Contains(t, output, `"AgentID"`)
-	assert.Contains(t, output, `"test-agent"`)
-	assert.Contains(t, output, `"Status"`)
-	assert.Contains(t, output, `"running"`)
+	out := buf.String()
+	assert.Contains(t, out, `"AgentID"`)
+	assert.Contains(t, out, `"test-agent"`)
+	assert.Contains(t, out, `"Status"`)
+	assert.Contains(t, out, `"running"`)
 }
 
 func TestRenderAgentList_Rich(t *testing.T) {
@@ -62,25 +62,25 @@ func TestRenderAgentList_Rich(t *testing.T) {
 		},
 	}
 
-	th := theme.NewRetroTheme(theme.PaletteCGA)
+	th := theme.NewDark()
 	var buf bytes.Buffer
-	err := RenderAgentList(&buf, agents, output.ModeRich, th)
+	err := RenderAgentList(&buf, agents, cli.ModeRich, th)
 
 	assert.NoError(t, err)
-	output := buf.String()
-	assert.Contains(t, output, "test-agent")
-	assert.Contains(t, output, "running")
+	out := buf.String()
+	assert.Contains(t, out, "test-agent")
+	assert.Contains(t, out, "running")
 	// Rich mode should have styled output (not plain text)
-	assert.NotEmpty(t, output)
+	assert.NotEmpty(t, out)
 }
 
 func TestRenderAgentList_Empty(t *testing.T) {
 	var buf bytes.Buffer
-	err := RenderAgentList(&buf, []AgentInfo{}, output.ModePlain, nil)
+	err := RenderAgentList(&buf, []AgentInfo{}, cli.ModePlain, nil)
 
 	assert.NoError(t, err)
-	output := buf.String()
-	assert.Contains(t, output, "No agents running")
+	out := buf.String()
+	assert.Contains(t, out, "No agents running")
 }
 
 func TestRenderAgentList_MultipleAgents(t *testing.T) {
@@ -91,11 +91,11 @@ func TestRenderAgentList_MultipleAgents(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := RenderAgentList(&buf, agents, output.ModePlain, nil)
+	err := RenderAgentList(&buf, agents, cli.ModePlain, nil)
 
 	assert.NoError(t, err)
-	output := buf.String()
-	assert.Contains(t, output, "agent-1")
-	assert.Contains(t, output, "agent-2")
-	assert.Contains(t, output, "agent-3")
+	out := buf.String()
+	assert.Contains(t, out, "agent-1")
+	assert.Contains(t, out, "agent-2")
+	assert.Contains(t, out, "agent-3")
 }

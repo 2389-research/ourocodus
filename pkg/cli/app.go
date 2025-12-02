@@ -22,7 +22,7 @@ type App struct {
 }
 
 // NewApp creates a new CLI application wrapping the given root command.
-// Standard flags (--json, --plain, --theme, etc.) are automatically registered.
+// Standard flags (--json, --plain, --light, etc.) are automatically registered.
 func NewApp(root *cobra.Command) *App {
 	app := &App{
 		root: root,
@@ -72,6 +72,11 @@ func (a *App) Execute() int {
 // chainPreRun chains our config resolution with any existing PreRunE.
 func (a *App) chainPreRun(existing func(*cobra.Command, []string) error) func(*cobra.Command, []string) error {
 	return func(cmd *cobra.Command, args []string) error {
+		// Validate flag combinations before resolving config
+		if err := ValidateFlags(&a.flags); err != nil {
+			return UsageError(err.Error())
+		}
+
 		// Get current context
 		ctx := cmd.Context()
 		if ctx == nil {

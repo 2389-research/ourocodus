@@ -1,4 +1,6 @@
 // Package doctor provides a Bubble Tea TUI for the doctor command.
+// This is an EPHEMERAL TUI - it performs an action and auto-exits.
+// Do not wait for user input after completion.
 package doctor
 
 import (
@@ -6,13 +8,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/2389-research/ourocodus/pkg/tui/components/header"
+	"github.com/2389-research/ourocodus/pkg/tui/components/spinner"
+	"github.com/2389-research/ourocodus/pkg/tui/components/steplist"
 	"github.com/2389-research/ourocodus/pkg/tui/keys"
 	"github.com/2389-research/ourocodus/pkg/tui/theme"
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 )
 
 // CheckStatus represents check completion status.
@@ -74,6 +77,7 @@ type Model struct {
 	help    help.Model
 	keys    keyMap
 	spinner spinner.Model
+	slCfg   steplist.Config
 
 	checks    []CheckInfo
 	current   int
@@ -103,12 +107,12 @@ func (k keyMap) FullHelp() [][]key.Binding {
 }
 
 // New creates a new doctor TUI model.
-func New(checkNames []string) Model {
-	th := theme.Default()
+// If th is nil, the default theme is used.
+func New(checkNames []string, th *theme.Theme) Model {
+	th = theme.Ensure(th)
 
-	s := spinner.New()
-	s.Spinner = spinner.Dot
-	s.Style = lipgloss.NewStyle().Foreground(th.Primary)
+	s := spinner.New(th)
+	slCfg := steplist.DefaultConfig(th, th.PrimaryText)
 
 	checks := make([]CheckInfo, len(checkNames))
 	for i, name := range checkNames {
@@ -123,6 +127,7 @@ func New(checkNames []string) Model {
 		help:    help.New(),
 		keys:    newKeyMap(),
 		spinner: s,
+		slCfg:   slCfg,
 		checks:  checks,
 	}
 }
@@ -130,7 +135,7 @@ func New(checkNames []string) Model {
 // Init initializes the model.
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(
-		m.spinner.Tick,
+		m.spinner.Tick(),
 		tickCmd(),
 	)
 }
@@ -143,68 +148,100 @@ func tickCmd() tea.Cmd {
 
 // Update handles messages.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	var cmds []tea.Cmd
-
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		switch {
-		case key.Matches(msg, m.keys.Quit):
-			return m, tea.Quit
-		}
-
+		return m.handleKeyMsg(msg)
 	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
-
+		return m.handleWindowSizeMsg(msg)
 	case CheckStartMsg:
-		if msg.Index < len(m.checks) {
-			m.checks[msg.Index].Status = StatusRunning
-			m.current = msg.Index
-		}
-
+		return m.handleCheckStartMsg(msg)
 	case CheckPassMsg:
-		if msg.Index < len(m.checks) {
-			m.checks[msg.Index].Status = StatusPassed
-			m.checks[msg.Index].Message = msg.Message
-		}
-
+		return m.handleCheckPassMsg(msg)
 	case CheckSkipMsg:
-		if msg.Index < len(m.checks) {
-			m.checks[msg.Index].Status = StatusSkipped
-			m.checks[msg.Index].Message = msg.Message
-		}
-
+		return m.handleCheckSkipMsg(msg)
 	case CheckFailMsg:
-		if msg.Index < len(m.checks) {
-			m.checks[msg.Index].Status = StatusFailed
-			m.checks[msg.Index].Error = msg.Error
-		}
-
+		return m.handleCheckFailMsg(msg)
 	case AllChecksCompleteMsg:
-		m.done = true
-		m.allPassed = msg.AllPassed
-
+		return m.handleAllChecksCompleteMsg(msg)
 	case TickMsg:
-		if !m.done {
-			cmds = append(cmds, tickCmd())
-		}
-
-	case spinner.TickMsg:
+		return m.handleTickMsg()
+	default:
+		// Let spinner handle its own tick messages
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
-		cmds = append(cmds, cmd)
+		return m, cmd
 	}
+}
 
-	return m, tea.Batch(cmds...)
+func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if key.Matches(msg, m.keys.Quit) {
+		return m, tea.Quit
+	}
+	return m, nil
+}
+
+func (m Model) handleWindowSizeMsg(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
+	m.width = msg.Width
+	m.height = msg.Height
+	return m, nil
+}
+
+func (m Model) handleCheckStartMsg(msg CheckStartMsg) (tea.Model, tea.Cmd) {
+	if msg.Index < len(m.checks) {
+		m.checks[msg.Index].Status = StatusRunning
+		m.current = msg.Index
+	}
+	return m, nil
+}
+
+func (m Model) handleCheckPassMsg(msg CheckPassMsg) (tea.Model, tea.Cmd) {
+	if msg.Index < len(m.checks) {
+		m.checks[msg.Index].Status = StatusPassed
+		m.checks[msg.Index].Message = msg.Message
+	}
+	return m, nil
+}
+
+func (m Model) handleCheckSkipMsg(msg CheckSkipMsg) (tea.Model, tea.Cmd) {
+	if msg.Index < len(m.checks) {
+		m.checks[msg.Index].Status = StatusSkipped
+		m.checks[msg.Index].Message = msg.Message
+	}
+	return m, nil
+}
+
+func (m Model) handleCheckFailMsg(msg CheckFailMsg) (tea.Model, tea.Cmd) {
+	if msg.Index < len(m.checks) {
+		m.checks[msg.Index].Status = StatusFailed
+		m.checks[msg.Index].Error = msg.Error
+	}
+	return m, nil
+}
+
+func (m Model) handleAllChecksCompleteMsg(msg AllChecksCompleteMsg) (tea.Model, tea.Cmd) {
+	m.done = true
+	m.allPassed = msg.AllPassed
+	// Auto-exit immediately - ephemeral TUI completes its action
+	return m, tea.Quit
+}
+
+func (m Model) handleTickMsg() (tea.Model, tea.Cmd) {
+	if !m.done {
+		return m, tickCmd()
+	}
+	return m, nil
 }
 
 // View renders the TUI.
 func (m Model) View() string {
 	var b strings.Builder
 
-	// Header
-	headerStyle := lipgloss.NewStyle().Foreground(m.th.Primary).Bold(true)
-	b.WriteString(headerStyle.Render("Validating environment"))
+	// Header with logo
+	b.WriteString(header.Render(m.th))
+	b.WriteString("\n\n")
+
+	// Command title
+	b.WriteString(m.th.Title.Render("Validating environment"))
 	b.WriteString("\n\n")
 
 	// Checks
@@ -222,45 +259,37 @@ func (m Model) View() string {
 	// Help
 	if !m.done {
 		b.WriteString("\n")
-		mutedStyle := lipgloss.NewStyle().Foreground(m.th.Muted)
-		b.WriteString(mutedStyle.Render("Press q to cancel"))
+		b.WriteString(m.th.MutedText.Render("Press q to cancel"))
 	}
 
 	return b.String()
 }
 
-func (m Model) renderCheck(index int, check CheckInfo) string {
-	var icon string
-	var style lipgloss.Style
-
-	switch check.Status {
+// toSteplistItem converts a CheckInfo to a steplist.Item.
+func (c CheckInfo) toSteplistItem() steplist.Item {
+	var status steplist.Status
+	switch c.Status {
 	case StatusPending:
-		icon = "○"
-		style = lipgloss.NewStyle().Foreground(m.th.Muted)
+		status = steplist.StatusPending
 	case StatusRunning:
-		icon = m.spinner.View()
-		style = lipgloss.NewStyle().Foreground(m.th.Primary)
+		status = steplist.StatusRunning
 	case StatusPassed:
-		icon = "✓"
-		style = lipgloss.NewStyle().Foreground(m.th.Success)
+		status = steplist.StatusComplete
 	case StatusSkipped:
-		icon = "⊘"
-		style = lipgloss.NewStyle().Foreground(m.th.Muted)
+		status = steplist.StatusSkipped
 	case StatusFailed:
-		icon = "✗"
-		style = lipgloss.NewStyle().Foreground(m.th.Error)
+		status = steplist.StatusError
 	}
+	return steplist.Item{
+		Name:    c.Name,
+		Status:  status,
+		Message: c.Message,
+		Error:   c.Error,
+	}
+}
 
-	line := fmt.Sprintf("%s %s", icon, check.Name)
-	if check.Message != "" {
-		mutedStyle := lipgloss.NewStyle().Foreground(m.th.Muted)
-		line += " " + mutedStyle.Render(fmt.Sprintf("(%s)", check.Message))
-	}
-	if check.Error != "" {
-		line += fmt.Sprintf(": %s", check.Error)
-	}
-
-	return style.Render(line)
+func (m Model) renderCheck(_ int, check CheckInfo) string {
+	return steplist.RenderItem(check.toSteplistItem(), m.slCfg, m.spinner.View())
 }
 
 func (m Model) renderSummary() string {
@@ -277,13 +306,10 @@ func (m Model) renderSummary() string {
 	}
 
 	if m.allPassed {
-		successStyle := lipgloss.NewStyle().Foreground(m.th.Success).Bold(true)
-		mutedStyle := lipgloss.NewStyle().Foreground(m.th.Muted)
-		return successStyle.Render("✨ Environment ready!") + " " + mutedStyle.Render("All systems go for spawning agents.")
+		return m.th.SuccessText.Bold(true).Render("✨ Environment ready!") + " " + m.th.MutedText.Render("All systems go for spawning agents.")
 	}
 
-	errorStyle := lipgloss.NewStyle().Foreground(m.th.Error).Bold(true)
-	return errorStyle.Render(fmt.Sprintf("✗ Validation failed: %d check(s) failed", failed))
+	return m.th.ErrorText.Render(fmt.Sprintf("✗ Validation failed: %d check(s) failed", failed))
 }
 
 // SendCheckStart sends a check start message.

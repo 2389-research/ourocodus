@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
+	cerrdefs "github.com/containerd/errdefs"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
-	"github.com/docker/docker/errdefs"
 )
 
 // TestUserSession_GetWebSocket tests the WebSocket accessor
@@ -559,8 +559,8 @@ func createTestContainer(t *testing.T, agentID, workspace string) string {
 			Force:         true,
 			RemoveVolumes: true,
 		}); err != nil {
-			//nolint:staticcheck // errdefs is Docker SDK's official error handling
-			if !errdefs.IsNotFound(err) {
+			// Use cerrdefs for robust error classification (ignore NotFound for idempotence)
+			if !cerrdefs.IsNotFound(err) {
 				t.Logf("cleanup warning: remove %s: %v", resp.ID[:12], err)
 			}
 		}

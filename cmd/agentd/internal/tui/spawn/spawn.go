@@ -1,4 +1,6 @@
 // Package spawn provides a Bubble Tea TUI for the spawn command.
+// This is an EPHEMERAL TUI - it performs an action and auto-exits.
+// Do not wait for user input after completion.
 package spawn
 
 import (
@@ -7,16 +9,17 @@ import (
 	"time"
 
 	"github.com/2389-research/ourocodus/pkg/agent/container"
+	"github.com/2389-research/ourocodus/pkg/tui/components/header"
+	"github.com/2389-research/ourocodus/pkg/tui/components/progress"
+	"github.com/2389-research/ourocodus/pkg/tui/components/spinner"
 	"github.com/2389-research/ourocodus/pkg/tui/keys"
 	"github.com/2389-research/ourocodus/pkg/tui/theme"
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 )
 
-// Step represents a spawn step.
+// Step represents a spawn step (for control flow).
 type Step int
 
 const (
@@ -27,23 +30,6 @@ const (
 	StepGenerateToken
 	StepDone
 )
-
-// StepStatus represents step completion status.
-type StepStatus int
-
-const (
-	StatusPending StepStatus = iota
-	StatusRunning
-	StatusComplete
-	StatusError
-)
-
-// StepInfo describes a step.
-type StepInfo struct {
-	Name   string
-	Status StepStatus
-	Error  string
-}
 
 // Event types
 type (
@@ -76,13 +62,13 @@ type (
 
 // Model is the spawn TUI model.
 type Model struct {
-	th      *theme.Theme
-	help    help.Model
-	keys    keyMap
-	spinner spinner.Model
+	th       *theme.Theme
+	help     help.Model
+	keys     keyMap
+	spinner  spinner.Model
+	progress progress.Model
 
 	agentID string
-	steps   []StepInfo
 	current Step
 	done    bool
 	err     error
@@ -115,36 +101,36 @@ func (k keyMap) FullHelp() [][]key.Binding {
 }
 
 // New creates a new spawn TUI model.
-func New(agentID string) Model {
-	th := theme.Default()
+// If th is nil, the default theme is used.
+func New(agentID string, th *theme.Theme) Model {
+	th = theme.Ensure(th)
 
-	s := spinner.New()
-	s.Spinner = spinner.Dot
-	s.Style = lipgloss.NewStyle().Foreground(th.Primary)
-
-	steps := []StepInfo{
-		{Name: "Checking for existing agent", Status: StatusPending},
-		{Name: "Creating launcher", Status: StatusPending},
-		{Name: "Building spawn config", Status: StatusPending},
-		{Name: "Spawning agent container", Status: StatusPending},
-		{Name: "Generating attach token", Status: StatusPending},
-	}
+	s := spinner.New(th)
+	p := progress.New(th)
+	p.SetSteps([]string{
+		"Checking for existing agent",
+		"Creating launcher",
+		"Building spawn config",
+		"Spawning agent container",
+		"Generating attach token",
+	})
 
 	return Model{
-		th:      th,
-		help:    help.New(),
-		keys:    newKeyMap(),
-		spinner: s,
-		agentID: agentID,
-		steps:   steps,
-		current: StepCheckExisting,
+		th:       th,
+		help:     help.New(),
+		keys:     newKeyMap(),
+		spinner:  s,
+		progress: p,
+		agentID:  agentID,
+		current:  StepCheckExisting,
 	}
 }
 
 // Init initializes the model.
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(
-		m.spinner.Tick,
+		m.spinner.Tick(),
+		m.progress.Tick(),
 		tickCmd(),
 	)
 }
@@ -157,78 +143,98 @@ func tickCmd() tea.Cmd {
 
 // Update handles messages.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	var cmds []tea.Cmd
-
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		switch {
-		case key.Matches(msg, m.keys.Quit):
-			return m, tea.Quit
-		}
-
+		return m.handleKeyMsg(msg)
 	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
-
+		return m.handleWindowSizeMsg(msg)
 	case StepStartMsg:
-		if int(msg.Step) < len(m.steps) {
-			m.steps[msg.Step].Status = StatusRunning
-			m.current = msg.Step
-		}
-
+		return m.handleStepStartMsg(msg)
 	case StepCompleteMsg:
-		if int(msg.Step) < len(m.steps) {
-			m.steps[msg.Step].Status = StatusComplete
-		}
-
+		return m.handleStepCompleteMsg(msg)
 	case StepErrorMsg:
-		if int(msg.Step) < len(m.steps) {
-			m.steps[msg.Step].Status = StatusError
-			m.steps[msg.Step].Error = msg.Error.Error()
-		}
-		m.err = msg.Error
-		m.done = true
-
+		return m.handleStepErrorMsg(msg)
 	case SpawnCompleteMsg:
-		m.handle = msg.Handle
-		m.attachToken = msg.AttachToken
-		m.tokenError = msg.TokenError
-		m.done = true
-		// Mark all steps complete
-		for i := range m.steps {
-			if m.steps[i].Status != StatusError {
-				m.steps[i].Status = StatusComplete
-			}
-		}
-
+		return m.handleSpawnCompleteMsg(msg)
 	case TickMsg:
-		if !m.done {
-			cmds = append(cmds, tickCmd())
-		}
-
-	case spinner.TickMsg:
+		return m.handleTickMsg()
+	default:
+		// Let spinner and progress handle their own tick messages
+		var cmds []tea.Cmd
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
 		cmds = append(cmds, cmd)
+		m.progress, cmd = m.progress.Update(msg)
+		cmds = append(cmds, cmd)
+		return m, tea.Batch(cmds...)
 	}
+}
 
-	return m, tea.Batch(cmds...)
+func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if key.Matches(msg, m.keys.Quit) {
+		return m, tea.Quit
+	}
+	return m, nil
+}
+
+func (m Model) handleWindowSizeMsg(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
+	m.width = msg.Width
+	m.height = msg.Height
+	return m, nil
+}
+
+func (m Model) handleStepStartMsg(msg StepStartMsg) (tea.Model, tea.Cmd) {
+	m.current = msg.Step
+	m.progress.StartStep(int(msg.Step))
+	return m, nil
+}
+
+func (m Model) handleStepCompleteMsg(_ StepCompleteMsg) (tea.Model, tea.Cmd) {
+	m.progress.CompleteStep()
+	return m, nil
+}
+
+func (m Model) handleStepErrorMsg(msg StepErrorMsg) (tea.Model, tea.Cmd) {
+	m.progress.FailStep(msg.Error.Error())
+	m.err = msg.Error
+	m.done = true
+	// Auto-exit after brief delay to show error
+	return m, tea.Sequence(tea.Tick(500*time.Millisecond, func(_ time.Time) tea.Msg { return nil }), tea.Quit)
+}
+
+func (m Model) handleSpawnCompleteMsg(msg SpawnCompleteMsg) (tea.Model, tea.Cmd) {
+	m.handle = msg.Handle
+	m.attachToken = msg.AttachToken
+	m.tokenError = msg.TokenError
+	m.done = true
+	// Complete the current step if it's not already done
+	m.progress.CompleteStep()
+	// Auto-exit - the final view will be rendered before quit
+	return m, tea.Quit
+}
+
+func (m Model) handleTickMsg() (tea.Model, tea.Cmd) {
+	if !m.done {
+		return m, tickCmd()
+	}
+	return m, nil
 }
 
 // View renders the TUI.
 func (m Model) View() string {
 	var b strings.Builder
 
-	// Header
-	headerStyle := lipgloss.NewStyle().Foreground(m.th.Primary).Bold(true)
-	b.WriteString(headerStyle.Render(fmt.Sprintf("✨ Spawning agent '%s'", m.agentID)))
+	// Header with logo
+	b.WriteString(header.Render(m.th))
 	b.WriteString("\n\n")
 
-	// Steps
-	for i, step := range m.steps {
-		b.WriteString(m.renderStep(i, step))
-		b.WriteString("\n")
-	}
+	// Command title
+	b.WriteString(m.th.Title.Render(fmt.Sprintf("Spawning agent '%s'", m.agentID)))
+	b.WriteString("\n\n")
+
+	// Steps using progress component
+	b.WriteString(m.progress.View())
+	b.WriteString("\n")
 
 	// Result or error
 	if m.done {
@@ -243,80 +249,46 @@ func (m Model) View() string {
 	// Help (only show quit hint while running)
 	if !m.done {
 		b.WriteString("\n")
-		mutedStyle := lipgloss.NewStyle().Foreground(m.th.Muted)
-		b.WriteString(mutedStyle.Render("Press q to cancel"))
+		b.WriteString(m.th.MutedText.Render("Press q to cancel"))
 	}
 
 	return b.String()
 }
 
-func (m Model) renderStep(index int, step StepInfo) string {
-	var icon string
-	var style lipgloss.Style
-
-	switch step.Status {
-	case StatusPending:
-		icon = "○"
-		style = lipgloss.NewStyle().Foreground(m.th.Muted)
-	case StatusRunning:
-		icon = m.spinner.View()
-		style = lipgloss.NewStyle().Foreground(m.th.Primary)
-	case StatusComplete:
-		icon = "✓"
-		style = lipgloss.NewStyle().Foreground(m.th.Success)
-	case StatusError:
-		icon = "✗"
-		style = lipgloss.NewStyle().Foreground(m.th.Error)
-	}
-
-	line := fmt.Sprintf("  %s %s", icon, step.Name)
-	if step.Error != "" {
-		line += fmt.Sprintf(" - %s", step.Error)
-	}
-
-	return style.Render(line)
-}
-
 func (m Model) renderError() string {
-	errStyle := lipgloss.NewStyle().Foreground(m.th.Error).Bold(true)
-	return errStyle.Render(fmt.Sprintf("✗ Spawn failed: %v", m.err))
+	return m.th.ErrorText.Render(fmt.Sprintf("✗ Spawn failed: %v", m.err))
 }
 
 func (m Model) renderSuccess() string {
 	var b strings.Builder
 
-	labelStyle := lipgloss.NewStyle().Foreground(m.th.Primary).Bold(true)
-	valueStyle := lipgloss.NewStyle().Foreground(m.th.Accent)
-	mutedStyle := lipgloss.NewStyle().Foreground(m.th.Muted)
-	successStyle := lipgloss.NewStyle().Foreground(m.th.Success)
-
 	if m.handle == nil {
-		return successStyle.Render("✓ Agent spawned successfully")
+		return m.th.SuccessText.Render("✓ Agent spawned successfully")
 	}
 
 	// Worktree
 	b.WriteString("🌳 ")
-	b.WriteString(labelStyle.Render("Worktree: "))
-	b.WriteString(valueStyle.Render(m.handle.WorkspacePath()) + " ")
-	b.WriteString(mutedStyle.Render(fmt.Sprintf("(branch: %s)", m.handle.BranchName())))
+	b.WriteString(m.th.LabelText.Render("Worktree: "))
+	b.WriteString(m.th.ValueText.Render(m.handle.WorkspacePath()) + " ")
+	b.WriteString(m.th.MutedText.Render(fmt.Sprintf("(branch: %s)", m.handle.BranchName())))
 	b.WriteString("\n")
 
 	// Container
 	b.WriteString("📦 ")
-	b.WriteString(labelStyle.Render("Container: "))
-	b.WriteString(valueStyle.Render(m.handle.ContainerID()) + " ")
-	b.WriteString(successStyle.Render("(running)"))
+	b.WriteString(m.th.LabelText.Render("Container: "))
+	b.WriteString(m.th.ValueText.Render(m.handle.ContainerID()) + " ")
+	b.WriteString(m.th.SuccessText.Render("(running)"))
 	b.WriteString("\n")
 
 	// Credentials
 	b.WriteString("🔑 ")
-	b.WriteString(labelStyle.Render("Credentials: "))
+	b.WriteString(m.th.LabelText.Render("Credentials: "))
 	credPath := m.handle.CredentialsPath()
 	if credPath != "" {
-		b.WriteString(valueStyle.Render("mounted at /root/.creds "))
-		b.WriteString(mutedStyle.Render("(read-only)"))
+		b.WriteString(m.th.ValueText.Render("mounted at /root/.creds "))
+		b.WriteString(m.th.MutedText.Render("(read-only)"))
 	} else {
-		b.WriteString(mutedStyle.Render("(none)"))
+		b.WriteString(m.th.MutedText.Render("(none)"))
 	}
 	b.WriteString("\n")
 
@@ -324,24 +296,22 @@ func (m Model) renderSuccess() string {
 	if m.attachToken != "" {
 		b.WriteString("\n")
 		b.WriteString("🔐 ")
-		tokenLabel := lipgloss.NewStyle().Foreground(lipgloss.Color("#00F6FF")).Bold(true)
-		b.WriteString(tokenLabel.Render("Attach Token:"))
+		b.WriteString(m.th.LabelText.Render("Attach Token:"))
 		b.WriteString("\n")
-		b.WriteString(fmt.Sprintf("   %s\n", valueStyle.Render(m.attachToken)))
+		b.WriteString(fmt.Sprintf("   %s\n", m.th.ValueText.Render(m.attachToken)))
 		b.WriteString("\n")
-		b.WriteString(mutedStyle.Render("   Use this token when attaching from PWA or relay:"))
+		b.WriteString(m.th.MutedText.Render("   Use this token when attaching from PWA or relay:"))
 		b.WriteString("\n")
-		b.WriteString(mutedStyle.Render(fmt.Sprintf("   → agent:attach {\"agentId\": \"%s\", \"token\": \"<token>\"}", m.handle.AgentID())))
+		b.WriteString(m.th.MutedText.Render(fmt.Sprintf("   → agent:attach {\"agentId\": \"%s\", \"token\": \"<token>\"}", m.handle.AgentID())))
 		b.WriteString("\n")
 	} else if m.tokenError != nil {
-		warnStyle := lipgloss.NewStyle().Foreground(m.th.Warning)
 		b.WriteString("\n")
-		b.WriteString(warnStyle.Render(fmt.Sprintf("⚠️  Warning: Failed to generate attach token: %v", m.tokenError)))
+		b.WriteString(m.th.WarningText.Render(fmt.Sprintf("⚠️  Warning: Failed to generate attach token: %v", m.tokenError)))
 		b.WriteString("\n")
 	}
 
 	b.WriteString("\n")
-	b.WriteString(successStyle.Bold(true).Render(fmt.Sprintf("✓ Agent %s ready", m.handle.AgentID())))
+	b.WriteString(m.th.SuccessText.Bold(true).Render(fmt.Sprintf("✓ Agent %s ready", m.handle.AgentID())))
 
 	return b.String()
 }

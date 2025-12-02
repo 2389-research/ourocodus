@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -14,9 +13,7 @@ import (
 
 	doctortui "github.com/2389-research/ourocodus/cmd/agentd/internal/tui/doctor"
 	"github.com/2389-research/ourocodus/pkg/cli"
-	"github.com/2389-research/ourocodus/pkg/tui/theme"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/docker/docker/api/types/container"
 	"github.com/spf13/cobra"
 )
@@ -48,21 +45,6 @@ type Check struct {
 	Run  func(context.Context) (string, error) // Returns (message, error)
 }
 
-// doctorTheme provides consistent styling for doctor output
-var doctorTheme = theme.Default()
-
-func printSuccess(msg string) {
-	style := lipgloss.NewStyle().Foreground(doctorTheme.Success)
-	fmt.Print(style.Render("✓ "))
-	fmt.Println(msg)
-}
-
-func printError(msg string) {
-	style := lipgloss.NewStyle().Foreground(doctorTheme.Error)
-	fmt.Print(style.Render("× "))
-	fmt.Println(msg)
-}
-
 func runDoctor(cmd *cobra.Command, _ []string) error {
 	ctx := cmd.Context()
 
@@ -79,25 +61,24 @@ func runDoctor(cmd *cobra.Command, _ []string) error {
 	// Get mode from AppContext (set by cli.App wrapper)
 	appCtx := cli.FromContext(ctx)
 	if appCtx == nil {
-		// Fallback for tests or direct cobra execution
-		return runDoctorLegacy(ctx, checks, cli.ModePlain)
+		return cli.ContextError()
 	}
 
 	// Use TUI for rich mode, legacy for others
 	if appCtx.Mode.IsRich() {
-		return runDoctorTUI(ctx, checks)
+		return runDoctorTUI(ctx, checks, appCtx)
 	}
-	return runDoctorLegacy(ctx, checks, appCtx.Mode)
+	return runDoctorLegacy(ctx, checks, appCtx)
 }
 
 // runDoctorTUI runs the doctor command with a Bubble Tea TUI.
-func runDoctorTUI(ctx context.Context, checks []Check) error {
+func runDoctorTUI(ctx context.Context, checks []Check, appCtx *cli.AppContext) error {
 	checkNames := make([]string, len(checks))
 	for i, c := range checks {
 		checkNames[i] = c.Name
 	}
 
-	m := doctortui.New(checkNames)
+	m := doctortui.New(checkNames, appCtx.Theme)
 	p := tea.NewProgram(m)
 
 	// Channel to receive final result
@@ -138,7 +119,7 @@ func runDoctorTUI(ctx context.Context, checks []Check) error {
 	// Get result
 	allPassed := <-resultCh
 	if !allPassed {
-		return fmt.Errorf("environment validation failed")
+		return cli.ConfigError("environment validation failed")
 	}
 
 	return nil
@@ -159,7 +140,7 @@ type DoctorResults struct {
 }
 
 // runDoctorLegacy runs doctor checks without TUI (for JSON/plain mode).
-func runDoctorLegacy(ctx context.Context, checks []Check, mode cli.Mode) error {
+func runDoctorLegacy(ctx context.Context, checks []Check, appCtx *cli.AppContext) error {
 	results := make([]DoctorResult, 0, len(checks))
 	allPassed := true
 
@@ -172,35 +153,33 @@ func runDoctorLegacy(ctx context.Context, checks []Check, mode cli.Mode) error {
 			if strings.Contains(strings.ToLower(errStr), "skip") {
 				result.Status = "skipped"
 				result.Message = msg
-				if !mode.IsJSON() {
+				if !appCtx.Mode.IsJSON() {
 					fmt.Printf("⊘ %s (%s)\n", check.Name, msg)
 				}
 			} else {
 				result.Status = "failed"
 				result.Error = errStr
 				allPassed = false
-				if !mode.IsJSON() {
-					printError(fmt.Sprintf("%s: %s", check.Name, errStr))
+				if !appCtx.Mode.IsJSON() {
+					appCtx.Output.Error(fmt.Errorf("%s: %s", check.Name, errStr))
 				}
 			}
 		} else {
 			result.Status = "passed"
 			result.Message = msg
-			if !mode.IsJSON() {
+			if !appCtx.Mode.IsJSON() {
 				if msg != "" {
-					printSuccess(fmt.Sprintf("%s (%s)", check.Name, msg))
+					appCtx.Output.Success(fmt.Sprintf("%s (%s)", check.Name, msg))
 				} else {
-					printSuccess(check.Name)
+					appCtx.Output.Success(check.Name)
 				}
 			}
 		}
 		results = append(results, result)
 	}
 
-	if mode.IsJSON() {
-		encoder := json.NewEncoder(os.Stdout)
-		encoder.SetIndent("", "  ")
-		_ = encoder.Encode(DoctorResults{
+	if appCtx.Mode.IsJSON() {
+		_ = appCtx.Output.JSON(DoctorResults{
 			Results: results,
 			Success: allPassed,
 		})
@@ -212,7 +191,7 @@ func runDoctorLegacy(ctx context.Context, checks []Check, mode cli.Mode) error {
 	}
 
 	if !allPassed {
-		return fmt.Errorf("environment validation failed")
+		return cli.ConfigError("environment validation failed")
 	}
 
 	return nil
@@ -221,12 +200,12 @@ func runDoctorLegacy(ctx context.Context, checks []Check, mode cli.Mode) error {
 func checkDockerDaemon(ctx context.Context) (string, error) {
 	dockerCli, err := newDockerClient()
 	if err != nil {
-		return "", fmt.Errorf("docker client creation failed: %w", err)
+		return "", cli.ConfigError("docker client creation failed: " + err.Error())
 	}
 	defer func() { _ = dockerCli.Close() }()
 
 	if _, err := dockerCli.Ping(ctx); err != nil {
-		return "", fmt.Errorf("docker daemon not running: start Docker Desktop and retry")
+		return "", cli.ConfigError("docker daemon not running: start Docker Desktop and retry")
 	}
 
 	// Get version for display

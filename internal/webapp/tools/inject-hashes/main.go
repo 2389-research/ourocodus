@@ -23,7 +23,7 @@ func main() {
 	htmlPath := os.Args[2]
 
 	// Read manifest
-	manifestData, err := os.ReadFile(manifestPath) // nolint:gosec // G304: CLI tool takes file path as argument
+	manifestData, err := os.ReadFile(manifestPath) //nolint:gosec // G304: CLI tool takes file path as argument
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error reading manifest: %v\n", err)
 		os.Exit(1)
@@ -36,7 +36,7 @@ func main() {
 	}
 
 	// Read HTML file
-	htmlContent, err := os.ReadFile(htmlPath) // nolint:gosec // G304: CLI tool takes file path as argument
+	htmlContent, err := os.ReadFile(htmlPath) //nolint:gosec // G304: CLI tool takes file path as argument
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error reading HTML: %v\n", err)
 		os.Exit(1)

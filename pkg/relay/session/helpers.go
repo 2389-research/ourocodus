@@ -9,9 +9,9 @@ import (
 	"strings"
 
 	"github.com/2389-research/ourocodus/pkg/labels"
+	cerrdefs "github.com/containerd/errdefs"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
-	"github.com/docker/docker/errdefs"
 )
 
 // WorktreeDir is the base directory for agent worktrees
@@ -190,9 +190,8 @@ func StopCLISpawnedContainer(
 		if err := cli.ContainerStop(ctx, containerID, container.StopOptions{
 			Timeout: &timeout,
 		}); err != nil {
-			// Use errdefs for robust error classification (ignore NotFound for idempotence)
-			//nolint:staticcheck // errdefs is Docker SDK's official error handling
-			if !errdefs.IsNotFound(err) {
+			// Use cerrdefs for robust error classification (ignore NotFound for idempotence)
+			if !cerrdefs.IsNotFound(err) {
 				logger.Printf("WARN: Failed to stop CLI agent container %s: %v", agentID, err)
 				failed = true
 			}
@@ -203,9 +202,8 @@ func StopCLISpawnedContainer(
 			Force:         true,
 			RemoveVolumes: true,
 		}); err != nil {
-			// Use errdefs for robust error classification (ignore NotFound for idempotence)
-			//nolint:staticcheck // errdefs is Docker SDK's official error handling
-			if !errdefs.IsNotFound(err) {
+			// Use cerrdefs for robust error classification (ignore NotFound for idempotence)
+			if !cerrdefs.IsNotFound(err) {
 				logger.Printf("WARN: Failed to remove CLI agent container %s: %v", agentID, err)
 				failed = true
 			}

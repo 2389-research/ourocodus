@@ -4,12 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"strings"
 	"text/tabwriter"
 	"time"
 
-	"github.com/2389-research/ourocodus/cmd/agentd/internal/detect"
-	"github.com/2389-research/ourocodus/cmd/agentd/internal/output"
+	"github.com/2389-research/ourocodus/pkg/cli"
+	"github.com/2389-research/ourocodus/pkg/cli/detect"
+	"github.com/2389-research/ourocodus/pkg/cli/format"
+	"github.com/2389-research/ourocodus/pkg/tui/components/header"
 	"github.com/2389-research/ourocodus/pkg/tui/theme"
 	"github.com/charmbracelet/bubbles/table"
 	"github.com/charmbracelet/lipgloss"
@@ -28,7 +29,7 @@ type AgentInfo struct {
 }
 
 // RenderAgentList renders a list of agents in the specified output mode
-func RenderAgentList(w io.Writer, agents []AgentInfo, mode output.Mode, th *theme.RetroTheme) error {
+func RenderAgentList(w io.Writer, agents []AgentInfo, mode cli.Mode, th *theme.Theme) error {
 	if len(agents) == 0 {
 		return renderEmptyList(w, mode, th)
 	}
@@ -39,24 +40,21 @@ func RenderAgentList(w io.Writer, agents []AgentInfo, mode output.Mode, th *them
 	case mode.IsPlain():
 		return renderPlainTable(w, agents)
 	case mode.IsRich():
-		if th == nil {
-			th = theme.NewRetroTheme(theme.PaletteCGA)
-		}
+		th = theme.Ensure(th)
 		return renderRichTable(w, agents, th)
 	default:
 		return renderPlainTable(w, agents)
 	}
 }
 
-func renderEmptyList(w io.Writer, mode output.Mode, th *theme.RetroTheme) error {
+func renderEmptyList(w io.Writer, mode cli.Mode, th *theme.Theme) error {
 	if mode.IsJSON() {
 		return json.NewEncoder(w).Encode([]AgentInfo{})
 	}
 
 	msg := "✨ No agents running."
 	if mode.IsRich() && th != nil {
-		mutedStyle := lipgloss.NewStyle().Foreground(th.Muted)
-		msg = mutedStyle.Render(msg)
+		msg = th.MutedText.Render(msg)
 	}
 
 	_, err := fmt.Fprintln(w, msg)
@@ -88,9 +86,9 @@ func renderPlainTable(w io.Writer, agents []AgentInfo) error {
 			agent.Status,
 			agent.SpawnSource,
 			attachedTo,
-			formatLastBeat(agent.LastBeat),
+			format.FormatLastBeatVerbose(agent.LastBeat),
 			formatWorkspace(agent.Workspace),
-			output.FormatDurationHuman(time.Since(agent.CreatedAt)),
+			format.FormatDurationHuman(time.Since(agent.CreatedAt)),
 		)
 	}
 
@@ -98,40 +96,12 @@ func renderPlainTable(w io.Writer, agents []AgentInfo) error {
 	return tw.Flush()
 }
 
-func renderRichTable(w io.Writer, agents []AgentInfo, th *theme.RetroTheme) error {
+func renderRichTable(w io.Writer, agents []AgentInfo, th *theme.Theme) error {
 	// Detect unicode support
 	supportsUnicode := detect.SupportsUnicode()
 
-	// Header with theme styling - rainbow gradient logo
-	logoText := theme.GetLogo(theme.LogoSmall)
-
-	// Apply bright rainbow gradient to logo (line by line for color variation)
-	lines := strings.Split(logoText, "\n")
-	pastelColors := []lipgloss.Color{
-		lipgloss.Color("#FF5555"), // Red
-		lipgloss.Color("#FFB86C"), // Orange
-		lipgloss.Color("#F1FA8C"), // Yellow
-		lipgloss.Color("#50FA7B"), // Green
-		lipgloss.Color("#8BE9FD"), // Cyan
-		lipgloss.Color("#6272A4"), // Blue
-		lipgloss.Color("#BD93F9"), // Purple
-	}
-
-	var coloredLines []string
-	for i, line := range lines {
-		color := pastelColors[i%len(pastelColors)]
-		coloredLine := lipgloss.NewStyle().Foreground(color).Render(line)
-		coloredLines = append(coloredLines, coloredLine)
-	}
-	coloredLogo := strings.Join(coloredLines, "\n")
-
-	logoBox := lipgloss.NewStyle().
-		Border(lipgloss.NormalBorder()).
-		BorderForeground(th.Primary).
-		Padding(1, 2).
-		Align(lipgloss.Center).
-		Render(coloredLogo)
-	_, _ = fmt.Fprintln(w, logoBox)
+	// Header with rainbow logo
+	_, _ = fmt.Fprintln(w, header.Render(th))
 	_, _ = fmt.Fprintln(w)
 
 	// Define table columns with proper widths
@@ -161,8 +131,8 @@ func renderRichTable(w io.Writer, agents []AgentInfo, th *theme.RetroTheme) erro
 			statusIcon + " " + agent.Status,
 			agent.SpawnSource,
 			attachedTo,
-			formatLastBeat(agent.LastBeat),
-			output.FormatDurationHuman(time.Since(agent.CreatedAt)),
+			format.FormatLastBeatVerbose(agent.LastBeat),
+			format.FormatDurationHuman(time.Since(agent.CreatedAt)),
 		})
 	}
 
@@ -194,9 +164,8 @@ func renderRichTable(w io.Writer, agents []AgentInfo, th *theme.RetroTheme) erro
 	_, _ = fmt.Fprintln(w)
 
 	// Footer with summary
-	summaryStyle := lipgloss.NewStyle().Foreground(th.Secondary)
 	summary := fmt.Sprintf("Total: %d agents", len(agents))
-	_, _ = fmt.Fprintln(w, summaryStyle.Render(summary))
+	_, _ = fmt.Fprintln(w, th.SecondaryText.Render(summary))
 
 	return nil
 }
@@ -226,24 +195,4 @@ func formatWorkspace(path string) string {
 		return "..." + path[len(path)-57:]
 	}
 	return path
-}
-
-func formatLastBeat(t time.Time) string {
-	if t.IsZero() {
-		return "–"
-	}
-	diff := time.Since(t)
-	if diff < time.Second {
-		return "now"
-	}
-	if diff < time.Minute {
-		return fmt.Sprintf("%ds ago", int(diff.Seconds()))
-	}
-	if diff < time.Hour {
-		return fmt.Sprintf("%dm ago", int(diff.Minutes()))
-	}
-	if diff < 24*time.Hour {
-		return fmt.Sprintf("%dh ago", int(diff.Hours()))
-	}
-	return fmt.Sprintf("%dd ago", int(diff.Hours()/24))
 }

@@ -11,8 +11,8 @@ type Flags struct {
 	JSON bool
 	// Plain outputs plain text without colors or TUI.
 	Plain bool
-	// Theme selects the color theme (cga, amber, green, c64).
-	Theme string
+	// Light enables the light color theme (default is dark).
+	Light bool
 	// NoColor disables ANSI colors (respects NO_COLOR standard).
 	NoColor bool
 	// Quiet suppresses informational output.
@@ -26,7 +26,7 @@ type Flags struct {
 func RegisterFlags(flags *pflag.FlagSet, f *Flags) {
 	flags.BoolVar(&f.JSON, "json", false, "Output JSON only (machine-readable)")
 	flags.BoolVar(&f.Plain, "plain", false, "Plain text output (no TUI, no colors)")
-	flags.StringVar(&f.Theme, "theme", "", "Color theme: cga, amber, green, c64")
+	flags.BoolVar(&f.Light, "light", false, "Use light theme (default is dark)")
 	flags.BoolVar(&f.NoColor, "no-color", false, "Disable ANSI colors")
 	flags.BoolVarP(&f.Quiet, "quiet", "q", false, "Suppress informational output")
 	flags.BoolVarP(&f.Verbose, "verbose", "v", false, "Increase verbosity")
@@ -50,8 +50,8 @@ func GetFlags(cmd *cobra.Command) *Flags {
 	if val, err := cmd.Flags().GetBool("plain"); err == nil {
 		f.Plain = val
 	}
-	if val, err := cmd.Flags().GetString("theme"); err == nil {
-		f.Theme = val
+	if val, err := cmd.Flags().GetBool("light"); err == nil {
+		f.Light = val
 	}
 	if val, err := cmd.Flags().GetBool("no-color"); err == nil {
 		f.NoColor = val

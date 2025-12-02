@@ -3,13 +3,14 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"time"
 
-	"github.com/2389-research/ourocodus/cmd/agentd/internal/detect"
-	"github.com/2389-research/ourocodus/cmd/agentd/internal/output"
 	"github.com/2389-research/ourocodus/cmd/agentd/internal/render"
 	uilist "github.com/2389-research/ourocodus/cmd/agentd/internal/tui/list"
+	"github.com/2389-research/ourocodus/pkg/cli"
+	"github.com/2389-research/ourocodus/pkg/cli/output"
 	"github.com/2389-research/ourocodus/pkg/labels"
 	"github.com/2389-research/ourocodus/pkg/relay/session"
 	"github.com/2389-research/ourocodus/pkg/tui/theme"
@@ -17,12 +18,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var (
-	listFormat    string
-	listPlainFlag bool
-	listTheme     string
-	listNATSURL   string
-)
+var listNATSURL string
 
 const defaultNATSURL = "nats://localhost:4222"
 
@@ -37,51 +33,27 @@ var listCmd = &cobra.Command{
   agentd list --plain
 
   # JSON output for scripting
-  agentd list --format json
+  agentd list --json
 
-  # Use amber theme for rich mode
-  agentd list --theme amber`,
+  # Use light theme for rich mode
+  agentd list --light`,
 	RunE: runList,
 }
 
 func init() {
-	listCmd.Flags().StringVar(&listFormat, "format", "auto", "Output format (auto|rich|plain|json)")
-	listCmd.Flags().BoolVar(&listPlainFlag, "plain", false, "Force plain text output (alias for --format plain)")
-	listCmd.Flags().StringVar(&listTheme, "theme", "cga", "Color theme for rich mode (cga|amber|green|c64)")
 	listCmd.Flags().StringVar(&listNATSURL, "nats", defaultNATSURL, "NATS server URL for live heartbeats (use empty string to disable)")
 }
 
-func runList(cmd *cobra.Command, args []string) error {
+func runList(cmd *cobra.Command, _ []string) error {
 	ctx := cmd.Context()
 
-	// Step 1: Detect output mode
-	jsonFlag := listFormat == "json"
-	plainFlag := listPlainFlag || listFormat == "plain"
-	shouldPlain := detect.ShouldUsePlainMode(jsonFlag, plainFlag, os.Environ)
-
-	mode := output.ModeRich
-	if listFormat != "auto" {
-		// Explicit format flag takes precedence
-		parsedMode, valid := output.ParseMode(listFormat)
-		if valid {
-			mode = parsedMode
-		}
-	} else {
-		// Auto-detect mode
-		mode = output.DetectMode(jsonFlag, plainFlag, shouldPlain)
+	// Get mode from AppContext (set by cli.App wrapper)
+	appCtx := cli.FromContext(ctx)
+	if appCtx == nil {
+		return cli.ContextError()
 	}
 
-	// Step 2: Create theme if rich mode
-	var th *theme.RetroTheme
-	if mode.IsRich() {
-		palette, valid := theme.ParsePaletteName(listTheme)
-		if !valid {
-			palette = theme.PaletteCGA
-		}
-		th = theme.NewRetroTheme(palette)
-	}
-
-	// Step 2.5: Optional heartbeat monitor
+	// Optional heartbeat monitor
 	hbURL := listNATSURL
 	if env := os.Getenv("AGENTD_NATS"); env != "" {
 		hbURL = env
@@ -105,13 +77,13 @@ func runList(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Step 3: Query Docker for agents
+	// Query Docker for agents
 	agents, err := listAgentsFromDocker(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to list agents: %w", err)
+		return cli.IOError("failed to list agents: " + err.Error())
 	}
 
-	// Step 4: Convert to render.AgentInfo format
+	// Convert to render.AgentInfo format
 	renderAgents := make([]render.AgentInfo, len(agents))
 	for i, agent := range agents {
 		renderAgents[i] = render.AgentInfo{
@@ -127,8 +99,8 @@ func runList(cmd *cobra.Command, args []string) error {
 	}
 	applyHeartbeats(renderAgents, hbMonitor)
 
-	// Step 5: Render using new renderer
-	if mode.IsRich() {
+	// Render based on mode
+	if appCtx.Mode.IsRich() {
 		opts := uilist.RunOptions{
 			Loader: func(ctx context.Context) ([]render.AgentInfo, error) {
 				agents, err := listAgentsFromDocker(ctx)
@@ -152,12 +124,25 @@ func runList(cmd *cobra.Command, args []string) error {
 				return res, nil
 			},
 			Stopper: func(ctx context.Context, agentID string) error {
-				return stopAgent(ctx, nil, agentID)
+				// Create a silent AppContext to suppress output during TUI stop operations.
+				// The TUI shows status in its own status bar.
+				silentCtx := &cli.AppContext{
+					Mode:   cli.ModePlain,
+					Theme:  theme.Ensure(nil),
+					Output: output.NewPlainOutputWithWriters(io.Discard, io.Discard, true),
+				}
+				return stopAgent(silentCtx.ToContext(ctx), nil, agentID)
 			},
 		}
-		return uilist.Run(ctx, th, renderAgents, hbStatus, opts)
+		return uilist.Run(ctx, appCtx.Theme, renderAgents, hbStatus, opts)
 	}
-	return render.RenderAgentList(os.Stdout, renderAgents, mode, th)
+
+	// Plain/JSON mode - use render package
+	mode := cli.ModePlain
+	if appCtx.Mode.IsJSON() {
+		mode = cli.ModeJSON
+	}
+	return render.RenderAgentList(os.Stdout, renderAgents, mode, appCtx.Theme)
 }
 
 // agentInfo represents an agent discovered from Docker
@@ -174,19 +159,19 @@ type agentInfo struct {
 
 // listAgentsFromDocker queries Docker for containers with agentd labels
 func listAgentsFromDocker(ctx context.Context) ([]agentInfo, error) {
-	cli, err := newDockerClient()
+	dockerCli, err := newDockerClient()
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = cli.Close() }()
+	defer func() { _ = dockerCli.Close() }()
 
 	// Use centralized filter builder from pkg/labels
-	containers, err := cli.ContainerList(ctx, container.ListOptions{
+	containers, err := dockerCli.ContainerList(ctx, container.ListOptions{
 		All:     false, // Only running containers
 		Filters: labels.ListAgentsFilter(),
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to list containers: %w", err)
+		return nil, cli.IOError("failed to list containers: " + err.Error())
 	}
 
 	// Get all leases to determine attached status and last heartbeat

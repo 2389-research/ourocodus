@@ -1,8 +1,10 @@
 # CLI/TUI Standards Framework Design
 
 **Date:** 2025-12-01
-**Status:** Draft
+**Status:** Accepted
 **Author:** Claude + Human collaboration
+
+> **Related Documentation**: See the [CLI/TUI Framework Implementation Guide](../development/CLI_TUI_FRAMEWORK.md) for code patterns and usage examples.
 
 ## Summary
 
@@ -21,24 +23,29 @@ This document defines the standard CLI/TUI framework for all ourocodus tools. Th
 
 The framework uses two layers:
 
-```
-┌─────────────────────────────────────────────┐
-│  cli.NewApp()  (Primary API - 99% of use)   │
-│  ─────────────────────────────────────────  │
-│  • Wraps cobra.Command                      │
-│  • Registers standard flags automatically   │
-│  • Handles signals, mode detection, cleanup │
-│  • Propagates AppContext via cmd.Context()  │
-└─────────────────────────────────────────────┘
-                      │
-                      ▼
-┌─────────────────────────────────────────────┐
-│  Middleware Primitives  (Edge cases only)   │
-│  ─────────────────────────────────────────  │
-│  • WithTheme(), WithOutput(), WithSignals() │
-│  • Used internally by App                   │
-│  • Exposed for relay daemon, custom TUIs    │
-└─────────────────────────────────────────────┘
+```mermaid
+graph TB
+    subgraph "Primary API (99% of use)"
+        A[cli.NewApp] --> B[Wraps cobra.Command]
+        A --> C[Registers standard flags]
+        A --> D[Handles signals & cleanup]
+        A --> E[Propagates AppContext]
+    end
+
+    subgraph "Middleware Primitives (Edge cases)"
+        F[WithTheme]
+        G[WithOutput]
+        H[WithSignals]
+    end
+
+    A --> F
+    A --> G
+    A --> H
+
+    F --> I[Used by App internally]
+    G --> I
+    H --> I
+    I --> J[Exposed for relay daemon, custom TUIs]
 ```
 
 ### Package Structure
@@ -96,6 +103,24 @@ The framework detects output mode in this order:
 4. **TTY detection**: Non-TTY (pipes) forces plain mode
 5. **Default**: Rich TUI mode
 
+```mermaid
+flowchart TD
+    A[Start] --> B{--json flag?}
+    B -->|Yes| JSON[ModeJSON]
+    B -->|No| C{--plain flag?}
+    C -->|Yes| PLAIN[ModePlain]
+    C -->|No| D{OUROCODUS_OUTPUT set?}
+    D -->|Yes| E[Parse env value]
+    E --> F{Valid mode?}
+    F -->|Yes| G[Use parsed mode]
+    F -->|No| H{CI=true?}
+    D -->|No| H
+    H -->|Yes| PLAIN2[ModePlain]
+    H -->|No| I{Is TTY?}
+    I -->|No| PLAIN3[ModePlain]
+    I -->|Yes| RICH[ModeRich]
+```
+
 ```go
 func resolveMode(flags Flags, env Environment) Mode {
     if flags.JSON {
@@ -116,14 +141,19 @@ func resolveMode(flags Flags, env Environment) Mode {
 
 ## Exit Codes
 
-| Code | Meaning |
-|------|---------|
-| 0 | Success |
-| 1 | General error |
-| 2 | Usage/argument error |
-| 3 | Configuration error |
-| 4 | Network/IO error |
-| 130 | Interrupted (SIGINT) |
+Exit codes follow [BSD sysexits](https://man.freebsd.org/cgi/man.cgi?query=sysexits) conventions where applicable:
+
+| Code | Meaning | Typed Error |
+|------|---------|-------------|
+| 0 | Success | (none) |
+| 1 | General error | `errors.New(...)` |
+| 2 | Usage/argument error | `cli.UsageError(msg)` |
+| 4 | Network/IO error | `cli.IOError(msg)` |
+| 70 | Internal software error | `cli.ContextError()` |
+| 78 | Configuration error | `cli.ConfigError(msg)` |
+| 130 | Interrupted (SIGINT) | (signal handler) |
+
+> **Note**: Codes 70 and 78 match BSD sysexits (`EX_SOFTWARE` and `EX_CONFIG`). This provides meaningful exit codes for scripting while maintaining compatibility with Unix conventions.
 
 ## Usage Examples
 

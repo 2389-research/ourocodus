@@ -1,4 +1,6 @@
 // Package stop provides a Bubble Tea TUI for the stop command.
+// This is an EPHEMERAL TUI - it performs an action and auto-exits.
+// Do not wait for user input after completion.
 package stop
 
 import (
@@ -6,13 +8,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/2389-research/ourocodus/pkg/tui/components/header"
+	"github.com/2389-research/ourocodus/pkg/tui/components/spinner"
+	"github.com/2389-research/ourocodus/pkg/tui/components/steplist"
 	"github.com/2389-research/ourocodus/pkg/tui/keys"
 	"github.com/2389-research/ourocodus/pkg/tui/theme"
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 )
 
 // StepType represents a cleanup step.
@@ -109,6 +112,7 @@ type Model struct {
 	help    help.Model
 	keys    keyMap
 	spinner spinner.Model
+	slCfg   steplist.Config
 
 	agents   []AgentState
 	current  int
@@ -138,12 +142,16 @@ func (k keyMap) FullHelp() [][]key.Binding {
 }
 
 // New creates a new stop TUI model.
-func New(agentIDs []string) Model {
-	th := theme.Default()
+// If th is nil, the default theme is used.
+func New(agentIDs []string, th *theme.Theme) Model {
+	th = theme.Ensure(th)
 
-	s := spinner.New()
-	s.Spinner = spinner.Dot
-	s.Style = lipgloss.NewStyle().Foreground(th.Warning)
+	s := spinner.New(th)
+
+	// Use WarningText for running steps, indent steps, use " - " separator
+	slCfg := steplist.DefaultConfig(th, th.WarningText)
+	slCfg.Indent = "  "
+	slCfg.ErrorSep = " - "
 
 	agents := make([]AgentState, len(agentIDs))
 	for i, id := range agentIDs {
@@ -162,6 +170,7 @@ func New(agentIDs []string) Model {
 		help:    help.New(),
 		keys:    newKeyMap(),
 		spinner: s,
+		slCfg:   slCfg,
 		agents:  agents,
 	}
 }
@@ -169,7 +178,7 @@ func New(agentIDs []string) Model {
 // Init initializes the model.
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(
-		m.spinner.Tick,
+		m.spinner.Tick(),
 		tickCmd(),
 	)
 }
@@ -182,76 +191,117 @@ func tickCmd() tea.Cmd {
 
 // Update handles messages.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	var cmds []tea.Cmd
-
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		switch {
-		case key.Matches(msg, m.keys.Quit):
-			return m, tea.Quit
-		}
-
+		return m.handleKeyMsg(msg)
 	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
-
+		return m.handleWindowSizeMsg(msg)
 	case AgentStartMsg:
-		for i := range m.agents {
-			if m.agents[i].AgentID == msg.AgentID {
-				m.current = i
-				break
-			}
-		}
-
+		return m.handleAgentStartMsg(msg)
 	case StepStartMsg:
-		m.updateAgentStep(msg.AgentID, msg.Step, StatusRunning, "")
-
+		return m.handleStepStartMsg(msg)
 	case StepCompleteMsg:
-		m.updateAgentStep(msg.AgentID, msg.Step, StatusComplete, "")
-		if msg.ContainerID != "" {
-			m.setAgentContainerID(msg.AgentID, msg.ContainerID)
-		}
-		if msg.Workspace != "" {
-			m.setAgentWorkspace(msg.AgentID, msg.Workspace)
-		}
-
+		return m.handleStepCompleteMsg(msg)
 	case StepSkipMsg:
-		m.updateAgentStep(msg.AgentID, msg.Step, StatusSkipped, msg.Reason)
-
+		return m.handleStepSkipMsg(msg)
 	case StepErrorMsg:
-		m.updateAgentStep(msg.AgentID, msg.Step, StatusError, msg.Error.Error())
-		m.anyError = true
-
+		return m.handleStepErrorMsg(msg)
 	case AgentCompleteMsg:
-		for i := range m.agents {
-			if m.agents[i].AgentID == msg.AgentID {
-				m.agents[i].Done = true
-				m.agents[i].Status = msg.Status
-				// Mark remaining steps complete or skipped
-				for j := range m.agents[i].Steps {
-					if m.agents[i].Steps[j].Status == StatusPending {
-						m.agents[i].Steps[j].Status = StatusComplete
-					}
-				}
-				break
-			}
-		}
-
+		return m.handleAgentCompleteMsg(msg)
 	case AllCompleteMsg:
-		m.done = true
-
+		return m.handleAllCompleteMsg()
 	case TickMsg:
-		if !m.done {
-			cmds = append(cmds, tickCmd())
-		}
-
-	case spinner.TickMsg:
+		return m.handleTickMsg()
+	default:
+		// Let spinner handle its own tick messages
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
-		cmds = append(cmds, cmd)
+		return m, cmd
 	}
+}
 
-	return m, tea.Batch(cmds...)
+func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if key.Matches(msg, m.keys.Quit) {
+		return m, tea.Quit
+	}
+	return m, nil
+}
+
+func (m Model) handleWindowSizeMsg(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
+	m.width = msg.Width
+	m.height = msg.Height
+	return m, nil
+}
+
+func (m Model) handleAgentStartMsg(msg AgentStartMsg) (tea.Model, tea.Cmd) {
+	for i := range m.agents {
+		if m.agents[i].AgentID == msg.AgentID {
+			m.current = i
+			break
+		}
+	}
+	return m, nil
+}
+
+func (m Model) handleStepStartMsg(msg StepStartMsg) (tea.Model, tea.Cmd) {
+	m.updateAgentStep(msg.AgentID, msg.Step, StatusRunning, "")
+	return m, nil
+}
+
+func (m Model) handleStepCompleteMsg(msg StepCompleteMsg) (tea.Model, tea.Cmd) {
+	m.updateAgentStep(msg.AgentID, msg.Step, StatusComplete, "")
+	if msg.ContainerID != "" {
+		m.setAgentContainerID(msg.AgentID, msg.ContainerID)
+	}
+	if msg.Workspace != "" {
+		m.setAgentWorkspace(msg.AgentID, msg.Workspace)
+	}
+	return m, nil
+}
+
+func (m Model) handleStepSkipMsg(msg StepSkipMsg) (tea.Model, tea.Cmd) {
+	m.updateAgentStep(msg.AgentID, msg.Step, StatusSkipped, msg.Reason)
+	return m, nil
+}
+
+func (m Model) handleStepErrorMsg(msg StepErrorMsg) (tea.Model, tea.Cmd) {
+	m.updateAgentStep(msg.AgentID, msg.Step, StatusError, msg.Error.Error())
+	m.anyError = true
+	return m, nil
+}
+
+func (m Model) handleAgentCompleteMsg(msg AgentCompleteMsg) (tea.Model, tea.Cmd) {
+	m.markAgentComplete(msg.AgentID, msg.Status)
+	return m, nil
+}
+
+func (m *Model) markAgentComplete(agentID, status string) {
+	for i := range m.agents {
+		if m.agents[i].AgentID == agentID {
+			m.agents[i].Done = true
+			m.agents[i].Status = status
+			// Mark remaining steps complete or skipped
+			for j := range m.agents[i].Steps {
+				if m.agents[i].Steps[j].Status == StatusPending {
+					m.agents[i].Steps[j].Status = StatusComplete
+				}
+			}
+			break
+		}
+	}
+}
+
+func (m Model) handleAllCompleteMsg() (tea.Model, tea.Cmd) {
+	m.done = true
+	// Auto-exit immediately - ephemeral TUI completes its action
+	return m, tea.Quit
+}
+
+func (m Model) handleTickMsg() (tea.Model, tea.Cmd) {
+	if !m.done {
+		return m, tickCmd()
+	}
+	return m, nil
 }
 
 func (m *Model) updateAgentStep(agentID string, step StepType, status StepStatus, errMsg string) {
@@ -289,12 +339,15 @@ func (m *Model) setAgentWorkspace(agentID, workspace string) {
 func (m Model) View() string {
 	var b strings.Builder
 
-	// Header
-	headerStyle := lipgloss.NewStyle().Foreground(m.th.Warning).Bold(true)
+	// Header with logo
+	b.WriteString(header.Render(m.th))
+	b.WriteString("\n\n")
+
+	// Command title
 	if len(m.agents) == 1 {
-		b.WriteString(headerStyle.Render(fmt.Sprintf("Stopping agent '%s'", m.agents[0].AgentID)))
+		b.WriteString(m.th.WarningText.Bold(true).Render(fmt.Sprintf("Stopping agent '%s'", m.agents[0].AgentID)))
 	} else {
-		b.WriteString(headerStyle.Render(fmt.Sprintf("Stopping %d agents", len(m.agents))))
+		b.WriteString(m.th.WarningText.Bold(true).Render(fmt.Sprintf("Stopping %d agents", len(m.agents))))
 	}
 	b.WriteString("\n\n")
 
@@ -312,8 +365,7 @@ func (m Model) View() string {
 
 	// Help
 	if !m.done {
-		mutedStyle := lipgloss.NewStyle().Foreground(m.th.Muted)
-		b.WriteString(mutedStyle.Render("Press q to cancel"))
+		b.WriteString(m.th.MutedText.Render("Press q to cancel"))
 	}
 
 	return b.String()
@@ -323,19 +375,16 @@ func (m Model) renderAgent(agent AgentState) string {
 	var b strings.Builder
 
 	// Agent header
-	agentStyle := lipgloss.NewStyle().Foreground(m.th.Primary).Bold(true)
-	b.WriteString(agentStyle.Render(fmt.Sprintf("Agent: %s", agent.AgentID)))
+	b.WriteString(m.th.Title.Render(fmt.Sprintf("Agent: %s", agent.AgentID)))
 
 	if agent.Status == "not_found" {
-		mutedStyle := lipgloss.NewStyle().Foreground(m.th.Muted)
-		b.WriteString(" " + mutedStyle.Render("(not found)"))
+		b.WriteString(" " + m.th.MutedText.Render("(not found)"))
 	} else if agent.ContainerID != "" {
-		mutedStyle := lipgloss.NewStyle().Foreground(m.th.Muted)
 		shortID := agent.ContainerID
 		if len(shortID) > 12 {
 			shortID = shortID[:12]
 		}
-		b.WriteString(" " + mutedStyle.Render(fmt.Sprintf("[%s]", shortID)))
+		b.WriteString(" " + m.th.MutedText.Render(fmt.Sprintf("[%s]", shortID)))
 	}
 	b.WriteString("\n")
 
@@ -348,34 +397,30 @@ func (m Model) renderAgent(agent AgentState) string {
 	return b.String()
 }
 
-func (m Model) renderStep(index int, step StepInfo) string {
-	var icon string
-	var style lipgloss.Style
-
-	switch step.Status {
+// toSteplistItem converts a StepInfo to a steplist.Item.
+func (s StepInfo) toSteplistItem() steplist.Item {
+	var status steplist.Status
+	switch s.Status {
 	case StatusPending:
-		icon = "○"
-		style = lipgloss.NewStyle().Foreground(m.th.Muted)
+		status = steplist.StatusPending
 	case StatusRunning:
-		icon = m.spinner.View()
-		style = lipgloss.NewStyle().Foreground(m.th.Warning)
+		status = steplist.StatusRunning
 	case StatusComplete:
-		icon = "✓"
-		style = lipgloss.NewStyle().Foreground(m.th.Success)
+		status = steplist.StatusComplete
 	case StatusSkipped:
-		icon = "⊘"
-		style = lipgloss.NewStyle().Foreground(m.th.Muted)
+		status = steplist.StatusSkipped
 	case StatusError:
-		icon = "✗"
-		style = lipgloss.NewStyle().Foreground(m.th.Error)
+		status = steplist.StatusError
 	}
-
-	line := fmt.Sprintf("  %s %s", icon, step.Name)
-	if step.Error != "" {
-		line += fmt.Sprintf(" - %s", step.Error)
+	return steplist.Item{
+		Name:   s.Name,
+		Status: status,
+		Error:  s.Error,
 	}
+}
 
-	return style.Render(line)
+func (m Model) renderStep(_ int, step StepInfo) string {
+	return steplist.RenderItem(step.toSteplistItem(), m.slCfg, m.spinner.View())
 }
 
 func (m Model) renderSummary() string {
@@ -392,18 +437,15 @@ func (m Model) renderSummary() string {
 	}
 
 	var parts []string
-	successStyle := lipgloss.NewStyle().Foreground(m.th.Success).Bold(true)
-	warningStyle := lipgloss.NewStyle().Foreground(m.th.Warning)
-	errorStyle := lipgloss.NewStyle().Foreground(m.th.Error).Bold(true)
 
 	if stopped > 0 {
-		parts = append(parts, successStyle.Render(fmt.Sprintf("✓ %d stopped", stopped)))
+		parts = append(parts, m.th.SuccessText.Bold(true).Render(fmt.Sprintf("✓ %d stopped", stopped)))
 	}
 	if notFound > 0 {
-		parts = append(parts, warningStyle.Render(fmt.Sprintf("⊘ %d not found", notFound)))
+		parts = append(parts, m.th.WarningText.Render(fmt.Sprintf("⊘ %d not found", notFound)))
 	}
 	if failed > 0 {
-		parts = append(parts, errorStyle.Render(fmt.Sprintf("✗ %d failed", failed)))
+		parts = append(parts, m.th.ErrorText.Render(fmt.Sprintf("✗ %d failed", failed)))
 	}
 
 	return strings.Join(parts, "  ")

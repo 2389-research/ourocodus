@@ -179,8 +179,8 @@ func connectAndCreateSession(t *testing.T) (*helpers.WSClient, string) {
 	sessionMsg, err := client.WaitForMessageType("session:created", messageTimeout)
 	require.NoError(t, err, "Failed to receive session:created message")
 
-	sessionID, ok := sessionMsg["sessionId"].(string)
-	require.True(t, ok, "sessionId field missing or wrong type")
+	sessionID, ok := sessionMsg["userSessionId"].(string)
+	require.True(t, ok, "userSessionId field missing or wrong type")
 	require.NotEmpty(t, sessionID, "sessionId is empty")
 
 	t.Logf("Session created: %s", sessionID)
@@ -197,24 +197,34 @@ func spawnAgents(t *testing.T, client *helpers.WSClient, sessionID string, roles
 		// With WORKSPACE_BASE_DIR=./agent, this creates ./agent/<role>
 		// The relay validates that workspace path is under baseWorkspaceDir
 		spawnMsg := map[string]interface{}{
-			"version":   protocolVersion,
-			"type":      "agent:spawn",
-			"sessionId": sessionID,
-			"role":      role,
-			"workspace": filepath.Join(workspaceBase, role),
+			"version":       protocolVersion,
+			"type":          "agent:spawn",
+			"userSessionId": sessionID,
+			"agentId":       role,
+			"workspace":     filepath.Join(workspaceBase, role),
 		}
 		err := client.Send(spawnMsg)
 		require.NoError(t, err, "Failed to send agent:spawn message for %s", role)
 
-		// Wait for agent ready message
+		// Wait for agent ready message (or capture error)
 		readyMsg, err := client.ReceiveWithFilter(func(msg map[string]interface{}) bool {
 			msgType, _ := msg["type"].(string)
-			msgRole, _ := msg["role"].(string)
-			return msgType == "agent:ready" && msgRole == role
+			msgAgentID, _ := msg["agentId"].(string)
+
+			// Log all messages for debugging
+			t.Logf("  [WS] Received message: type=%s agentId=%v", msgType, msg["agentId"])
+
+			// Check for error messages
+			if msgType == "error" {
+				errDetail, _ := msg["error"].(map[string]interface{})
+				t.Logf("  [WS] ERROR: code=%v message=%v", errDetail["code"], errDetail["message"])
+			}
+
+			return msgType == "agent:ready" && msgAgentID == role
 		}, messageTimeout)
 		require.NoError(t, err, "Failed to receive agent:ready message for %s", role)
 
-		msgSessionID, _ := readyMsg["sessionId"].(string)
+		msgSessionID, _ := readyMsg["userSessionId"].(string)
 		assert.Equal(t, sessionID, msgSessionID, "Session ID mismatch in agent:ready")
 
 		t.Logf("Agent %s is ready", role)
@@ -236,11 +246,11 @@ func testAgentCommunication(t *testing.T, client *helpers.WSClient, sessionID st
 
 		// Send message to agent
 		msgRequest := map[string]interface{}{
-			"version":   protocolVersion,
-			"type":      "agent:message",
-			"sessionId": sessionID,
-			"role":      role,
-			"content":   content,
+			"version":       protocolVersion,
+			"type":          "agent:message",
+			"userSessionId": sessionID,
+			"agentId":       role,
+			"content":       content,
 		}
 		err := client.Send(msgRequest)
 		require.NoError(t, err, "Failed to send message to %s agent", role)
@@ -248,13 +258,13 @@ func testAgentCommunication(t *testing.T, client *helpers.WSClient, sessionID st
 		// Wait for agent response
 		responseMsg, err := client.ReceiveWithFilter(func(msg map[string]interface{}) bool {
 			msgType, _ := msg["type"].(string)
-			msgRole, _ := msg["role"].(string)
-			return msgType == "agent:response" && msgRole == role
+			msgAgentID, _ := msg["agentId"].(string)
+			return msgType == "agent:response" && msgAgentID == role
 		}, messageTimeout)
 		require.NoError(t, err, "Failed to receive response from %s agent", role)
 
 		// Verify response
-		msgSessionID, _ := responseMsg["sessionId"].(string)
+		msgSessionID, _ := responseMsg["userSessionId"].(string)
 		msgContent, _ := responseMsg["content"].(string)
 		assert.Equal(t, sessionID, msgSessionID, "Session ID mismatch in response")
 		assert.NotEmpty(t, msgContent, "Response content is empty")

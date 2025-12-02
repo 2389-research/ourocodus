@@ -1,27 +1,24 @@
 package main
 
 import (
+	"fmt"
 	"os"
 
 	"github.com/2389-research/ourocodus/pkg/cli"
 	"github.com/2389-research/ourocodus/pkg/tui/theme"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 )
 
 var rootCmd = &cobra.Command{
 	Use:   "agentd",
 	Short: "✨ agentd - Multi-agent isolation orchestrator",
-	Long: func() string {
-		th := theme.NewRetroTheme(theme.PaletteCGA)
-		bannerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(string(th.Primary))).Bold(true)
-		mutedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(string(th.Muted)))
-		return bannerStyle.Render("agentd") + " demonstrates Ourocodus's three-layer isolation architecture:\n\n" +
-			"  🌳 Git worktrees isolate code\n" +
-			"  📦 Docker containers isolate processes\n" +
-			"  🔑 Credential volumes isolate access\n\n" +
-			mutedStyle.Render("Multiple agents work concurrently without conflicts.")
-	}(),
+	Long: `agentd demonstrates Ourocodus's three-layer isolation architecture:
+
+  🌳 Git worktrees isolate code
+  📦 Docker containers isolate processes
+  🔑 Credential volumes isolate access
+
+Multiple agents work concurrently without conflicts.`,
 	Version: Version,
 }
 
@@ -39,4 +36,11 @@ func init() {
 	rootCmd.AddCommand(attachCmd)
 	rootCmd.AddCommand(executeCmd)
 	rootCmd.AddCommand(replCmd)
+}
+
+// printError is a shared helper for consistent error output formatting.
+// Used by legacy (non-TUI) code paths that haven't been migrated to Output interface yet.
+func printError(msg string, th *theme.Theme) {
+	fmt.Print(th.ErrorText.Render("× "))
+	fmt.Println(msg)
 }

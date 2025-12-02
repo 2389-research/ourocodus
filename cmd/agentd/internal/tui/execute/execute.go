@@ -1,4 +1,6 @@
 // Package execute provides a Bubble Tea TUI for the execute command.
+// This is an EPHEMERAL TUI - it performs an action and auto-exits.
+// Do not wait for user input after completion.
 package execute
 
 import (
@@ -6,11 +8,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/2389-research/ourocodus/pkg/tui/components/header"
+	"github.com/2389-research/ourocodus/pkg/tui/components/spinner"
 	"github.com/2389-research/ourocodus/pkg/tui/keys"
 	"github.com/2389-research/ourocodus/pkg/tui/theme"
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -103,12 +106,11 @@ func (k keyMap) FullHelp() [][]key.Binding {
 }
 
 // New creates a new execute TUI model.
-func New(agentID, command string) Model {
-	th := theme.Default()
+// If th is nil, the default theme is used.
+func New(agentID, command string, th *theme.Theme) Model {
+	th = theme.Ensure(th)
 
-	s := spinner.New()
-	s.Spinner = spinner.Dot
-	s.Style = lipgloss.NewStyle().Foreground(th.Primary)
+	s := spinner.New(th)
 
 	vp := viewport.New(80, 10)
 
@@ -127,7 +129,7 @@ func New(agentID, command string) Model {
 // Init initializes the model.
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(
-		m.spinner.Tick,
+		m.spinner.Tick(),
 		tickCmd(),
 	)
 }
@@ -176,21 +178,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.exitCode = msg.ExitCode
 		m.done = true
 		m.phase = PhaseDone
+		// Auto-exit - ephemeral TUI completes its action
+		return m, tea.Quit
 
 	case ErrorMsg:
 		m.err = msg.Error
 		m.done = true
 		m.phase = PhaseDone
+		// Auto-exit after brief delay to show error
+		return m, tea.Sequence(
+			tea.Tick(500*time.Millisecond, func(_ time.Time) tea.Msg { return nil }),
+			tea.Quit,
+		)
 
 	case TickMsg:
 		if !m.done {
 			cmds = append(cmds, tickCmd())
 		}
+	}
 
-	case spinner.TickMsg:
-		var cmd tea.Cmd
-		m.spinner, cmd = m.spinner.Update(msg)
-		cmds = append(cmds, cmd)
+	// Let spinner handle its own tick messages
+	var spinnerCmd tea.Cmd
+	m.spinner, spinnerCmd = m.spinner.Update(msg)
+	if spinnerCmd != nil {
+		cmds = append(cmds, spinnerCmd)
 	}
 
 	// Handle viewport scrolling
@@ -214,13 +225,11 @@ func (m *Model) updateViewport() {
 		if content.Len() > 0 {
 			content.WriteString("\n")
 		}
-		errStyle := lipgloss.NewStyle().Foreground(m.th.Error)
-		content.WriteString(errStyle.Render(m.stderr))
+		content.WriteString(m.th.ErrorText.Render(m.stderr))
 	}
 
 	if content.Len() == 0 {
-		mutedStyle := lipgloss.NewStyle().Foreground(m.th.Muted)
-		content.WriteString(mutedStyle.Render("(no output)"))
+		content.WriteString(m.th.MutedText.Render("(no output)"))
 	}
 
 	m.viewport.SetContent(content.String())
@@ -230,19 +239,21 @@ func (m *Model) updateViewport() {
 func (m Model) View() string {
 	var b strings.Builder
 
-	// Header
-	headerStyle := lipgloss.NewStyle().Foreground(m.th.Primary).Bold(true)
-	b.WriteString(headerStyle.Render(fmt.Sprintf("⚡ Execute on agent '%s'", m.agentID)))
+	// Header with logo
+	b.WriteString(header.Render(m.th))
+	b.WriteString("\n\n")
+
+	// Command title
+	b.WriteString(m.th.Title.Render(fmt.Sprintf("Execute on agent '%s'", m.agentID)))
 	b.WriteString("\n")
 
 	// Container and command info
-	mutedStyle := lipgloss.NewStyle().Foreground(m.th.Muted)
 	if m.containerID != "" {
 		shortID := m.containerID
 		if len(shortID) > 12 {
 			shortID = shortID[:12]
 		}
-		b.WriteString(mutedStyle.Render(fmt.Sprintf("   Container: %s", shortID)))
+		b.WriteString(m.th.MutedText.Render(fmt.Sprintf("   Container: %s", shortID)))
 		b.WriteString("\n")
 	}
 
@@ -251,7 +262,7 @@ func (m Model) View() string {
 	if len(cmdDisplay) > 60 {
 		cmdDisplay = cmdDisplay[:57] + "..."
 	}
-	b.WriteString(mutedStyle.Render(fmt.Sprintf("   Command: %s", cmdDisplay)))
+	b.WriteString(m.th.MutedText.Render(fmt.Sprintf("   Command: %s", cmdDisplay)))
 	b.WriteString("\n\n")
 
 	// Status
@@ -266,19 +277,18 @@ func (m Model) View() string {
 
 	// Output section
 	if m.phase == PhaseExecuting || m.phase == PhaseDone {
-		successStyle := lipgloss.NewStyle().Foreground(m.th.Success)
 		b.WriteString("\n")
-		b.WriteString(successStyle.Render("─── Output ───"))
+		b.WriteString(m.th.SuccessText.Render("─── Output ───"))
 		b.WriteString("\n")
 
-		// Viewport content
+		// Viewport content (keeping complex style with border/padding)
 		vpStyle := lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(m.th.Muted).
 			Padding(0, 1)
 		b.WriteString(vpStyle.Render(m.viewport.View()))
 		b.WriteString("\n")
-		b.WriteString(successStyle.Render("─────────────"))
+		b.WriteString(m.th.SuccessText.Render("─────────────"))
 		b.WriteString("\n")
 	}
 
@@ -286,14 +296,11 @@ func (m Model) View() string {
 	if m.done {
 		b.WriteString("\n")
 		if m.err != nil {
-			errStyle := lipgloss.NewStyle().Foreground(m.th.Error).Bold(true)
-			b.WriteString(errStyle.Render(fmt.Sprintf("✗ Error: %v", m.err)))
+			b.WriteString(m.th.ErrorText.Render(fmt.Sprintf("✗ Error: %v", m.err)))
 		} else if m.exitCode != 0 {
-			errStyle := lipgloss.NewStyle().Foreground(m.th.Error).Bold(true)
-			b.WriteString(errStyle.Render(fmt.Sprintf("✗ Command failed with exit code %d", m.exitCode)))
+			b.WriteString(m.th.ErrorText.Render(fmt.Sprintf("✗ Command failed with exit code %d", m.exitCode)))
 		} else {
-			successStyle := lipgloss.NewStyle().Foreground(m.th.Success).Bold(true)
-			b.WriteString(successStyle.Render("✓ Command completed successfully"))
+			b.WriteString(m.th.SuccessText.Bold(true).Render("✓ Command completed successfully"))
 		}
 		b.WriteString("\n")
 	}
@@ -301,10 +308,10 @@ func (m Model) View() string {
 	// Help
 	if !m.done {
 		b.WriteString("\n")
-		b.WriteString(mutedStyle.Render("Press q to cancel"))
+		b.WriteString(m.th.MutedText.Render("Press q to cancel"))
 	} else {
 		b.WriteString("\n")
-		b.WriteString(mutedStyle.Render("Press q to exit"))
+		b.WriteString(m.th.MutedText.Render("Press q to exit"))
 	}
 
 	return b.String()

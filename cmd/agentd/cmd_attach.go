@@ -1,19 +1,29 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"os/signal"
 	"syscall"
 
-	"github.com/2389-research/ourocodus/cmd/agentd/internal/output"
-	"github.com/2389-research/ourocodus/pkg/tui/theme"
-	"github.com/charmbracelet/lipgloss"
+	"github.com/2389-research/ourocodus/pkg/cli"
+	"github.com/2389-research/ourocodus/pkg/cli/format"
+	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
+
+// DockerClient interface for Docker operations needed by attach command.
+type DockerClient interface {
+	ContainerInspect(ctx context.Context, containerID string) (container.InspectResponse, error)
+	ContainerExecCreate(ctx context.Context, container string, config container.ExecOptions) (container.ExecCreateResponse, error)
+	ContainerExecAttach(ctx context.Context, execID string, config container.ExecStartOptions) (types.HijackedResponse, error)
+	Close() error
+}
 
 var attachCmd = &cobra.Command{
 	Use:   "attach <agent-id>",
@@ -42,47 +52,111 @@ func runAttach(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 	agentID := args[0]
 
-	// Find the container
-	containerID, err := findAgentContainerID(ctx, agentID)
-	if err != nil {
-		return fmt.Errorf("failed to find agent: %w", err)
-	}
+	// Get AppContext for mode-aware output
+	appCtx := cli.FromContext(ctx)
 
-	if containerID == "" {
-		return fmt.Errorf("agent '%s' not found", agentID)
-	}
-
-	// Check if agent is running
-	cli, err := newDockerClient()
+	// Find and validate the container
+	containerID, dockerCli, err := findAndValidateContainer(ctx, agentID)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = cli.Close() }()
+	defer func() { _ = dockerCli.Close() }()
 
-	inspect, err := cli.ContainerInspect(ctx, containerID)
+	// Print attach message based on mode
+	printAttachMessage(agentID, containerID, appCtx)
+
+	// Run the interactive session
+	return runAttachSession(ctx, containerID, dockerCli)
+}
+
+// findAndValidateContainer finds the agent container and validates it is running.
+func findAndValidateContainer(ctx context.Context, agentID string) (string, DockerClient, error) {
+	containerID, err := findAgentContainerID(ctx, agentID)
 	if err != nil {
-		return fmt.Errorf("failed to inspect container: %w", err)
+		return "", nil, cli.IOError("failed to find agent: " + err.Error())
+	}
+
+	if containerID == "" {
+		return "", nil, cli.UsageError("agent '" + agentID + "' not found")
+	}
+
+	dockerCli, err := newDockerClient()
+	if err != nil {
+		return "", nil, err
+	}
+
+	inspect, err := dockerCli.ContainerInspect(ctx, containerID)
+	if err != nil {
+		_ = dockerCli.Close()
+		return "", nil, cli.IOError("failed to inspect container: " + err.Error())
 	}
 
 	if !inspect.State.Running {
-		return fmt.Errorf("agent '%s' is not running (status: %s)", agentID, inspect.State.Status)
+		_ = dockerCli.Close()
+		return "", nil, cli.UsageError(fmt.Sprintf("agent '%s' is not running (status: %s)", agentID, inspect.State.Status))
 	}
 
-	// Print attach message
-	th := theme.NewRetroTheme(theme.PaletteCGA)
-	headerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(string(th.Primary))).Bold(true)
-	mutedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(string(th.Muted)))
-	warnStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(string(th.Warning)))
+	return containerID, dockerCli, nil
+}
+
+// printAttachMessage dispatches to mode-specific attach output.
+// Uses custom functions rather than Output interface because:
+// - JSON mode outputs structured container metadata
+// - Rich mode uses multi-line themed layout with emojis
+// - Plain mode displays formatted connection details
+func printAttachMessage(agentID, containerID string, appCtx *cli.AppContext) {
+	if appCtx == nil {
+		printAttachPlain(agentID, containerID)
+		return
+	}
+
+	switch appCtx.Mode {
+	case cli.ModeJSON:
+		printAttachJSON(agentID, containerID)
+	case cli.ModePlain:
+		printAttachPlain(agentID, containerID)
+	default: // ModeRich
+		printAttachRich(agentID, containerID, appCtx)
+	}
+}
+
+// printAttachJSON outputs attach metadata as JSON for machine parsing.
+func printAttachJSON(agentID, containerID string) {
+	info := map[string]interface{}{
+		"agent_id":     agentID,
+		"container_id": containerID,
+		"workspace":    "/workspace",
+		"status":       "attaching",
+	}
+	jsonData, _ := json.Marshal(info)
+	fmt.Println(string(jsonData))
+}
+
+// printAttachPlain displays formatted attach info for plain text output.
+func printAttachPlain(agentID, containerID string) {
+	fmt.Printf("Attaching to agent '%s'\n", agentID)
+	fmt.Printf("Container: %s\n", format.FormatContainerID(containerID))
+	fmt.Printf("Workspace: /workspace\n")
+	fmt.Println()
+	fmt.Println("Press Ctrl-D or type 'exit' to detach")
+	fmt.Println()
+}
+
+// printAttachRich displays themed multi-line attach info with emojis for rich terminal output.
+func printAttachRich(agentID, containerID string, appCtx *cli.AppContext) {
+	th := appCtx.Theme
 
 	fmt.Println()
-	fmt.Println(headerStyle.Render(fmt.Sprintf("📎 Attaching to agent '%s'", agentID)))
-	fmt.Println(mutedStyle.Render(fmt.Sprintf("   Container: %s", output.FormatContainerID(containerID))))
-	fmt.Println(mutedStyle.Render("   Workspace: /workspace"))
+	fmt.Println(th.Title.Render(fmt.Sprintf("📎 Attaching to agent '%s'", agentID)))
+	fmt.Println(th.MutedText.Render(fmt.Sprintf("   Container: %s", format.FormatContainerID(containerID))))
+	fmt.Println(th.MutedText.Render("   Workspace: /workspace"))
 	fmt.Println()
-	fmt.Println(warnStyle.Render("   Press Ctrl-D or type 'exit' to detach"))
+	fmt.Println(th.WarningText.Render("   Press Ctrl-D or type 'exit' to detach"))
 	fmt.Println()
+}
 
-	// Create exec instance with interactive TTY
+// runAttachSession runs the interactive attach session.
+func runAttachSession(ctx context.Context, containerID string, dockerCli DockerClient) error {
 	execConfig := container.ExecOptions{
 		AttachStdin:  true,
 		AttachStdout: true,
@@ -91,57 +165,46 @@ func runAttach(cmd *cobra.Command, args []string) error {
 		Cmd:          []string{"/bin/bash"},
 	}
 
-	execID, err := cli.ContainerExecCreate(ctx, containerID, execConfig)
+	execID, err := dockerCli.ContainerExecCreate(ctx, containerID, execConfig)
 	if err != nil {
-		return fmt.Errorf("failed to create exec: %w", err)
+		return cli.IOError("failed to create exec: " + err.Error())
 	}
 
-	// Attach to exec
-	resp, err := cli.ContainerExecAttach(ctx, execID.ID, container.ExecStartOptions{
+	resp, err := dockerCli.ContainerExecAttach(ctx, execID.ID, container.ExecStartOptions{
 		Tty: true,
 	})
 	if err != nil {
-		return fmt.Errorf("failed to attach to exec: %w", err)
+		return cli.IOError("failed to attach to exec: " + err.Error())
 	}
 	defer resp.Close()
 
-	// Set up raw terminal mode for interactive session
 	oldState, err := setRawTerminal()
 	if err != nil {
-		return fmt.Errorf("failed to set raw terminal: %w", err)
+		return cli.IOError("failed to set raw terminal: " + err.Error())
 	}
 	defer func() { _ = restoreTerminal(oldState) }()
 
-	// Handle signals to cleanup on interrupt
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	defer signal.Stop(sigCh)
 
-	// Copy stdin/stdout/stderr
 	errCh := make(chan error, 2)
-
-	// Copy stdin to container
 	go func() {
 		_, err := io.Copy(resp.Conn, os.Stdin)
 		errCh <- err
 	}()
-
-	// Copy container output to stdout
 	go func() {
 		_, err := io.Copy(os.Stdout, resp.Reader)
 		errCh <- err
 	}()
 
-	// Wait for completion or signal
 	select {
 	case <-sigCh:
-		// User interrupted - clean exit
 		fmt.Println("\n\nDetached from agent")
 		return nil
 	case err := <-errCh:
-		// Connection closed or error
 		if err != nil && err != io.EOF {
-			return fmt.Errorf("error during attach: %w", err)
+			return cli.IOError("error during attach: " + err.Error())
 		}
 		fmt.Println("\nDetached from agent")
 		return nil

@@ -7,15 +7,16 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/2389-research/ourocodus/cmd/agentd/internal/detect"
-	"github.com/2389-research/ourocodus/cmd/agentd/internal/output"
 	spawntui "github.com/2389-research/ourocodus/cmd/agentd/internal/tui/spawn"
 	"github.com/2389-research/ourocodus/pkg/agent/container"
+	"github.com/2389-research/ourocodus/pkg/cli"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 )
@@ -25,8 +26,6 @@ var (
 	spawnImage     string
 	spawnEnv       []string
 	spawnAPIKey    string
-	spawnJSON      bool
-	spawnPlain     bool
 )
 
 var spawnCmd = &cobra.Command{
@@ -64,32 +63,38 @@ func init() {
 	spawnCmd.Flags().StringVar(&spawnImage, "image", "ourocodus/agent:latest", "Docker image")
 	spawnCmd.Flags().StringArrayVar(&spawnEnv, "env", nil, "Environment variables (KEY=VALUE)")
 	spawnCmd.Flags().StringVar(&spawnAPIKey, "api-key", "", "Anthropic API key (or set ANTHROPIC_API_KEY env var)")
-	spawnCmd.Flags().BoolVar(&spawnJSON, "json", false, "Output in JSON format")
-	spawnCmd.Flags().BoolVar(&spawnPlain, "plain", false, "Output in plain text (no colors)")
 }
 
 func runSpawn(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 
-	// Detect output mode
-	shouldPlain := detect.ShouldUsePlainMode(spawnJSON, spawnPlain, os.Environ)
-	mode := output.DetectMode(spawnJSON, spawnPlain, shouldPlain)
+	// Get mode from AppContext (set by cli.App wrapper)
+	appCtx := cli.FromContext(ctx)
+	if appCtx == nil {
+		return cli.ContextError()
+	}
 
 	// Get or generate agent ID
 	agentID := generateAgentID(args)
 
 	// Use TUI for rich mode
-	if mode.IsRich() {
-		return runSpawnTUI(ctx, agentID)
+	if appCtx.Mode.IsRich() {
+		return runSpawnTUI(ctx, agentID, appCtx)
 	}
 
 	// Non-TUI mode (JSON or plain)
-	return runSpawnLegacy(cmd, agentID, mode)
+	return runSpawnLegacy(cmd, agentID, appCtx.Mode)
 }
 
 // runSpawnTUI runs the spawn command with a Bubble Tea TUI.
-func runSpawnTUI(ctx context.Context, agentID string) error {
-	m := spawntui.New(agentID)
+func runSpawnTUI(ctx context.Context, agentID string, appCtx *cli.AppContext) error {
+	// Suppress log output during TUI mode to prevent bleeding into the display
+	// Save and restore after TUI completes
+	originalLogOutput := log.Writer()
+	log.SetOutput(io.Discard)
+	defer log.SetOutput(originalLogOutput)
+
+	m := spawntui.New(agentID, appCtx.Theme)
 	p := tea.NewProgram(m)
 
 	// Channel to receive final result
@@ -201,16 +206,16 @@ func runSpawnTUI(ctx context.Context, agentID string) error {
 }
 
 // runSpawnLegacy runs the spawn command without TUI (JSON or plain mode).
-func runSpawnLegacy(cmd *cobra.Command, agentID string, mode output.Mode) error {
+func runSpawnLegacy(cmd *cobra.Command, agentID string, mode cli.Mode) error {
 	ctx := cmd.Context()
 
 	// Check if agent already exists in Docker
 	existingContainerID, err := findAgentContainerID(ctx, agentID)
 	if err != nil {
-		return fmt.Errorf("failed to check for existing agent: %w", err)
+		return cli.IOError("failed to check for existing agent: " + err.Error())
 	}
 	if existingContainerID != "" {
-		return fmt.Errorf("agent '%s' already exists\nUse 'agentd list' to see active agents or 'agentd stop %s' to remove it", agentID, agentID)
+		return cli.UsageError(fmt.Sprintf("agent '%s' already exists\nUse 'agentd list' to see active agents or 'agentd stop %s' to remove it", agentID, agentID))
 	}
 
 	// Only print progress for plain mode, not JSON
@@ -221,13 +226,13 @@ func runSpawnLegacy(cmd *cobra.Command, agentID string, mode output.Mode) error 
 	// Create launcher (wiring pkg/ components)
 	launcher, err := createLauncher()
 	if err != nil {
-		return fmt.Errorf("failed to create launcher: %w", err)
+		return cli.IOError("failed to create launcher: " + err.Error())
 	}
 
 	// Build spawn config
 	config, err := buildSpawnConfig(agentID)
 	if err != nil {
-		return fmt.Errorf("failed to build spawn config: %w", err)
+		return cli.ConfigError("failed to build spawn config: " + err.Error())
 	}
 
 	// Spawn agent (launcher will write credentials after creating worktree)
@@ -235,12 +240,12 @@ func runSpawnLegacy(cmd *cobra.Command, agentID string, mode output.Mode) error 
 	if err != nil {
 		// Check for specific error types
 		if err == container.ErrAgentAlreadyExists {
-			return fmt.Errorf("agent '%s' already exists\nUse 'agentd list' to see active agents or 'agentd stop %s' to remove it", agentID, agentID)
+			return cli.UsageError(fmt.Sprintf("agent '%s' already exists\nUse 'agentd list' to see active agents or 'agentd stop %s' to remove it", agentID, agentID))
 		}
 		if strings.Contains(err.Error(), "worktree setup failed") {
-			return fmt.Errorf("worktree creation failed: %w\nEnsure git repository is clean", err)
+			return cli.IOError("worktree creation failed: " + err.Error() + "\nEnsure git repository is clean")
 		}
-		return fmt.Errorf("spawn failed: %w", err)
+		return cli.IOError("spawn failed: " + err.Error())
 	}
 
 	// Generate attach token (Phase 4: Security Hardening)
@@ -291,13 +296,13 @@ func buildSpawnConfig(agentID string) (container.SpawnConfig, error) {
 		apiKey = os.Getenv("ANTHROPIC_API_KEY")
 	}
 	if apiKey == "" {
-		return container.SpawnConfig{}, fmt.Errorf("ANTHROPIC_API_KEY required (via --api-key flag or ANTHROPIC_API_KEY environment variable)")
+		return container.SpawnConfig{}, cli.ConfigError("ANTHROPIC_API_KEY required (via --api-key flag or ANTHROPIC_API_KEY environment variable)")
 	}
 
 	// Parse environment variables
 	env, err := parseEnvFlags(spawnEnv)
 	if err != nil {
-		return container.SpawnConfig{}, fmt.Errorf("invalid --env flag: %w", err)
+		return container.SpawnConfig{}, cli.UsageError("invalid --env flag: " + err.Error())
 	}
 
 	// Add agent ID and NATS URL to environment for heartbeat publishing
@@ -331,7 +336,7 @@ func buildSpawnConfig(agentID string) (container.SpawnConfig, error) {
 func parseEnvFlags(envFlags []string) ([]string, error) {
 	for _, flag := range envFlags {
 		if !strings.Contains(flag, "=") {
-			return nil, fmt.Errorf("invalid format '%s', expected KEY=VALUE", flag)
+			return nil, cli.UsageError(fmt.Sprintf("invalid format '%s', expected KEY=VALUE", flag))
 		}
 	}
 	return envFlags, nil
@@ -359,7 +364,7 @@ func generateAttachToken(agentID string) (string, error) {
 	// Generate 32 random bytes (256 bits)
 	tokenBytes := make([]byte, 32)
 	if _, err := rand.Read(tokenBytes); err != nil {
-		return "", fmt.Errorf("failed to generate random bytes: %w", err)
+		return "", cli.IOError("failed to generate random bytes: " + err.Error())
 	}
 
 	// Encode as base64url (URL-safe, no padding)
@@ -368,13 +373,13 @@ func generateAttachToken(agentID string) (string, error) {
 	// Ensure session directory exists with secure permissions
 	sessionDir := filepath.Join(".agentd", "session")
 	if err := os.MkdirAll(sessionDir, 0o700); err != nil {
-		return "", fmt.Errorf("failed to create session directory: %w", err)
+		return "", cli.IOError("failed to create session directory: " + err.Error())
 	}
 
 	// Write token to file with 0600 permissions (owner read/write only)
 	tokenPath := filepath.Join(sessionDir, agentID+".token")
 	if err := os.WriteFile(tokenPath, []byte(tokenStr), 0o600); err != nil {
-		return "", fmt.Errorf("failed to write token file: %w", err)
+		return "", cli.IOError("failed to write token file: " + err.Error())
 	}
 
 	return tokenStr, nil
@@ -392,7 +397,9 @@ type SpawnResult struct {
 	Status          string `json:"status"`
 }
 
-// printSpawnSuccessJSON prints the successful spawn output as JSON.
+// printSpawnSuccessJSON outputs structured spawn result for machine parsing.
+// Uses custom JSON structure rather than Output.JSON() for specific field ordering
+// and to include both success data and token generation errors in a single response.
 // If tokenErr is non-nil, includes the error message in the tokenError field.
 func printSpawnSuccessJSON(handle *container.AgentContainerHandle, attachToken string, tokenErr error) {
 	result := SpawnResult{
@@ -418,7 +425,9 @@ func printSpawnSuccessJSON(handle *container.AgentContainerHandle, attachToken s
 	_ = encoder.Encode(result)
 }
 
-// printSpawnSuccessPlain prints the successful spawn output in plain text
+// printSpawnSuccessPlain outputs formatted spawn details with multi-line layout.
+// Uses custom formatting rather than Output.Success() to display structured information
+// (agent ID, container, workspace, token) in a readable table-like format.
 func printSpawnSuccessPlain(handle *container.AgentContainerHandle, attachToken string) {
 	fmt.Printf("Agent: %s\n", handle.AgentID())
 	fmt.Printf("Container: %s (running)\n", handle.ContainerID())

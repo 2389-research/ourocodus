@@ -12,12 +12,18 @@ type contextKey struct{}
 
 // AppContext provides access to CLI configuration and utilities within commands.
 // It is propagated through cmd.Context() to all subcommands.
+//
+// IMPORTANT: AppContext should be treated as immutable after creation.
+// Do not modify fields in command handlers. The configuration is resolved
+// once at application startup and should remain constant throughout execution.
+// If goroutines need the context, pass it as a parameter rather than modifying
+// shared state.
 type AppContext struct {
 	// Mode is the resolved output mode (rich, plain, json).
 	Mode Mode
 
 	// Theme is the resolved theme (nil in JSON mode).
-	Theme *theme.RetroTheme
+	Theme *theme.Theme
 
 	// Output provides mode-aware output methods.
 	Output output.Output
@@ -49,7 +55,7 @@ func NewAppContext(cfg Config, cancel context.CancelFunc) *AppContext {
 }
 
 // createOutput creates the appropriate Output implementation for the mode.
-func createOutput(cfg Config, th *theme.RetroTheme) output.Output {
+func createOutput(cfg Config, th *theme.Theme) output.Output {
 	switch cfg.Mode {
 	case ModeJSON:
 		return output.NewJSONOutput()

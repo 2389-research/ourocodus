@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"fmt"
+
 	"github.com/2389-research/ourocodus/pkg/cli/detect"
 	"github.com/2389-research/ourocodus/pkg/tui/theme"
 )
@@ -10,8 +12,8 @@ import (
 type Config struct {
 	// Mode is the resolved output mode (rich, plain, json).
 	Mode Mode
-	// Theme is the resolved theme name.
-	ThemeName string
+	// ThemeMode is the resolved theme mode (dark or light).
+	ThemeMode theme.ThemeMode
 	// NoColor indicates if colors should be disabled.
 	NoColor bool
 	// Quiet indicates if informational output should be suppressed.
@@ -22,7 +24,30 @@ type Config struct {
 	Unicode bool
 }
 
+// ValidateFlags checks for incompatible flag combinations and returns an error if any are found.
+// This function should be called before ResolveConfig to ensure flag combinations are valid.
+//
+// Detected conflicts:
+//   - --json and --plain are mutually exclusive (both set output mode)
+//   - --quiet and --verbose are mutually exclusive (contradictory)
+func ValidateFlags(f *Flags) error {
+	// Check for mutually exclusive output mode flags
+	if f.JSON && f.Plain {
+		return fmt.Errorf("flags --json and --plain are mutually exclusive")
+	}
+
+	// Check for contradictory verbosity flags
+	if f.Quiet && f.Verbose {
+		return fmt.Errorf("flags --quiet and --verbose are mutually exclusive")
+	}
+
+	return nil
+}
+
 // ResolveConfig computes the final configuration from flags and environment.
+//
+// Note: This function does not validate flag conflicts. Callers should call
+// ValidateFlags() first to ensure flag combinations are valid.
 //
 // Resolution priority for mode:
 //  1. --json flag
@@ -34,9 +59,9 @@ type Config struct {
 //  7. Default: rich mode
 //
 // Resolution priority for theme:
-//  1. --theme flag
-//  2. OUROCODUS_THEME environment variable
-//  3. Default: "cga"
+//  1. --light flag (selects light theme)
+//  2. OUROCODUS_THEME environment variable ("light" or "dark")
+//  3. Default: dark theme
 //
 // Resolution priority for no-color:
 //  1. --no-color flag
@@ -46,7 +71,7 @@ type Config struct {
 func ResolveConfig(flags *Flags) Config {
 	cfg := Config{
 		Mode:      resolveMode(flags),
-		ThemeName: resolveTheme(flags),
+		ThemeMode: resolveThemeMode(flags),
 		NoColor:   resolveNoColor(flags),
 		Quiet:     flags.Quiet,
 		Verbose:   flags.Verbose,
@@ -87,20 +112,22 @@ func resolveMode(flags *Flags) Mode {
 	return ModeRich
 }
 
-// resolveTheme determines the theme from flags and environment.
-func resolveTheme(flags *Flags) string {
-	// 1. Explicit flag
-	if flags.Theme != "" {
-		return flags.Theme
+// resolveThemeMode determines the theme mode from flags and environment.
+func resolveThemeMode(flags *Flags) theme.ThemeMode {
+	// 1. Explicit --light flag
+	if flags.Light {
+		return theme.ThemeLight
 	}
 
-	// 2. Environment variable
+	// 2. Check environment variable
 	if envTheme := detect.GetEnvTheme(); envTheme != "" {
-		return envTheme
+		if envTheme == "light" {
+			return theme.ThemeLight
+		}
 	}
 
-	// 3. Default to CGA
-	return theme.PaletteCGA.String()
+	// 3. Default to dark theme
+	return theme.ThemeDark
 }
 
 // resolveNoColor determines if colors should be disabled.
@@ -114,12 +141,7 @@ func resolveNoColor(flags *Flags) bool {
 	return detect.NoColor()
 }
 
-// GetTheme returns the theme.RetroTheme for the config.
-// Returns nil if the theme name is invalid.
-func (c Config) GetTheme() *theme.RetroTheme {
-	palette, ok := theme.ParsePaletteName(c.ThemeName)
-	if !ok {
-		palette = theme.PaletteCGA
-	}
-	return theme.NewRetroTheme(palette)
+// GetTheme returns the theme.Theme for the config.
+func (c Config) GetTheme() *theme.Theme {
+	return theme.New(c.ThemeMode)
 }

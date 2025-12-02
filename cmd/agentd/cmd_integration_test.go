@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -116,7 +115,7 @@ func TestCLI_SpawnListStopWorkflow(t *testing.T) {
 
 	// Test list JSON format
 	t.Run("list JSON via CLI", func(t *testing.T) {
-		cmd := exec.Command("./agentd-test", "list", "--format", "json")
+		cmd := exec.Command("./agentd-test", "list", "--json")
 		output, err := cmd.CombinedOutput()
 		if err != nil {
 			t.Logf("List JSON output:\n%s", output)
@@ -237,75 +236,6 @@ func TestCLI_StopMultipleAgents(t *testing.T) {
 	}
 }
 
-func TestCLI_LogsCommand(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping CLI integration test in short mode")
-	}
-
-	if os.Getenv("DOCKER_HOST") == "" {
-		t.Skip("DOCKER_HOST not set, skipping integration test")
-	}
-
-	if os.Getenv("ANTHROPIC_API_KEY") == "" {
-		t.Skip("ANTHROPIC_API_KEY not set, skipping integration test")
-	}
-
-	ctx := context.Background()
-	agentID := "test-cli-logs"
-
-	// Cleanup
-	defer stopAgent(ctx, nil, agentID)
-
-	// Build binary
-	buildCmd := exec.Command("go", "build", "-o", "agentd-test", ".")
-	if err := buildCmd.Run(); err != nil {
-		t.Fatalf("Failed to build binary: %v", err)
-	}
-	defer os.Remove("agentd-test")
-
-	// Spawn agent
-	launcher, err := createLauncher()
-	if err != nil {
-		t.Fatalf("Failed to create launcher: %v", err)
-	}
-
-	config, _ := buildSpawnConfig(agentID)
-	_, err = launcher.Spawn(ctx, config)
-	if err != nil {
-		t.Fatalf("Failed to spawn agent: %v", err)
-	}
-
-	time.Sleep(2 * time.Second)
-
-	// Test logs command (without follow, just tail)
-	cmd := exec.Command("./agentd-test", "logs", agentID, "--follow=false", "--tail", "10")
-
-	// Set up pipes to capture output
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		t.Fatalf("Failed to create stdout pipe: %v", err)
-	}
-
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("Failed to start logs command: %v", err)
-	}
-
-	// Read some output
-	output := make([]byte, 1024)
-	n, _ := io.ReadAtLeast(stdout, output, 10)
-
-	cmd.Process.Kill()
-	cmd.Wait()
-
-	if n > 0 {
-		outputStr := string(output[:n])
-		if !strings.Contains(outputStr, "Logs for agent") {
-			t.Logf("Logs output: %s", outputStr)
-			// Not a hard failure - container might not have produced logs yet
-		}
-	}
-}
-
 func TestCLI_SpawnWithEnvironment(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping CLI integration test in short mode")
@@ -379,13 +309,11 @@ func TestCLI_InvalidCommands(t *testing.T) {
 		args       []string
 		shouldFail bool
 	}{
-		{"logs without agent ID", []string{"logs"}, true},
 		{"stop without agent ID", []string{"stop"}, true},
-		{"send without agent ID", []string{"send"}, true},
-		{"send without command", []string{"send", "alice"}, true},
+		{"execute without agent ID", []string{"execute"}, true},
+		{"execute without command", []string{"execute", "alice"}, true},
 		{"attach without agent ID", []string{"attach"}, true},
 		{"repl without agent ID", []string{"repl"}, true},
-		// Note: list --format invalid doesn't fail, it just defaults to table
 	}
 
 	for _, tt := range tests {
@@ -399,63 +327,6 @@ func TestCLI_InvalidCommands(t *testing.T) {
 				t.Errorf("Expected command to succeed but it failed: %v", err)
 			}
 		})
-	}
-}
-
-func TestCLI_SendCommand(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping CLI integration test in short mode")
-	}
-
-	if os.Getenv("DOCKER_HOST") == "" {
-		t.Skip("DOCKER_HOST not set, skipping integration test")
-	}
-
-	if os.Getenv("ANTHROPIC_API_KEY") == "" {
-		t.Skip("ANTHROPIC_API_KEY not set, skipping integration test")
-	}
-
-	ctx := context.Background()
-	agentID := "test-cli-send"
-
-	// Cleanup
-	defer stopAgent(ctx, nil, agentID)
-
-	// Build binary
-	buildCmd := exec.Command("go", "build", "-o", "agentd-test", ".")
-	if err := buildCmd.Run(); err != nil {
-		t.Fatalf("Failed to build binary: %v", err)
-	}
-	defer os.Remove("agentd-test")
-
-	// Spawn agent
-	launcher, err := createLauncher()
-	if err != nil {
-		t.Fatalf("Failed to create launcher: %v", err)
-	}
-
-	config, _ := buildSpawnConfig(agentID)
-	_, err = launcher.Spawn(ctx, config)
-	if err != nil {
-		t.Fatalf("Failed to spawn agent: %v", err)
-	}
-
-	time.Sleep(2 * time.Second)
-
-	// Test send command
-	cmd := exec.Command("./agentd-test", "send", agentID, "echo 'test output'")
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Logf("Send output:\n%s", output)
-		t.Fatalf("Send command failed: %v", err)
-	}
-
-	outputStr := string(output)
-	if !strings.Contains(outputStr, "test output") {
-		t.Errorf("Send output missing expected text: %s", outputStr)
-	}
-	if !strings.Contains(outputStr, "Command completed successfully") {
-		t.Errorf("Send output missing success message: %s", outputStr)
 	}
 }
 

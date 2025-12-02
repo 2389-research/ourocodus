@@ -10,9 +10,9 @@ import (
 func TestExitCodes(t *testing.T) {
 	// Verify constants match expected values
 	assert.Equal(t, 0, ExitSuccess)
-	assert.Equal(t, 1, ExitError)
+	assert.Equal(t, 1, ExitGenericError)
 	assert.Equal(t, 2, ExitUsageError)
-	assert.Equal(t, 3, ExitConfigError)
+	assert.Equal(t, 78, ExitConfigError)
 	assert.Equal(t, 4, ExitIOError)
 	assert.Equal(t, 130, ExitInterrupted)
 }
@@ -45,7 +45,7 @@ func TestExitCodeFromError(t *testing.T) {
 		expected int
 	}{
 		{"nil error", nil, ExitSuccess},
-		{"generic error", errors.New("something went wrong"), ExitError},
+		{"generic error", errors.New("something went wrong"), ExitGenericError},
 		{"usage error", UsageError("bad args"), ExitUsageError},
 		{"config error", ConfigError("bad config"), ExitConfigError},
 		{"io error", IOError("network fail"), ExitIOError},

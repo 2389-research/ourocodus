@@ -6,8 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/2389-research/ourocodus/cmd/agentd/internal/output"
+	"github.com/2389-research/ourocodus/pkg/cli"
 	"github.com/2389-research/ourocodus/pkg/relay/session"
+	"github.com/2389-research/ourocodus/pkg/tui/theme"
 	"github.com/nats-io/nats.go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -153,59 +154,7 @@ func TestLeaseRenewalEventJSON(t *testing.T) {
 	assert.Equal(t, 3600.5, raw["timeUntilExpiry"])
 }
 
-func TestDetectWatchOutputMode(t *testing.T) {
-	// Save original flag values
-	origJSON := watchJSON
-	origPlain := watchPlain
-	defer func() {
-		watchJSON = origJSON
-		watchPlain = origPlain
-	}()
-
-	tests := []struct {
-		name      string
-		jsonFlag  bool
-		plainFlag bool
-		want      string // Use string for comparison since output.Mode is internal
-	}{
-		{
-			name:      "JSON flag takes precedence",
-			jsonFlag:  true,
-			plainFlag: false,
-			want:      "json",
-		},
-		{
-			name:      "JSON flag takes precedence over plain",
-			jsonFlag:  true,
-			plainFlag: true,
-			want:      "json",
-		},
-		{
-			name:      "plain flag when no JSON",
-			jsonFlag:  false,
-			plainFlag: true,
-			want:      "plain",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			watchJSON = tt.jsonFlag
-			watchPlain = tt.plainFlag
-
-			mode := detectWatchOutputMode()
-
-			switch tt.want {
-			case "json":
-				assert.True(t, mode.IsJSON(), "expected JSON mode")
-			case "plain":
-				assert.True(t, mode.IsPlain(), "expected plain mode")
-			case "rich":
-				assert.True(t, mode.IsRich(), "expected rich mode")
-			}
-		})
-	}
-}
+// TestDetectWatchOutputMode removed - output mode detection now handled by pkg/cli
 
 func TestStartLogStreamer(t *testing.T) {
 	// Save original flag value
@@ -220,7 +169,7 @@ func TestStartLogStreamer(t *testing.T) {
 		defer cancel()
 
 		// Use JSON mode to prevent actual log streaming attempts
-		logCancel := startLogStreamer(ctx, "test-agent", output.ModeJSON)
+		logCancel := startLogStreamer(ctx, "test-agent", cli.ModeJSON)
 		assert.Nil(t, logCancel, "expected nil cancel func when watchLogs is false")
 	})
 
@@ -230,7 +179,7 @@ func TestStartLogStreamer(t *testing.T) {
 		defer cancel()
 
 		// Use JSON mode - streamAgentLogs returns early for JSON mode
-		logCancel := startLogStreamer(ctx, "test-agent", output.ModeJSON)
+		logCancel := startLogStreamer(ctx, "test-agent", cli.ModeJSON)
 		assert.NotNil(t, logCancel, "expected non-nil cancel func when watchLogs is true")
 
 		// Clean up
@@ -245,9 +194,15 @@ func TestRunWatchEventLoop(t *testing.T) {
 		msgChan := make(chan *nats.Msg, 1)
 		leaseChan := make(chan *session.Lease, 1)
 
+		// Create minimal AppContext for testing
+		appCtx := &cli.AppContext{
+			Mode:  cli.ModeJSON,
+			Theme: theme.Default(),
+		}
+
 		done := make(chan struct{})
 		go func() {
-			runWatchEventLoop(ctx, output.ModeJSON, msgChan, leaseChan, nil)
+			runWatchEventLoop(ctx, appCtx, msgChan, leaseChan, nil)
 			close(done)
 		}()
 
@@ -269,12 +224,18 @@ func TestRunWatchEventLoop(t *testing.T) {
 		msgChan := make(chan *nats.Msg, 1)
 		leaseChan := make(chan *session.Lease, 1)
 
+		// Create minimal AppContext for testing
+		appCtx := &cli.AppContext{
+			Mode:  cli.ModeJSON,
+			Theme: theme.Default(),
+		}
+
 		logCancelCalled := false
 		logCancel := func() { logCancelCalled = true }
 
 		done := make(chan struct{})
 		go func() {
-			runWatchEventLoop(ctx, output.ModeJSON, msgChan, leaseChan, logCancel)
+			runWatchEventLoop(ctx, appCtx, msgChan, leaseChan, logCancel)
 			close(done)
 		}()
 
@@ -295,9 +256,15 @@ func TestRunWatchEventLoop(t *testing.T) {
 		msgChan := make(chan *nats.Msg, 1)
 		leaseChan := make(chan *session.Lease, 1)
 
+		// Create minimal AppContext for testing
+		appCtx := &cli.AppContext{
+			Mode:  cli.ModeJSON,
+			Theme: theme.Default(),
+		}
+
 		// Start event loop
 		go func() {
-			runWatchEventLoop(ctx, output.ModeJSON, msgChan, leaseChan, nil)
+			runWatchEventLoop(ctx, appCtx, msgChan, leaseChan, nil)
 		}()
 
 		// Send a lease change

@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/2389-research/ourocodus/cmd/agentd/internal/output"
+	"github.com/2389-research/ourocodus/pkg/cli/format"
 )
 
 func TestFormatContainerID(t *testing.T) {
@@ -32,7 +32,7 @@ func TestFormatContainerID(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := output.FormatContainerID(tt.id)
+			got := format.FormatContainerID(tt.id)
 			if len(got) != tt.want {
 				t.Errorf("FormatContainerID() length = %d, want %d", len(got), tt.want)
 			}
@@ -63,7 +63,7 @@ func TestFormatPath(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := output.FormatPath(tt.path, tt.maxWidth)
+			got := format.FormatPath(tt.path, tt.maxWidth)
 			if len(got) != tt.wantLen {
 				t.Errorf("FormatPath() length = %d, want %d", len(got), tt.wantLen)
 			}
@@ -104,7 +104,7 @@ func TestFormatDurationHuman(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := output.FormatDurationHuman(tt.duration)
+			got := format.FormatDurationHuman(tt.duration)
 			if got != tt.want {
 				t.Errorf("FormatDurationHuman(%v) = %q, want %q", tt.duration, got, tt.want)
 			}

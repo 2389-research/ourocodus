@@ -18,6 +18,8 @@ linters:
     - unparam
     - unconvert
     - gosec
+    - forbidigo
+    - nolintlint
 
 linters-settings:
   gocyclo:
@@ -33,6 +35,19 @@ linters-settings:
     excludes:
       - G104 # Audit errors not checked (we'll handle this properly later)
 
+  # TUI Framework Enforcement - See docs/development/TUI_FRAMEWORK_PRINCIPLES.md
+  # We use forbidigo to flag lipgloss.NewStyle() usage in application code.
+  # This catches the most common violation while still allowing legitimate lipgloss
+  # layout functions like JoinHorizontal, JoinVertical, NormalBorder, etc.
+  forbidigo:
+    forbid:
+      - p: "^lipgloss\\.NewStyle$"
+        msg: "Use semantic theme styles (th.Title, th.ErrorText, etc.) instead of lipgloss.NewStyle(). See docs/development/TUI_FRAMEWORK_PRINCIPLES.md"
+
+  nolintlint:
+    require-explanation: true
+    require-specific: true
+
 issues:
   exclude-use-default: false
   max-issues-per-linter: 0
@@ -46,6 +61,35 @@ issues:
         - errcheck
         - gosec
         - unparam # Test helper functions may have unused return values
+
+    # TUI Framework Enforcement - Allow lipgloss.NewStyle() in framework packages
+    - path: pkg/tui/
+      linters:
+        - forbidigo
+
+    # CLI Framework - Allow lipgloss.NewStyle() in pkg/cli (framework code)
+    - path: pkg/cli/
+      linters:
+        - forbidigo
+
+    # TUI Framework - Justified exceptions (see TUI_FRAMEWORK_PRINCIPLES.md)
+    # relay/model.go - Dynamic tag colors from palette (lines 268, 331)
+    - path: cmd/relay/internal/tui/model\.go
+      text: "lipgloss.NewStyle"
+      linters:
+        - forbidigo
+
+    # repl/repl.go - Dynamic color parameter for prompt styling (lines 204, 210)
+    - path: cmd/agentd/internal/tui/repl/repl\.go
+      text: "lipgloss.NewStyle"
+      linters:
+        - forbidigo
+
+    # execute/execute.go - Padding layout requirement (line 285)
+    - path: cmd/agentd/internal/tui/execute/execute\.go
+      text: "lipgloss.NewStyle"
+      linters:
+        - forbidigo
 
     # Temporary exception for TerminateUserSession complexity
     # TODO: Refactor in future to reduce complexity (issue #166, #167, #168)

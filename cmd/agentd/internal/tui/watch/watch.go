@@ -7,14 +7,16 @@ import (
 	"strings"
 	"time"
 
+	"github.com/2389-research/ourocodus/pkg/cli/format"
 	"github.com/2389-research/ourocodus/pkg/relay/session"
+	"github.com/2389-research/ourocodus/pkg/tui/components/header"
 	"github.com/2389-research/ourocodus/pkg/tui/keys"
+	"github.com/2389-research/ourocodus/pkg/tui/layout"
 	"github.com/2389-research/ourocodus/pkg/tui/theme"
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 )
 
 // Event types
@@ -99,11 +101,12 @@ func (k keyMap) FullHelp() [][]key.Binding {
 }
 
 // New creates a new watch TUI model.
-func New(agentID string) Model {
-	th := theme.Default()
+// If th is nil, the default theme is used.
+func New(agentID string, th *theme.Theme) Model {
+	th = theme.Ensure(th)
 
 	vp := viewport.New(80, 20)
-	vp.Style = lipgloss.NewStyle()
+	vp.Style = th.ViewportPlain
 
 	return Model{
 		th:        th,
@@ -152,9 +155,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		m.ready = true
 
-		headerHeight := 5 // header info
-		footerHeight := 3 // help
-		vpHeight := m.height - headerHeight - footerHeight
+		// Measure actual rendered heights instead of using magic numbers
+		headerStr := m.renderHeader()
+		footerStr := m.help.View(m.keys)
+		// Account for viewport border (2 lines) and newlines between sections
+		borderAndSpacing := 3
+		vpHeight := layout.ContentHeight(m.height, headerStr, footerStr) - borderAndSpacing
 		if vpHeight < 5 {
 			vpHeight = 5
 		}
@@ -208,37 +214,30 @@ func (m *Model) updateViewport() {
 }
 
 func (m Model) formatSubscribed(subject string) string {
-	successStyle := lipgloss.NewStyle().Foreground(m.th.Success)
-	return successStyle.Render(fmt.Sprintf("✓ Subscribed to: %s", subject))
+	return m.th.SuccessText.Render(fmt.Sprintf("✓ Subscribed to: %s", subject))
 }
 
 func (m Model) formatHeartbeat(hb HeartbeatMsg) string {
 	timestamp := time.Now().Format("15:04:05")
-	timeStyle := lipgloss.NewStyle().Foreground(m.th.Muted)
-	heartStyle := lipgloss.NewStyle().Foreground(m.th.Success)
-	lagStyle := lipgloss.NewStyle().Foreground(m.th.Primary)
 
 	return fmt.Sprintf("%s %s Heartbeat (lag=%s, status=%s)",
-		timeStyle.Render(timestamp),
-		heartStyle.Render("💓"),
-		lagStyle.Render(formatDuration(hb.Lag)),
+		m.th.MutedText.Render(timestamp),
+		m.th.SuccessText.Render("💓"),
+		m.th.PrimaryText.Render(format.FormatDurationShort(hb.Lag)),
 		hb.Status,
 	)
 }
 
 func (m Model) formatLeaseChange(lease *session.Lease) string {
 	timestamp := time.Now().Format("15:04:05")
-	timeStyle := lipgloss.NewStyle().Foreground(m.th.Muted)
 
 	if lease == nil {
-		warnStyle := lipgloss.NewStyle().Foreground(m.th.Warning)
 		return fmt.Sprintf("%s %s Lease detached",
-			timeStyle.Render(timestamp),
-			warnStyle.Render("🔓"),
+			m.th.MutedText.Render(timestamp),
+			m.th.WarningText.Render("🔓"),
 		)
 	}
 
-	leaseStyle := lipgloss.NewStyle().Foreground(m.th.Primary)
 	timeUntil := time.Until(lease.ExpiresAt)
 	shortSession := lease.UserSessionID
 	if len(shortSession) > 8 {
@@ -246,34 +245,34 @@ func (m Model) formatLeaseChange(lease *session.Lease) string {
 	}
 
 	return fmt.Sprintf("%s %s Lease renewed (expires in %s, session=%s)",
-		timeStyle.Render(timestamp),
-		leaseStyle.Render("🔐"),
-		formatDuration(timeUntil),
+		m.th.MutedText.Render(timestamp),
+		m.th.PrimaryText.Render("🔐"),
+		format.FormatDurationShort(timeUntil),
 		shortSession,
 	)
 }
 
 func (m Model) formatLogLine(msg LogLineMsg) string {
 	if msg.IsErr {
-		errStyle := lipgloss.NewStyle().Foreground(m.th.Error)
-		return errStyle.Render(msg.Line)
+		return m.th.ErrorText.Render(msg.Line)
+	}
+	// Apply JSON syntax highlighting if the line is valid JSON
+	if format.IsJSON(msg.Line) {
+		colors := &format.JSONHighlightColors{
+			Key:     m.th.Primary,
+			String:  m.th.Success,
+			Number:  m.th.Accent,
+			Bool:    m.th.Warning,
+			Null:    m.th.Error,
+			Bracket: m.th.Muted,
+		}
+		return format.HighlightJSON(msg.Line, colors)
 	}
 	return msg.Line
 }
 
 func (m Model) formatError(err error) string {
-	errStyle := lipgloss.NewStyle().Foreground(m.th.Error).Bold(true)
-	return errStyle.Render(fmt.Sprintf("✗ Error: %v", err))
-}
-
-func formatDuration(d time.Duration) string {
-	if d < time.Second {
-		return fmt.Sprintf("%dms", d.Milliseconds())
-	}
-	if d < time.Minute {
-		return fmt.Sprintf("%.1fs", d.Seconds())
-	}
-	return fmt.Sprintf("%.1fm", d.Minutes())
+	return m.th.ErrorText.Render(fmt.Sprintf("✗ Error: %v", err))
 }
 
 // View renders the TUI.
@@ -283,8 +282,7 @@ func (m Model) View() string {
 	}
 
 	if m.quitting {
-		warnStyle := lipgloss.NewStyle().Foreground(m.th.Warning)
-		return "\n" + warnStyle.Render("Stopped watching.") + "\n"
+		return "\n" + m.th.WarningText.Render("Stopped watching.") + "\n"
 	}
 
 	var b strings.Builder
@@ -294,10 +292,7 @@ func (m Model) View() string {
 	b.WriteString("\n")
 
 	// Events viewport
-	borderStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(m.th.Primary)
-	b.WriteString(borderStyle.Render(m.viewport.View()))
+	b.WriteString(m.th.ViewportBorder.Render(m.viewport.View()))
 	b.WriteString("\n")
 
 	// Help
@@ -307,13 +302,13 @@ func (m Model) View() string {
 }
 
 func (m Model) renderHeader() string {
-	headerStyle := lipgloss.NewStyle().Foreground(m.th.Primary).Bold(true)
-	mutedStyle := lipgloss.NewStyle().Foreground(m.th.Muted)
+	// Build status content for header
+	var status strings.Builder
+	status.WriteString(m.th.Title.Render(fmt.Sprintf("Watching agent: %s", m.agentID)))
+	status.WriteString("\n")
+	status.WriteString(m.th.MutedText.Render("Press q to quit, ? for help"))
 
-	header := headerStyle.Render(fmt.Sprintf("👁️  Watching agent: %s", m.agentID))
-	hint := mutedStyle.Render("Press q to quit, ? for help")
-
-	return header + "\n" + hint
+	return header.RenderWithContent(m.th, status.String())
 }
 
 // SendHeartbeat sends a heartbeat message to the TUI.
@@ -357,8 +352,9 @@ func SendSubscribed(subject string) tea.Cmd {
 }
 
 // Run starts the watch TUI with the given context and event sources.
-func Run(ctx context.Context, agentID string) error {
-	m := New(agentID)
+// If th is nil, the default theme is used.
+func Run(ctx context.Context, agentID string, th *theme.Theme) error {
+	m := New(agentID, th)
 	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithContext(ctx))
 	_, err := p.Run()
 	return err

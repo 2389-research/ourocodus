@@ -5,8 +5,8 @@
 //
 // Features:
 //   - Smart defaults: Rich TUI when interactive, plain text in CI/pipes, JSON when requested
-//   - Standard flags: --json, --plain, --theme, --no-color, --quiet, --verbose
-//   - Environment support: NO_COLOR, OUROCODUS_THEME, OUROCODUS_OUTPUT, CI
+//   - Standard flags: --json, --plain, --light, --no-color, --quiet, --verbose
+//   - Environment support: NO_COLOR, OUROCODUS_OUTPUT, CI
 //   - Consistent exit codes across all tools
 //
 // Usage:

@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/2389-research/ourocodus/pkg/cli/format"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -80,7 +81,7 @@ func TestFormatAge(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := formatAge(tt.input)
+			result := format.FormatAge(tt.input)
 			assert.Equal(t, tt.expected, result)
 		})
 	}
@@ -128,7 +129,7 @@ func TestFormatLastBeat(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := formatLastBeat(tt.input)
+			result := format.FormatLastBeat(tt.input)
 			assert.Equal(t, tt.expected, result)
 		})
 	}
@@ -154,35 +155,20 @@ func TestFormatStatus(t *testing.T) {
 	}
 }
 
-func TestRenderRainbowLogo(t *testing.T) {
-	// Simple test to ensure it doesn't panic and returns colored output
-	input := "Line 1\nLine 2\nLine 3"
-	result := renderRainbowLogo(input)
-
-	// Result should contain ANSI escape codes
-	assert.NotEmpty(t, result)
-	// Should still contain the original text
-	assert.Contains(t, result, "Line 1")
-	assert.Contains(t, result, "Line 2")
-	assert.Contains(t, result, "Line 3")
-}
-
 func TestNewKeyMap(t *testing.T) {
 	t.Run("stop enabled", func(t *testing.T) {
 		km := newKeyMap(true)
 
-		// Verify all key bindings are set
+		// Verify navigation bindings from keys.Navigation are set
 		assert.NotEmpty(t, km.Quit.Keys())
 		assert.NotEmpty(t, km.Up.Keys())
 		assert.NotEmpty(t, km.Down.Keys())
-		assert.NotEmpty(t, km.Top.Keys())
+		assert.NotEmpty(t, km.Home.Keys())
 		assert.NotEmpty(t, km.End.Keys())
 		assert.NotEmpty(t, km.Stop.Keys())
 
 		// Verify help text is set
 		assert.Contains(t, km.Quit.Help().Key, "q")
-		assert.Contains(t, km.Up.Help().Key, "k")
-		assert.Contains(t, km.Down.Help().Key, "j")
 		assert.Contains(t, km.Stop.Help().Key, "x")
 
 		// Verify stop is enabled

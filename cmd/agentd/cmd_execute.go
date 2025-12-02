@@ -2,15 +2,17 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"time"
 
-	"github.com/2389-research/ourocodus/cmd/agentd/internal/output"
+	"github.com/2389-research/ourocodus/pkg/cli"
+	"github.com/2389-research/ourocodus/pkg/cli/format"
 	"github.com/2389-research/ourocodus/pkg/tui/theme"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/spf13/cobra"
@@ -20,6 +22,19 @@ var (
 	executeTimeout int
 	executeShell   string
 )
+
+// ExecuteResult represents the output of an execute operation for JSON output
+type ExecuteResult struct {
+	AgentID     string `json:"agentId"`
+	ContainerID string `json:"containerId"`
+	Command     string `json:"command"`
+	Shell       string `json:"shell"`
+	Stdout      string `json:"stdout"`
+	Stderr      string `json:"stderr"`
+	ExitCode    int    `json:"exitCode"`
+	Success     bool   `json:"success"`
+	Error       string `json:"error,omitempty"`
+}
 
 var executeCmd = &cobra.Command{
 	Use:   "execute <agent-id> <command>",
@@ -55,47 +70,98 @@ func init() {
 }
 
 func runExecute(cmd *cobra.Command, args []string) error {
-	ctx, cancel := context.WithTimeout(cmd.Context(), time.Duration(executeTimeout)*time.Second)
+	ctx := cmd.Context()
+
+	// Get mode from AppContext (set by cli.App wrapper)
+	appCtx := cli.FromContext(ctx)
+	if appCtx == nil {
+		return cli.ContextError()
+	}
+
+	// Create context with timeout
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(executeTimeout)*time.Second)
 	defer cancel()
 
 	agentID := args[0]
 	command := args[1]
 
+	// Execute the command and collect result
+	result := executeCommand(ctx, agentID, command, appCtx.Mode, appCtx.Theme)
+
+	// Output based on mode
+	if appCtx.Mode.IsJSON() {
+		encoder := json.NewEncoder(os.Stdout)
+		encoder.SetIndent("", "  ")
+		if err := encoder.Encode(result); err != nil {
+			return cli.IOError("failed to encode JSON: " + err.Error())
+		}
+	}
+
+	// Return error if command failed
+	if !result.Success {
+		if result.Error != "" {
+			// Categorize errors based on message content
+			if strings.Contains(result.Error, "not found") || strings.Contains(result.Error, "not running") {
+				return cli.UsageError(result.Error)
+			}
+			return cli.IOError(result.Error)
+		}
+		return cli.IOError("command failed")
+	}
+
+	return nil
+}
+
+// executeCommand executes a command in an agent container and returns the result
+func executeCommand(ctx context.Context, agentID, command string, mode cli.Mode, th *theme.Theme) ExecuteResult {
+	result := ExecuteResult{
+		AgentID: agentID,
+		Command: command,
+		Shell:   executeShell,
+	}
+
 	// Find the container
 	containerID, err := findAgentContainerID(ctx, agentID)
 	if err != nil {
-		return fmt.Errorf("failed to find agent: %w", err)
+		result.Error = fmt.Sprintf("failed to find agent: %v", err)
+		printIfNotJSON(mode, func() { printError(result.Error, th) })
+		return result
 	}
 
 	if containerID == "" {
-		return fmt.Errorf("agent '%s' not found", agentID)
+		result.Error = fmt.Sprintf("agent '%s' not found", agentID)
+		printIfNotJSON(mode, func() { printError(result.Error, th) })
+		return result
 	}
+
+	result.ContainerID = containerID
 
 	// Check if agent is running
-	cli, err := newDockerClient()
+	dockerCli, err := newDockerClient()
 	if err != nil {
-		return err
+		result.Error = fmt.Sprintf("failed to create Docker client: %v", err)
+		printIfNotJSON(mode, func() { printError(result.Error, th) })
+		return result
 	}
-	defer func() { _ = cli.Close() }()
+	defer func() { _ = dockerCli.Close() }()
 
-	inspect, err := cli.ContainerInspect(ctx, containerID)
+	inspect, err := dockerCli.ContainerInspect(ctx, containerID)
 	if err != nil {
-		return fmt.Errorf("failed to inspect container: %w", err)
+		result.Error = fmt.Sprintf("failed to inspect container: %v", err)
+		printIfNotJSON(mode, func() { printError(result.Error, th) })
+		return result
 	}
 
 	if !inspect.State.Running {
-		return fmt.Errorf("agent '%s' is not running (status: %s)", agentID, inspect.State.Status)
+		result.Error = fmt.Sprintf("agent '%s' is not running (status: %s)", agentID, inspect.State.Status)
+		printIfNotJSON(mode, func() { printError(result.Error, th) })
+		return result
 	}
 
-	// Print command info
-	th := theme.NewRetroTheme(theme.PaletteCGA)
-	headerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(string(th.Primary))).Bold(true)
-	mutedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(string(th.Muted)))
-
-	fmt.Println(headerStyle.Render(fmt.Sprintf("⚡ Executing command on agent '%s'", agentID)))
-	fmt.Println(mutedStyle.Render(fmt.Sprintf("   Container: %s", output.FormatContainerID(containerID))))
-	fmt.Println(mutedStyle.Render(fmt.Sprintf("   Command: %s", command)))
-	fmt.Println()
+	// Print command info (non-JSON modes)
+	printIfNotJSON(mode, func() {
+		printExecuteHeader(agentID, containerID, command, mode, th)
+	})
 
 	// Create exec instance
 	execConfig := container.ExecOptions{
@@ -104,56 +170,114 @@ func runExecute(cmd *cobra.Command, args []string) error {
 		Cmd:          []string{executeShell, "-c", command},
 	}
 
-	execID, err := cli.ContainerExecCreate(ctx, containerID, execConfig)
+	execID, err := dockerCli.ContainerExecCreate(ctx, containerID, execConfig)
 	if err != nil {
-		return fmt.Errorf("failed to create exec: %w", err)
+		result.Error = fmt.Sprintf("failed to create exec: %v", err)
+		printIfNotJSON(mode, func() { printError(result.Error, th) })
+		return result
 	}
 
 	// Attach and run
-	resp, err := cli.ContainerExecAttach(ctx, execID.ID, container.ExecStartOptions{})
+	resp, err := dockerCli.ContainerExecAttach(ctx, execID.ID, container.ExecStartOptions{})
 	if err != nil {
-		return fmt.Errorf("failed to attach to exec: %w", err)
+		result.Error = fmt.Sprintf("failed to attach to exec: %v", err)
+		printIfNotJSON(mode, func() { printError(result.Error, th) })
+		return result
 	}
 	defer resp.Close()
-
-	// Read and display output
-	successStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(string(th.Success)))
-	errorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(string(th.Error)))
-
-	fmt.Println(successStyle.Render("─── Output ───"))
 
 	// Read all output using StdCopy to demultiplex stdout/stderr
 	var stdout, stderr strings.Builder
 	_, err = stdcopy.StdCopy(&stdout, &stderr, resp.Reader)
 	if err != nil && !errors.Is(err, io.EOF) {
-		return fmt.Errorf("failed to read output: %w", err)
+		result.Error = fmt.Sprintf("failed to read output: %v", err)
+		printIfNotJSON(mode, func() { printError(result.Error, th) })
+		return result
 	}
 
-	// Print stdout
-	if out := stdout.String(); out != "" {
-		fmt.Print(strings.TrimSuffix(out, "\n"))
-		fmt.Println()
-	}
-
-	// Print stderr in red
-	if errOut := stderr.String(); errOut != "" {
-		fmt.Print(errorStyle.Render(strings.TrimSuffix(errOut, "\n")))
-		fmt.Println()
-	}
+	result.Stdout = stdout.String()
+	result.Stderr = stderr.String()
 
 	// Check exit code
-	inspectResp, err := cli.ContainerExecInspect(ctx, execID.ID)
+	inspectResp, err := dockerCli.ContainerExecInspect(ctx, execID.ID)
 	if err != nil {
-		return fmt.Errorf("failed to inspect exec: %w", err)
+		result.Error = fmt.Sprintf("failed to inspect exec: %v", err)
+		printIfNotJSON(mode, func() { printError(result.Error, th) })
+		return result
 	}
 
-	fmt.Println(successStyle.Render("─────────────"))
+	result.ExitCode = inspectResp.ExitCode
+	result.Success = inspectResp.ExitCode == 0
 
-	if inspectResp.ExitCode != 0 {
-		fmt.Println(errorStyle.Render(fmt.Sprintf("✗ Command failed with exit code %d", inspectResp.ExitCode)))
-		return fmt.Errorf("command failed")
+	// Print output (non-JSON modes)
+	printIfNotJSON(mode, func() {
+		printExecuteOutput(result, mode, th)
+	})
+
+	return result
+}
+
+// printExecuteHeader prints the command execution header
+func printExecuteHeader(agentID, containerID, command string, mode cli.Mode, th *theme.Theme) {
+	if mode.IsRich() {
+		fmt.Println(th.Title.Render(fmt.Sprintf("⚡ Executing command on agent '%s'", agentID)))
+		fmt.Println(th.MutedText.Render(fmt.Sprintf("   Container: %s", format.FormatContainerID(containerID))))
+		fmt.Println(th.MutedText.Render(fmt.Sprintf("   Command: %s", command)))
+		fmt.Println()
+	} else {
+		// Plain mode
+		fmt.Printf("Executing command on agent '%s'\n", agentID)
+		fmt.Printf("Container: %s\n", format.FormatContainerID(containerID))
+		fmt.Printf("Command: %s\n", command)
+		fmt.Println()
 	}
+}
 
-	fmt.Println(successStyle.Render("✓ Command completed successfully"))
-	return nil
+// printExecuteOutput prints the command output and result
+func printExecuteOutput(result ExecuteResult, mode cli.Mode, th *theme.Theme) {
+	if mode.IsRich() {
+		fmt.Println(th.SuccessText.Render("─── Output ───"))
+
+		// Print stdout
+		if result.Stdout != "" {
+			fmt.Print(strings.TrimSuffix(result.Stdout, "\n"))
+			fmt.Println()
+		}
+
+		// Print stderr in red
+		if result.Stderr != "" {
+			fmt.Print(th.ErrorText.Render(strings.TrimSuffix(result.Stderr, "\n")))
+			fmt.Println()
+		}
+
+		fmt.Println(th.SuccessText.Render("─────────────"))
+
+		if result.Success {
+			fmt.Println(th.SuccessText.Render("✓ Command completed successfully"))
+		} else {
+			fmt.Println(th.ErrorText.Render(fmt.Sprintf("✗ Command failed with exit code %d", result.ExitCode)))
+		}
+	} else {
+		// Plain mode
+		fmt.Println("--- Output ---")
+
+		// Print stdout
+		if result.Stdout != "" {
+			fmt.Print(strings.TrimSuffix(result.Stdout, "\n"))
+			fmt.Println()
+		}
+
+		// Print stderr
+		if result.Stderr != "" {
+			fmt.Fprintf(os.Stderr, "%s\n", strings.TrimSuffix(result.Stderr, "\n"))
+		}
+
+		fmt.Println("-------------")
+
+		if result.Success {
+			fmt.Println("Command completed successfully")
+		} else {
+			fmt.Fprintf(os.Stderr, "Command failed with exit code %d\n", result.ExitCode)
+		}
+	}
 }

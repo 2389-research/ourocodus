@@ -96,3 +96,4 @@ internal/webapp/web/asset-manifest.json
 *.sqlite3
 container-reuse
 nats-basic
+workspaces/

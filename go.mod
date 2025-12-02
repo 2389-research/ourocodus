@@ -15,6 +15,7 @@ require (
 	github.com/opencontainers/image-spec v1.1.1
 	github.com/prometheus/client_golang v1.17.0
 	github.com/spf13/cobra v1.10.1
+	github.com/spf13/pflag v1.0.9
 	golang.org/x/sync v0.17.0
 	golang.org/x/term v0.37.0
 )
@@ -67,7 +68,6 @@ require (
 	github.com/prometheus/procfs v0.11.1 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/rogpeppe/go-internal v1.14.1 // indirect
-	github.com/spf13/pflag v1.0.9 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	go.opentelemetry.io/auto/sdk v1.1.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.63.0 // indirect
