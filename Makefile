@@ -1,4 +1,4 @@
-.PHONY: all build build-tui test smoke-relay smoke-session smoke-all test-e2e demo interactive run stop clean lint fmt check pre-commit nats-start nats-stop nats-logs nats-health assets assets-check tailwind-download acp-binary agent-image
+.PHONY: all build test smoke-relay smoke-session smoke-all test-e2e demo interactive run stop clean lint fmt check pre-commit nats-start nats-stop nats-logs nats-health assets assets-check tailwind-download acp-binary agent-image
 
 # Default target: build and test
 all: build test
@@ -107,17 +107,7 @@ build: assets
 	go build -o bin/relay ./cmd/relay
 	go build -o bin/echo-agent ./cmd/echo-agent
 	go build -o bin/agentd ./cmd/agentd
-	go build -o bin/build ./cmd/build
 	@echo "Build complete. Binaries in bin/"
-
-# Build with TUI progress display
-build-tui: bin/build
-	@./bin/build
-
-# Bootstrap the build TUI tool (no dependencies)
-bin/build:
-	@mkdir -p bin
-	@go build -o bin/build ./cmd/build
 
 # Build ACP binary for inclusion in agent Docker image
 # Cross-compile for Linux since the binary runs inside a Linux container
