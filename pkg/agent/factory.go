@@ -146,6 +146,15 @@ func (a *containerLauncherAdapter) Spawn(ctx context.Context, config *SpawnConfi
 		GitHubToken: a.launcherConfig.GitHubToken,
 		Env:         env,
 		Labels:      config.Labels, // Pass through custom labels (including spawn-source)
+		// Default security hardening for Claude Code agents
+		RuntimeHardening: container.RuntimeHardening{
+			ReadOnlyRootfs:  true,  // Make root filesystem read-only
+			DropAllCaps:     true,  // Drop all Linux capabilities
+			NoNewPrivileges: true,  // Prevent privilege escalation
+			MemoryLimitMB:   2048,  // 2GB memory limit
+			CPULimit:        2.0,   // 2 CPU cores
+			TmpfsSizeMB:     100,   // 100MB tmpfs for /tmp
+		},
 	}
 
 	handle, err := launcher.Spawn(ctx, spawnConfig)
