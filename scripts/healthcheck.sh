@@ -24,13 +24,29 @@ if ! kill -0 "$PID" 2>/dev/null; then
     exit 1
 fi
 
-# Verify process is claude-code-acp (check cmdline)
-if [ -f "/proc/$PID/cmdline" ]; then
-    CMDLINE=$(tr '\0' ' ' < "/proc/$PID/cmdline")
-    if [[ "$CMDLINE" != *"claude-code-acp"* ]]; then
-        echo "Process $PID is not claude-code-acp" >&2
-        exit 1
+# Verify process is claude-code-acp
+# Primary check: verify executable path via /proc/$PID/exe symlink
+# Fallback: check cmdline if exe is not readable (some environments)
+VERIFIED=false
+
+if [ -L "/proc/$PID/exe" ]; then
+    EXE_PATH=$(readlink -f "/proc/$PID/exe" 2>/dev/null)
+    if [ -n "$EXE_PATH" ] && [[ "$EXE_PATH" == *"/claude-code-acp" ]]; then
+        VERIFIED=true
     fi
+fi
+
+# Fallback to cmdline check if exe verification didn't succeed
+if [ "$VERIFIED" != "true" ] && [ -f "/proc/$PID/cmdline" ]; then
+    CMDLINE=$(tr '\0' ' ' < "/proc/$PID/cmdline")
+    if [[ "$CMDLINE" == *"claude-code-acp"* ]]; then
+        VERIFIED=true
+    fi
+fi
+
+if [ "$VERIFIED" != "true" ]; then
+    echo "Process $PID is not claude-code-acp" >&2
+    exit 1
 fi
 
 exit 0

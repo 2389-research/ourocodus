@@ -288,7 +288,21 @@ func (m *Manager) CreateContainerSessionWithConfig(ctx context.Context, config C
 		hostConfig.CapDrop = []string{"ALL"}
 	}
 	if config.RuntimeHardening.NoNewPrivileges {
-		hostConfig.SecurityOpt = append(hostConfig.SecurityOpt, "no-new-privileges")
+		// Initialize slice if nil before appending
+		if hostConfig.SecurityOpt == nil {
+			hostConfig.SecurityOpt = []string{}
+		}
+		// Check for duplicates before appending
+		hasNoNewPriv := false
+		for _, opt := range hostConfig.SecurityOpt {
+			if opt == "no-new-privileges" {
+				hasNoNewPriv = true
+				break
+			}
+		}
+		if !hasNoNewPriv {
+			hostConfig.SecurityOpt = append(hostConfig.SecurityOpt, "no-new-privileges")
+		}
 	}
 	if config.RuntimeHardening.MemoryLimitMB > 0 {
 		hostConfig.Memory = config.RuntimeHardening.MemoryLimitMB * 1024 * 1024
@@ -297,9 +311,11 @@ func (m *Manager) CreateContainerSessionWithConfig(ctx context.Context, config C
 		hostConfig.NanoCPUs = int64(config.RuntimeHardening.CPULimit * 1e9)
 	}
 	if config.RuntimeHardening.TmpfsSizeMB > 0 {
-		hostConfig.Tmpfs = map[string]string{
-			"/tmp": fmt.Sprintf("size=%dm,noexec,nosuid", config.RuntimeHardening.TmpfsSizeMB),
+		// Initialize map if nil, then set /tmp entry (merges instead of overwrites)
+		if hostConfig.Tmpfs == nil {
+			hostConfig.Tmpfs = make(map[string]string)
 		}
+		hostConfig.Tmpfs["/tmp"] = fmt.Sprintf("size=%dm,noexec,nosuid", config.RuntimeHardening.TmpfsSizeMB)
 	}
 
 	resp, err := m.dockerClient.ContainerCreate(ctx, containerConfig, hostConfig, nil, nil, "")

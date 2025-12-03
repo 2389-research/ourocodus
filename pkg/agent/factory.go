@@ -22,22 +22,30 @@ var ErrFactoryNotReady = errors.New("launcher factory not ready: missing require
 // ErrEmptyAgentID is returned when agentID is empty
 var ErrEmptyAgentID = errors.New("agentID cannot be empty")
 
-// getEnvInt64 retrieves an int64 value from an environment variable, returning the default if not set or invalid
+// getEnvInt64 retrieves an int64 value from an environment variable.
+// Returns defaultVal if the environment variable is not set or cannot be parsed.
+// Parse errors are silently ignored to allow graceful fallback to defaults.
 func getEnvInt64(key string, defaultVal int64) int64 {
 	if val := os.Getenv(key); val != "" {
 		if i, err := strconv.ParseInt(val, 10, 64); err == nil {
 			return i
 		}
+		// Invalid value - fall back to default silently
+		// This is intentional: config errors should use safe defaults
 	}
 	return defaultVal
 }
 
-// getEnvFloat64 retrieves a float64 value from an environment variable, returning the default if not set or invalid
+// getEnvFloat64 retrieves a float64 value from an environment variable.
+// Returns defaultVal if the environment variable is not set or cannot be parsed.
+// Parse errors are silently ignored to allow graceful fallback to defaults.
 func getEnvFloat64(key string, defaultVal float64) float64 {
 	if val := os.Getenv(key); val != "" {
 		if f, err := strconv.ParseFloat(val, 64); err == nil {
 			return f
 		}
+		// Invalid value - fall back to default silently
+		// This is intentional: config errors should use safe defaults
 	}
 	return defaultVal
 }
@@ -160,12 +168,13 @@ func (a *containerLauncherAdapter) Spawn(ctx context.Context, config *SpawnConfi
 	// This prevents the key from being visible in `docker inspect`
 
 	spawnConfig := container.SpawnConfig{
-		AgentID:     a.agentID,                   // Use the unique agentID provided in CreateLauncher
-		ImageName:   config.Image,                // Image from SpawnConfig (runtime decision)
-		Command:     config.Command,              // Command from SpawnConfig (runtime decision)
-		Entrypoint:  a.launcherConfig.Entrypoint, // Use Entrypoint from LauncherConfig
-		GitSSHKey:   a.launcherConfig.GitSSHKey,  // Use credentials from LauncherConfig
-		GitHubToken: a.launcherConfig.GitHubToken,
+		AgentID:     a.agentID,                     // Use the unique agentID provided in CreateLauncher
+		ImageName:   config.Image,                  // Image from SpawnConfig (runtime decision)
+		Command:     config.Command,                // Command from SpawnConfig (runtime decision)
+		Entrypoint:  a.launcherConfig.Entrypoint,   // Use Entrypoint from LauncherConfig
+		GitSSHKey:   a.launcherConfig.GitSSHKey,    // Use credentials from LauncherConfig
+		GitHubToken: a.launcherConfig.GitHubToken,  // GitHub token from LauncherConfig
+		APIKey:      a.launcherConfig.AnthropicKey, // Anthropic API key from LauncherConfig (written to .creds/.env)
 		Env:         env,
 		Labels:      config.Labels, // Pass through custom labels (including spawn-source)
 		// Default security hardening for Claude Code agents
