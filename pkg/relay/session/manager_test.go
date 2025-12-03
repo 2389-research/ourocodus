@@ -122,6 +122,16 @@ func (m *mockACPClient) CreateSession(ctx context.Context, cwd string) (string, 
 	return "mock-session-id", nil
 }
 
+func (m *mockACPClient) SendPrompt(ctx context.Context, sessionID, prompt string) error {
+	return nil
+}
+
+func (m *mockACPClient) Stream(ctx context.Context) <-chan acp.Event {
+	ch := make(chan acp.Event)
+	close(ch)
+	return ch
+}
+
 func (m *mockACPClient) Close(ctx context.Context) error {
 	if m.closeFunc != nil {
 		return m.closeFunc(ctx)

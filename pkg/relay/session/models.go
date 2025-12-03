@@ -136,11 +136,17 @@ type WebSocketConn interface {
 }
 
 // ACPClient abstracts ACP process operations
-// Implemented by pkg/acp.Client
+// Implemented by pkg/acp.Client and ACPBridge
 type ACPClient interface {
+	// Legacy method (deprecated, for backward compat)
 	SendMessage(ctx context.Context, content string) (*acp.AgentMessage, error)
+
+	// New ACP protocol methods
 	InitializeACP(ctx context.Context) (*acp.InitializeResult, error)
 	CreateSession(ctx context.Context, cwd string) (string, error)
+	SendPrompt(ctx context.Context, sessionID, prompt string) error
+	Stream(ctx context.Context) <-chan acp.Event
+
 	Close(ctx context.Context) error
 }
 
