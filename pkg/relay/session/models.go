@@ -87,11 +87,12 @@ type AgentSession struct {
 	expiresAt   time.Time // Lease expiration timestamp
 
 	// Mutable fields (protected by mu)
-	state      AgentState
-	acpClient  ACPClient
-	lastActive time.Time
-	errorMsg   string    // Error message if state is FAILED
-	history    []Message // Conversation history
+	state        AgentState
+	acpClient    ACPClient
+	lastActive   time.Time
+	errorMsg     string    // Error message if state is FAILED
+	history      []Message // Conversation history
+	acpSessionID string    // ACP session ID (1:1 with this agent)
 
 	mu sync.RWMutex
 }
@@ -300,6 +301,20 @@ func (a *AgentSession) GetHistory() []Message {
 	history := make([]Message, len(a.history))
 	copy(history, a.history)
 	return history
+}
+
+// GetACPSessionID returns the ACP session ID for this agent
+func (a *AgentSession) GetACPSessionID() string {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.acpSessionID
+}
+
+// SetACPSessionID sets the ACP session ID for this agent
+func (a *AgentSession) SetACPSessionID(sessionID string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.acpSessionID = sessionID
 }
 
 // --- CLI Agent Adoption methods (Phase 1) ---
