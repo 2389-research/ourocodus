@@ -137,9 +137,6 @@ func testSpawnSingleAgent(ctx context.Context, manager *session.Manager, verbose
 
 	// Use unique agent ID to avoid lease conflicts with other tests
 	agentID := fmt.Sprintf("single-agent-%d", time.Now().UnixNano())
-	if err := os.MkdirAll("./workspaces/single", 0755); err != nil {
-		return fmt.Errorf("failed to create workspace directory: %w", err)
-	}
 	err = manager.SpawnAgent(ctx, sessionID, agentID, "./workspaces/single")
 	if err != nil {
 		return fmt.Errorf("failed to spawn: %w", err)
@@ -173,7 +170,7 @@ func testSpawnMultipleAgents(ctx context.Context, manager *session.Manager, verb
 	}
 	sessionID := userSession.GetID()
 
-	// Use unique agent IDs to avoid lease conflicts with other tests
+	// Use unique agent IDs with timestamp to avoid lease conflicts
 	ts := time.Now().UnixNano()
 	agentIDs := []string{
 		fmt.Sprintf("multi-auth-%d", ts),
@@ -182,9 +179,6 @@ func testSpawnMultipleAgents(ctx context.Context, manager *session.Manager, verb
 	}
 	for _, agentID := range agentIDs {
 		workspace := fmt.Sprintf("./workspaces/%s", agentID)
-		if err := os.MkdirAll(workspace, 0755); err != nil {
-			return fmt.Errorf("failed to create workspace directory %s: %w", workspace, err)
-		}
 		if err := manager.SpawnAgent(ctx, sessionID, agentID, workspace); err != nil {
 			return fmt.Errorf("failed to spawn %s: %w", agentID, err)
 		}
@@ -224,10 +218,10 @@ func testAgentSpawnFailureIsolation(ctx context.Context, verbose bool) error {
 	cleaner := session.NewNoOpCleaner()
 	logger := &testLogger{verbose: verbose}
 
-	// Use unique agent ID to avoid lease conflicts with other tests
+	// Use unique agent IDs
 	ts := time.Now().UnixNano()
-	successAgentID := fmt.Sprintf("isolation-auth-%d", ts)
-	failingAgentID := fmt.Sprintf("isolation-failing-%d", ts)
+	successAgentID := fmt.Sprintf("fail-test-success-%d", ts)
+	failingAgentID := fmt.Sprintf("fail-test-failing-%d", ts)
 
 	failingFactory := session.NewFakeClientFactory(func(workspace string) (session.ACPClient, error) {
 		// Manager converts paths to absolute, so check suffix
@@ -248,20 +242,12 @@ func testAgentSpawnFailureIsolation(ctx context.Context, verbose bool) error {
 	sessionID := userSession.GetID()
 
 	// Spawn successful agent first
-	successWorkspace := "./workspaces/" + successAgentID
-	if err := os.MkdirAll(successWorkspace, 0755); err != nil {
-		return fmt.Errorf("failed to create workspace directory %s: %w", successWorkspace, err)
-	}
-	if err := manager.SpawnAgent(ctx, sessionID, successAgentID, successWorkspace); err != nil {
+	if err := manager.SpawnAgent(ctx, sessionID, successAgentID, "./workspaces/"+successAgentID); err != nil {
 		return fmt.Errorf("successful agent failed: %w", err)
 	}
 
 	// Try to spawn failing agent
-	failingWorkspace := "./workspaces/" + failingAgentID
-	if err := os.MkdirAll(failingWorkspace, 0755); err != nil {
-		return fmt.Errorf("failed to create workspace directory %s: %w", failingWorkspace, err)
-	}
-	err = manager.SpawnAgent(ctx, sessionID, failingAgentID, failingWorkspace)
+	err = manager.SpawnAgent(ctx, sessionID, failingAgentID, "./workspaces/"+failingAgentID)
 	if err == nil {
 		return fmt.Errorf("expected spawn to fail, but it succeeded")
 	}
@@ -299,24 +285,16 @@ func testTerminateSingleAgent(ctx context.Context, manager *session.Manager, ver
 	}
 	sessionID := userSession.GetID()
 
-	// Use unique agent IDs to avoid lease conflicts with other tests
+	// Use unique agent IDs
 	ts := time.Now().UnixNano()
 	authAgentID := fmt.Sprintf("term-auth-%d", ts)
 	dbAgentID := fmt.Sprintf("term-db-%d", ts)
 
 	// Spawn two agents
-	authWorkspace := "./workspaces/" + authAgentID
-	if err := os.MkdirAll(authWorkspace, 0755); err != nil {
-		return fmt.Errorf("failed to create workspace directory %s: %w", authWorkspace, err)
-	}
-	if err := manager.SpawnAgent(ctx, sessionID, authAgentID, authWorkspace); err != nil {
+	if err := manager.SpawnAgent(ctx, sessionID, authAgentID, "./workspaces/"+authAgentID); err != nil {
 		return fmt.Errorf("failed to spawn auth agent: %w", err)
 	}
-	dbWorkspace := "./workspaces/" + dbAgentID
-	if err := os.MkdirAll(dbWorkspace, 0755); err != nil {
-		return fmt.Errorf("failed to create workspace directory %s: %w", dbWorkspace, err)
-	}
-	if err := manager.SpawnAgent(ctx, sessionID, dbAgentID, dbWorkspace); err != nil {
+	if err := manager.SpawnAgent(ctx, sessionID, dbAgentID, "./workspaces/"+dbAgentID); err != nil {
 		return fmt.Errorf("failed to spawn db agent: %w", err)
 	}
 
@@ -346,8 +324,8 @@ func testTerminateSingleAgent(ctx context.Context, manager *session.Manager, ver
 		return fmt.Errorf("session not ACTIVE after single termination: %s", userSession.GetState())
 	}
 
-	debug(verbose, "  ✓ Agent terminated")
-	debug(verbose, "  ✓ Remaining agent still ACTIVE")
+	debug(verbose, "  ✓ First agent terminated")
+	debug(verbose, "  ✓ Second agent still ACTIVE")
 	debug(verbose, "  ✓ UserSession still ACTIVE")
 	success("✅", "Single agent termination verified")
 	return nil
@@ -361,19 +339,13 @@ func testTerminateSession(ctx context.Context, manager *session.Manager, verbose
 	}
 	sessionID := userSession.GetID()
 
-	// Use unique agent IDs to avoid lease conflicts with other tests
+	// Use unique agent IDs
 	ts := time.Now().UnixNano()
 	authAgentID := fmt.Sprintf("sess-auth-%d", ts)
 	dbAgentID := fmt.Sprintf("sess-db-%d", ts)
 	testsAgentID := fmt.Sprintf("sess-tests-%d", ts)
 
 	// Spawn multiple agents
-	for _, aid := range []string{authAgentID, dbAgentID, testsAgentID} {
-		ws := "./workspaces/" + aid
-		if err := os.MkdirAll(ws, 0755); err != nil {
-			return fmt.Errorf("failed to create workspace directory %s: %w", ws, err)
-		}
-	}
 	if err := manager.SpawnAgent(ctx, sessionID, authAgentID, "./workspaces/"+authAgentID); err != nil {
 		return fmt.Errorf("failed to spawn auth agent: %w", err)
 	}
@@ -416,15 +388,11 @@ func testIdempotentTermination(ctx context.Context, manager *session.Manager, ve
 	}
 	sessionID := userSession.GetID()
 
-	// Use unique agent ID to avoid lease conflicts with other tests
-	agentID := fmt.Sprintf("idemp-auth-%d", time.Now().UnixNano())
+	// Use unique agent ID
+	agentID := fmt.Sprintf("idemp-agent-%d", time.Now().UnixNano())
 
-	workspace := "./workspaces/" + agentID
-	if err := os.MkdirAll(workspace, 0755); err != nil {
-		return fmt.Errorf("failed to create workspace directory %s: %w", workspace, err)
-	}
-	if err := manager.SpawnAgent(ctx, sessionID, agentID, workspace); err != nil {
-		return fmt.Errorf("failed to spawn auth agent: %w", err)
+	if err := manager.SpawnAgent(ctx, sessionID, agentID, "./workspaces/"+agentID); err != nil {
+		return fmt.Errorf("failed to spawn agent: %w", err)
 	}
 
 	// Terminate agent twice - both should succeed (idempotent)
@@ -658,14 +626,9 @@ func testEventPublishing(ctx context.Context, verbose bool) error {
 	}
 	debug(verbose, "✓ session.created event published")
 
-	// Test 2: Agent spawned event
-	// Use unique agent ID to avoid lease conflicts with other tests
-	eventAgentID := fmt.Sprintf("event-tester-%d", time.Now().UnixNano())
-	eventWorkspace := "./workspaces/" + eventAgentID
-	if err := os.MkdirAll(eventWorkspace, 0755); err != nil {
-		return fmt.Errorf("failed to create workspace directory %s: %w", eventWorkspace, err)
-	}
-	err = manager.SpawnAgent(ctx, userSession.GetID(), eventAgentID, eventWorkspace)
+	// Test 2: Agent spawned event (use unique agent ID)
+	agentID := fmt.Sprintf("event-tester-%d", time.Now().UnixNano())
+	err = manager.SpawnAgent(ctx, userSession.GetID(), agentID, "./workspaces/"+agentID)
 	if err != nil {
 		return fmt.Errorf("failed to spawn agent: %w", err)
 	}
@@ -675,7 +638,7 @@ func testEventPublishing(ctx context.Context, verbose bool) error {
 	debug(verbose, "✓ agent.spawned event published")
 
 	// Test 3: Agent terminated event
-	err = manager.TerminateAgent(ctx, userSession.GetID(), eventAgentID)
+	err = manager.TerminateAgent(ctx, userSession.GetID(), agentID)
 	if err != nil {
 		return fmt.Errorf("failed to terminate agent: %w", err)
 	}

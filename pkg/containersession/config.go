@@ -4,6 +4,16 @@ import (
 	"github.com/docker/docker/api/types/mount"
 )
 
+// RuntimeHardening contains security hardening options for containers.
+type RuntimeHardening struct {
+	ReadOnlyRootfs  bool
+	DropAllCaps     bool
+	NoNewPrivileges bool
+	MemoryLimitMB   int64
+	CPULimit        float64
+	TmpfsSizeMB     int64
+}
+
 // CreateConfig provides configuration for creating a container session with custom options.
 // This allows callers to specify custom mounts, environment variables, and labels
 // beyond the defaults provided by CreateContainerSession.
@@ -37,4 +47,7 @@ type CreateConfig struct {
 	// Set to true when using external stdio attachment (e.g., ACP container attach mode)
 	// to avoid competing for the same streams.
 	SkipOutputLogging bool
+
+	// RuntimeHardening contains security options for the container (optional)
+	RuntimeHardening RuntimeHardening
 }
