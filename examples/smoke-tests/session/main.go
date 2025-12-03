@@ -135,25 +135,27 @@ func testSpawnSingleAgent(ctx context.Context, manager *session.Manager, verbose
 	}
 	sessionID := userSession.GetID()
 
-	err = manager.SpawnAgent(ctx, sessionID, "auth", "./workspaces/auth")
+	// Use unique agent ID to avoid lease conflicts with other tests
+	agentID := fmt.Sprintf("single-agent-%d", time.Now().UnixNano())
+	err = manager.SpawnAgent(ctx, sessionID, agentID, "./workspaces/single")
 	if err != nil {
 		return fmt.Errorf("failed to spawn: %w", err)
 	}
 
-	agent, err := manager.GetAgent(sessionID, "auth")
+	agent, err := manager.GetAgent(sessionID, agentID)
 	if err != nil {
 		return fmt.Errorf("failed to get agent: %w", err)
 	}
 
-	if agent.GetAgentID() != "auth" {
-		return fmt.Errorf("expected role 'coder-1', got %s", agent.GetAgentID())
+	if agent.GetAgentID() != agentID {
+		return fmt.Errorf("expected agent ID '%s', got %s", agentID, agent.GetAgentID())
 	}
 
 	if agent.GetState() != session.AgentActive {
 		return fmt.Errorf("expected ACTIVE state, got %s", agent.GetState())
 	}
 
-	debug(verbose, "  ✓ Agent 'coder-1' spawned successfully")
+	debug(verbose, "  ✓ Agent '%s' spawned successfully", agentID)
 	debug(verbose, "  ✓ Agent state is ACTIVE")
 	debug(verbose, "  ✓ UserSession remains ACTIVE")
 	success("✅", "Single agent spawned successfully")
@@ -168,7 +170,13 @@ func testSpawnMultipleAgents(ctx context.Context, manager *session.Manager, verb
 	}
 	sessionID := userSession.GetID()
 
-	roles := []string{"auth", "db", "tests"}
+	// Use unique agent IDs with timestamp to avoid lease conflicts
+	ts := time.Now().UnixNano()
+	roles := []string{
+		fmt.Sprintf("multi-auth-%d", ts),
+		fmt.Sprintf("multi-db-%d", ts),
+		fmt.Sprintf("multi-tests-%d", ts),
+	}
 	for _, role := range roles {
 		workspace := fmt.Sprintf("./workspaces/%s", role)
 		if err := manager.SpawnAgent(ctx, sessionID, role, workspace); err != nil {
@@ -195,7 +203,7 @@ func testSpawnMultipleAgents(ctx context.Context, manager *session.Manager, verb
 		}
 	}
 
-	debug(verbose, "  ✓ Spawned 3 agents: auth, db, tests")
+	debug(verbose, "  ✓ Spawned 3 agents with unique IDs")
 	debug(verbose, "  ✓ All agents in ACTIVE state")
 	debug(verbose, "  ✓ ListAgents returned 3 agents")
 	success("✅", "Multiple agents spawned successfully")
@@ -209,9 +217,15 @@ func testAgentSpawnFailureIsolation(ctx context.Context, verbose bool) error {
 	clock := &testClock{now: time.Now()}
 	cleaner := session.NewNoOpCleaner()
 	logger := &testLogger{verbose: verbose}
+
+	// Use unique agent IDs
+	ts := time.Now().UnixNano()
+	successAgentID := fmt.Sprintf("fail-test-success-%d", ts)
+	failingAgentID := fmt.Sprintf("fail-test-failing-%d", ts)
+
 	failingFactory := session.NewFakeClientFactory(func(workspace string) (session.ACPClient, error) {
 		// Manager converts paths to absolute, so check suffix
-		if strings.HasSuffix(workspace, "workspaces/failing") {
+		if strings.HasSuffix(workspace, failingAgentID) {
 			return nil, fmt.Errorf("simulated spawn failure")
 		}
 		return &fakeACPClient{workspace: workspace}, nil
@@ -228,12 +242,12 @@ func testAgentSpawnFailureIsolation(ctx context.Context, verbose bool) error {
 	sessionID := userSession.GetID()
 
 	// Spawn successful agent first
-	if err := manager.SpawnAgent(ctx, sessionID, "auth", "./workspaces/auth"); err != nil {
+	if err := manager.SpawnAgent(ctx, sessionID, successAgentID, "./workspaces/"+successAgentID); err != nil {
 		return fmt.Errorf("successful agent failed: %w", err)
 	}
 
 	// Try to spawn failing agent
-	err = manager.SpawnAgent(ctx, sessionID, "failing", "./workspaces/failing")
+	err = manager.SpawnAgent(ctx, sessionID, failingAgentID, "./workspaces/"+failingAgentID)
 	if err == nil {
 		return fmt.Errorf("expected spawn to fail, but it succeeded")
 	}
@@ -248,7 +262,7 @@ func testAgentSpawnFailureIsolation(ctx context.Context, verbose bool) error {
 	}
 
 	// Verify successful agent still works
-	agent, err := manager.GetAgent(sessionID, "auth")
+	agent, err := manager.GetAgent(sessionID, successAgentID)
 	if err != nil {
 		return fmt.Errorf("successful agent disappeared: %w", err)
 	}
@@ -271,27 +285,32 @@ func testTerminateSingleAgent(ctx context.Context, manager *session.Manager, ver
 	}
 	sessionID := userSession.GetID()
 
+	// Use unique agent IDs
+	ts := time.Now().UnixNano()
+	authAgentID := fmt.Sprintf("term-auth-%d", ts)
+	dbAgentID := fmt.Sprintf("term-db-%d", ts)
+
 	// Spawn two agents
-	if err := manager.SpawnAgent(ctx, sessionID, "auth", "./workspaces/auth"); err != nil {
+	if err := manager.SpawnAgent(ctx, sessionID, authAgentID, "./workspaces/"+authAgentID); err != nil {
 		return fmt.Errorf("failed to spawn auth agent: %w", err)
 	}
-	if err := manager.SpawnAgent(ctx, sessionID, "db", "./workspaces/db"); err != nil {
+	if err := manager.SpawnAgent(ctx, sessionID, dbAgentID, "./workspaces/"+dbAgentID); err != nil {
 		return fmt.Errorf("failed to spawn db agent: %w", err)
 	}
 
 	// Terminate one agent
-	if err := manager.TerminateAgent(ctx, sessionID, "auth"); err != nil {
+	if err := manager.TerminateAgent(ctx, sessionID, authAgentID); err != nil {
 		return fmt.Errorf("failed to terminate: %w", err)
 	}
 
 	// Verify auth agent is gone
-	_, err = manager.GetAgent(sessionID, "auth")
+	_, err = manager.GetAgent(sessionID, authAgentID)
 	if err == nil {
 		return fmt.Errorf("terminated agent still exists")
 	}
 
 	// Verify db agent still active
-	dbAgent, err := manager.GetAgent(sessionID, "db")
+	dbAgent, err := manager.GetAgent(sessionID, dbAgentID)
 	if err != nil {
 		return fmt.Errorf("remaining agent disappeared: %w", err)
 	}
@@ -305,8 +324,8 @@ func testTerminateSingleAgent(ctx context.Context, manager *session.Manager, ver
 		return fmt.Errorf("session not ACTIVE after single termination: %s", userSession.GetState())
 	}
 
-	debug(verbose, "  ✓ Agent 'coder-1' terminated")
-	debug(verbose, "  ✓ Agent 'db' still ACTIVE")
+	debug(verbose, "  ✓ First agent terminated")
+	debug(verbose, "  ✓ Second agent still ACTIVE")
 	debug(verbose, "  ✓ UserSession still ACTIVE")
 	success("✅", "Single agent termination verified")
 	return nil
@@ -320,14 +339,20 @@ func testTerminateSession(ctx context.Context, manager *session.Manager, verbose
 	}
 	sessionID := userSession.GetID()
 
+	// Use unique agent IDs
+	ts := time.Now().UnixNano()
+	authAgentID := fmt.Sprintf("sess-auth-%d", ts)
+	dbAgentID := fmt.Sprintf("sess-db-%d", ts)
+	testsAgentID := fmt.Sprintf("sess-tests-%d", ts)
+
 	// Spawn multiple agents
-	if err := manager.SpawnAgent(ctx, sessionID, "auth", "./workspaces/auth"); err != nil {
+	if err := manager.SpawnAgent(ctx, sessionID, authAgentID, "./workspaces/"+authAgentID); err != nil {
 		return fmt.Errorf("failed to spawn auth agent: %w", err)
 	}
-	if err := manager.SpawnAgent(ctx, sessionID, "db", "./workspaces/db"); err != nil {
+	if err := manager.SpawnAgent(ctx, sessionID, dbAgentID, "./workspaces/"+dbAgentID); err != nil {
 		return fmt.Errorf("failed to spawn db agent: %w", err)
 	}
-	if err := manager.SpawnAgent(ctx, sessionID, "tests", "./workspaces/tests"); err != nil {
+	if err := manager.SpawnAgent(ctx, sessionID, testsAgentID, "./workspaces/"+testsAgentID); err != nil {
 		return fmt.Errorf("failed to spawn tests agent: %w", err)
 	}
 
@@ -363,17 +388,20 @@ func testIdempotentTermination(ctx context.Context, manager *session.Manager, ve
 	}
 	sessionID := userSession.GetID()
 
-	if err := manager.SpawnAgent(ctx, sessionID, "auth", "./workspaces/auth"); err != nil {
-		return fmt.Errorf("failed to spawn auth agent: %w", err)
+	// Use unique agent ID
+	agentID := fmt.Sprintf("idemp-agent-%d", time.Now().UnixNano())
+
+	if err := manager.SpawnAgent(ctx, sessionID, agentID, "./workspaces/"+agentID); err != nil {
+		return fmt.Errorf("failed to spawn agent: %w", err)
 	}
 
 	// Terminate agent twice - both should succeed (idempotent)
-	if err := manager.TerminateAgent(ctx, sessionID, "auth"); err != nil {
+	if err := manager.TerminateAgent(ctx, sessionID, agentID); err != nil {
 		return fmt.Errorf("first termination failed: %w", err)
 	}
 
 	// Second termination should succeed without error (idempotent behavior)
-	if err := manager.TerminateAgent(ctx, sessionID, "auth"); err != nil {
+	if err := manager.TerminateAgent(ctx, sessionID, agentID); err != nil {
 		return fmt.Errorf("second termination failed (expected idempotent): %w", err)
 	}
 
@@ -580,8 +608,9 @@ func testEventPublishing(ctx context.Context, verbose bool) error {
 	}
 	debug(verbose, "✓ session.created event published")
 
-	// Test 2: Agent spawned event
-	err = manager.SpawnAgent(ctx, userSession.GetID(), "tester", "./workspaces/tester")
+	// Test 2: Agent spawned event (use unique agent ID)
+	agentID := fmt.Sprintf("event-tester-%d", time.Now().UnixNano())
+	err = manager.SpawnAgent(ctx, userSession.GetID(), agentID, "./workspaces/"+agentID)
 	if err != nil {
 		return fmt.Errorf("failed to spawn agent: %w", err)
 	}
@@ -591,7 +620,7 @@ func testEventPublishing(ctx context.Context, verbose bool) error {
 	debug(verbose, "✓ agent.spawned event published")
 
 	// Test 3: Agent terminated event
-	err = manager.TerminateAgent(ctx, userSession.GetID(), "tester")
+	err = manager.TerminateAgent(ctx, userSession.GetID(), agentID)
 	if err != nil {
 		return fmt.Errorf("failed to terminate agent: %w", err)
 	}
