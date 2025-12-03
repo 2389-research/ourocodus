@@ -95,8 +95,10 @@ func (m *mockWebSocket) WasClosed() bool {
 }
 
 type mockACPClient struct {
-	sendFunc  func(context.Context, string) (*acp.AgentMessage, error)
-	closeFunc func(context.Context) error
+	sendFunc       func(context.Context, string) (*acp.AgentMessage, error)
+	initFunc       func(context.Context) (*acp.InitializeResult, error)
+	createSessFunc func(context.Context, string) (string, error)
+	closeFunc      func(context.Context) error
 }
 
 func (m *mockACPClient) SendMessage(ctx context.Context, content string) (*acp.AgentMessage, error) {
@@ -104,6 +106,20 @@ func (m *mockACPClient) SendMessage(ctx context.Context, content string) (*acp.A
 		return m.sendFunc(ctx, content)
 	}
 	return nil, nil
+}
+
+func (m *mockACPClient) InitializeACP(ctx context.Context) (*acp.InitializeResult, error) {
+	if m.initFunc != nil {
+		return m.initFunc(ctx)
+	}
+	return &acp.InitializeResult{ProtocolVersion: 1}, nil
+}
+
+func (m *mockACPClient) CreateSession(ctx context.Context, cwd string) (string, error) {
+	if m.createSessFunc != nil {
+		return m.createSessFunc(ctx, cwd)
+	}
+	return "mock-session-id", nil
 }
 
 func (m *mockACPClient) Close(ctx context.Context) error {
@@ -1272,5 +1288,44 @@ func TestAgentSession_ContainerIDFormat(t *testing.T) {
 				t.Errorf("ContainerID mismatch: got %q, want %q", agent.ContainerID, tt.containerID)
 			}
 		})
+	}
+}
+
+func TestSpawnAgent_InitializesACPSession(t *testing.T) {
+	manager, _, _, _, _, clientFactory, restore := setupManagerWithLeaseIsolation(t)
+	defer restore()
+	ctx := context.Background()
+	ws := &mockWebSocket{}
+
+	// Create user session
+	session, err := manager.CreateUserSession(ctx, ws)
+	if err != nil {
+		t.Fatalf("CreateUserSession failed: %v", err)
+	}
+
+	// Configure mock to return specific session ID
+	expectedSessionID := "acp-session-12345"
+	clientFactory.runtimeFunc = func(ctx context.Context, runtime *AgentRuntimeContext) (ACPClient, error) {
+		return &mockACPClient{
+			createSessFunc: func(ctx context.Context, cwd string) (string, error) {
+				return expectedSessionID, nil
+			},
+		}, nil
+	}
+
+	// Spawn agent
+	err = manager.SpawnAgent(ctx, session.GetID(), "test-agent", "testdata/workspace")
+	if err != nil {
+		t.Fatalf("SpawnAgent failed: %v", err)
+	}
+
+	// Verify ACPSessionID is set
+	agent, err := manager.GetAgent(session.GetID(), "test-agent")
+	if err != nil {
+		t.Fatalf("GetAgent failed: %v", err)
+	}
+
+	if agent.GetACPSessionID() != expectedSessionID {
+		t.Errorf("ACPSessionID = %q, want %q", agent.GetACPSessionID(), expectedSessionID)
 	}
 }

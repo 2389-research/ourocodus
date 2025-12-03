@@ -139,6 +139,8 @@ type WebSocketConn interface {
 // Implemented by pkg/acp.Client
 type ACPClient interface {
 	SendMessage(ctx context.Context, content string) (*acp.AgentMessage, error)
+	InitializeACP(ctx context.Context) (*acp.InitializeResult, error)
+	CreateSession(ctx context.Context, cwd string) (string, error)
 	Close(ctx context.Context) error
 }
 

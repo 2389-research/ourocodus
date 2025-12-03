@@ -182,6 +182,16 @@ func (a *acpClientAdapter) SendMessage(ctx context.Context, content string) (*ac
 	return a.client.SendMessage(ctx, content)
 }
 
+// InitializeACP performs the ACP protocol handshake
+func (a *acpClientAdapter) InitializeACP(ctx context.Context) (*acp.InitializeResult, error) {
+	return a.client.InitializeACP(ctx)
+}
+
+// CreateSession creates a new ACP session
+func (a *acpClientAdapter) CreateSession(ctx context.Context, cwd string) (string, error) {
+	return a.client.CreateSession(ctx, cwd)
+}
+
 // Close closes the ACP client
 func (a *acpClientAdapter) Close(ctx context.Context) error {
 	return a.client.Close(ctx)

@@ -367,6 +367,30 @@ func (m *Manager) SpawnAgent(ctx context.Context, userSessionID, agentID, worksp
 	}
 	m.logger.Printf("[SESSION] ✓ ACP client created successfully")
 
+	// Initialize ACP protocol
+	m.logger.Printf("[SESSION] ├─ Initializing ACP protocol...")
+	initResult, err := acpClient.InitializeACP(ctx)
+	if err != nil {
+		m.logger.Printf("[SESSION] ✗ ACP initialization failed: %v", err)
+		return m.spawnFailure(ctx, agentSession, agentID, userSessionID,
+			fmt.Sprintf("failed to initialize ACP: %v", err), true)
+	}
+	m.logger.Printf("[SESSION] ✓ ACP initialized (protocol v%d, agent: %s)",
+		initResult.ProtocolVersion, initResult.AgentInfo.Name)
+
+	// Create ACP session
+	m.logger.Printf("[SESSION] ├─ Creating ACP session...")
+	acpSessionID, err := acpClient.CreateSession(ctx, absPath)
+	if err != nil {
+		m.logger.Printf("[SESSION] ✗ ACP session creation failed: %v", err)
+		return m.spawnFailure(ctx, agentSession, agentID, userSessionID,
+			fmt.Sprintf("failed to create ACP session: %v", err), true)
+	}
+	m.logger.Printf("[SESSION] ✓ ACP session created: %s", acpSessionID)
+
+	// Store session ID on agent
+	agentSession.SetACPSessionID(acpSessionID)
+
 	// Transition agent to ACTIVE
 	agentSession.mu.Lock()
 	agentSession.setACPClient(acpClient)

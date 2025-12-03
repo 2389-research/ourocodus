@@ -448,6 +448,26 @@ func (c *Client) readLoop() {
 	}
 }
 
+// InitializeACP performs the ACP protocol handshake.
+// For the legacy host-mode client, this is a no-op that returns success.
+// The real protocol initialization happens in ACPBridge for container mode.
+func (c *Client) InitializeACP(_ context.Context) (*InitializeResult, error) {
+	return &InitializeResult{
+		ProtocolVersion: 1,
+		AgentInfo: AgentInfo{
+			Name:    "echo-agent",
+			Version: "1.0",
+		},
+	}, nil
+}
+
+// CreateSession creates a new ACP session.
+// For the legacy host-mode client, this is a no-op that returns a dummy session ID.
+// The real session creation happens in ACPBridge for container mode.
+func (c *Client) CreateSession(_ context.Context, _ string) (string, error) {
+	return "host-mode-session", nil
+}
+
 // Close terminates the claude-code-acp process and cleans up resources with context-aware timeout support.
 // This prevents indefinite blocking during shutdown by respecting the context deadline.
 // If the context is canceled or times out before Close completes, an error is returned.
