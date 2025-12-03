@@ -457,3 +457,51 @@ func NewAgentTerminatedMessage(userSessionID, agentID string, workspaceCleaned b
 		WorkspaceCleaned: workspaceCleaned,
 	}
 }
+
+// StreamToolCall represents a tool call in a streaming delta
+type StreamToolCall struct {
+	ToolName  string `json:"toolName"`
+	ToolInput string `json:"toolInput"`
+}
+
+// AgentStreamDelta is sent by relay with streaming updates from the agent
+// Maps ACP session/update events to WebSocket stream deltas
+type AgentStreamDelta struct {
+	BaseMessage
+	UserSessionID string          `json:"userSessionId"`
+	AgentID       string          `json:"agentId"`
+	EventType     string          `json:"eventType"` // text.delta, tool.call, tool.result, error, session.end
+	Delta         string          `json:"delta,omitempty"`
+	ToolCall      *StreamToolCall `json:"toolCall,omitempty"`
+	Final         bool            `json:"final"`
+}
+
+// NewAgentStreamDelta creates a stream delta message for text deltas (pure function)
+func NewAgentStreamDelta(userSessionID, agentID, eventType, delta string, final bool) AgentStreamDelta {
+	return AgentStreamDelta{
+		BaseMessage: BaseMessage{
+			Version: ProtocolVersion,
+			Type:    "agent:stream-delta",
+		},
+		UserSessionID: userSessionID,
+		AgentID:       agentID,
+		EventType:     eventType,
+		Delta:         delta,
+		Final:         final,
+	}
+}
+
+// NewAgentStreamDeltaToolCall creates a stream delta message for tool calls (pure function)
+func NewAgentStreamDeltaToolCall(userSessionID, agentID string, toolCall StreamToolCall) AgentStreamDelta {
+	return AgentStreamDelta{
+		BaseMessage: BaseMessage{
+			Version: ProtocolVersion,
+			Type:    "agent:stream-delta",
+		},
+		UserSessionID: userSessionID,
+		AgentID:       agentID,
+		EventType:     "tool.call",
+		ToolCall:      &toolCall,
+		Final:         false,
+	}
+}

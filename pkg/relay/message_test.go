@@ -1,6 +1,7 @@
 package relay
 
 import (
+	"encoding/json"
 	"testing"
 )
 
@@ -414,5 +415,101 @@ func TestNewAgentMessageResponse(t *testing.T) {
 	}
 	if msg.Timestamp != "2025-10-27T12:00:00Z" {
 		t.Errorf("expected timestamp 2025-10-27T12:00:00Z, got %s", msg.Timestamp)
+	}
+}
+
+// TestAgentStreamDelta_TextDelta tests text delta message
+func TestAgentStreamDelta_TextDelta(t *testing.T) {
+	msg := NewAgentStreamDelta("sess-123", "auth", "text.delta", "Hello", false)
+
+	if msg.Version != ProtocolVersion {
+		t.Errorf("expected version %s, got %s", ProtocolVersion, msg.Version)
+	}
+	if msg.Type != "agent:stream-delta" {
+		t.Errorf("expected type agent:stream-delta, got %s", msg.Type)
+	}
+	if msg.UserSessionID != "sess-123" {
+		t.Errorf("expected userSessionId sess-123, got %s", msg.UserSessionID)
+	}
+	if msg.AgentID != "auth" {
+		t.Errorf("expected agentId auth, got %s", msg.AgentID)
+	}
+	if msg.EventType != "text.delta" {
+		t.Errorf("expected eventType text.delta, got %s", msg.EventType)
+	}
+	if msg.Delta != "Hello" {
+		t.Errorf("expected delta Hello, got %s", msg.Delta)
+	}
+	if msg.Final != false {
+		t.Errorf("expected final false, got %v", msg.Final)
+	}
+}
+
+// TestAgentStreamDelta_ToolCall tests tool call message
+func TestAgentStreamDelta_ToolCall(t *testing.T) {
+	tool := StreamToolCall{
+		ToolName:  "bash",
+		ToolInput: "{\"command\":\"ls -la\"}",
+	}
+	msg := NewAgentStreamDeltaToolCall("sess-123", "auth", tool)
+
+	if msg.Version != ProtocolVersion {
+		t.Errorf("expected version %s, got %s", ProtocolVersion, msg.Version)
+	}
+	if msg.Type != "agent:stream-delta" {
+		t.Errorf("expected type agent:stream-delta, got %s", msg.Type)
+	}
+	if msg.EventType != "tool.call" {
+		t.Errorf("expected eventType tool.call, got %s", msg.EventType)
+	}
+	if msg.ToolCall == nil {
+		t.Fatal("expected toolCall to be set")
+	}
+	if msg.ToolCall.ToolName != "bash" {
+		t.Errorf("expected toolName bash, got %s", msg.ToolCall.ToolName)
+	}
+	if msg.ToolCall.ToolInput != "{\"command\":\"ls -la\"}" {
+		t.Errorf("expected toolInput, got %s", msg.ToolCall.ToolInput)
+	}
+}
+
+// TestAgentStreamDelta_SessionEnd tests session end message
+func TestAgentStreamDelta_SessionEnd(t *testing.T) {
+	msg := NewAgentStreamDelta("sess-123", "auth", "session.end", "", true)
+
+	if msg.EventType != "session.end" {
+		t.Errorf("expected eventType session.end, got %s", msg.EventType)
+	}
+	if msg.Final != true {
+		t.Errorf("expected final true, got %v", msg.Final)
+	}
+}
+
+// TestAgentStreamDelta_Marshal tests JSON serialization
+func TestAgentStreamDelta_Marshal(t *testing.T) {
+	msg := NewAgentStreamDelta("sess-123", "auth", "text.delta", "Hello", false)
+
+	data, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatalf("failed to marshal: %v", err)
+	}
+
+	// Verify JSON structure
+	var parsed map[string]interface{}
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+
+	if parsed["version"] != ProtocolVersion {
+		t.Errorf("expected version %s, got %v", ProtocolVersion, parsed["version"])
+	}
+	if parsed["type"] != "agent:stream-delta" {
+		t.Errorf("expected type agent:stream-delta, got %v", parsed["type"])
+	}
+	if parsed["eventType"] != "text.delta" {
+		t.Errorf("expected eventType text.delta, got %v", parsed["eventType"])
+	}
+	if parsed["delta"] != "Hello" {
+		t.Errorf("expected delta Hello, got %v", parsed["delta"])
 	}
 }
