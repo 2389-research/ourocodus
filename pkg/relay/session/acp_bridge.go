@@ -169,7 +169,10 @@ func NewACPBridge(ctx context.Context, containerID, agentID string, logger Logge
 	return bridge, nil
 }
 
-// InitializeACP performs the protocol handshake with the ACP server
+// InitializeACP performs the ACP protocol handshake with the agent container.
+// It sends an initialize request with client info and capabilities, and returns
+// the agent's protocol version and capabilities. This must be called before
+// creating sessions.
 func (b *ACPBridge) InitializeACP(ctx context.Context) (*acp.InitializeResult, error) {
 	reqID := b.generateRequestID()
 
@@ -216,7 +219,10 @@ func (b *ACPBridge) InitializeACP(ctx context.Context) (*acp.InitializeResult, e
 	return &resp.Result, nil
 }
 
-// CreateSession creates a new ACP session with bypassPermissions mode
+// CreateSession creates a new ACP session with the agent using the specified
+// working directory. It sends a session/new request and returns the session ID
+// that should be used for subsequent prompts. The session is created in
+// bypassPermissions mode with no MCP servers.
 func (b *ACPBridge) CreateSession(ctx context.Context, cwd string) (string, error) {
 	reqID := b.generateRequestID()
 
@@ -558,11 +564,16 @@ func (b *ACPBridge) Notifications() <-chan []byte {
 	return b.notifCh
 }
 
-// Stream returns a channel of parsed events from session/update notifications
+// Stream returns a channel of parsed events from session/update notifications.
+// The returned channel is closed when the context is cancelled, when a session.end
+// event is received, or when the notification channel closes.
+// The goroutine is tracked by the bridge's WaitGroup for clean shutdown.
 func (b *ACPBridge) Stream(ctx context.Context) <-chan acp.Event {
 	eventCh := make(chan acp.Event, 100)
 
+	b.wg.Add(1)
 	go func() {
+		defer b.wg.Done()
 		defer close(eventCh)
 
 		for {
