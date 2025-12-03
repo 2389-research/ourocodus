@@ -169,6 +169,53 @@ func NewACPBridge(ctx context.Context, containerID, agentID string, logger Logge
 	return bridge, nil
 }
 
+// InitializeACP performs the protocol handshake with the ACP server
+func (b *ACPBridge) InitializeACP(ctx context.Context) (*acp.InitializeResult, error) {
+	reqID := b.generateRequestID()
+
+	req := map[string]interface{}{
+		"jsonrpc": "2.0",
+		"id":      reqID,
+		"method":  acp.MethodInitialize,
+		"params": acp.InitializeParams{
+			ProtocolVersion: 1,
+			ClientInfo: acp.ClientInfo{
+				Name:    "ourocodus",
+				Version: "1.0",
+			},
+			Capabilities: map[string]any{},
+		},
+	}
+
+	reqBytes, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal initialize request: %w", err)
+	}
+
+	respBytes, err := b.sendRaw(ctx, reqBytes, reqID)
+	if err != nil {
+		return nil, fmt.Errorf("initialize failed: %w", err)
+	}
+
+	var resp struct {
+		Result acp.InitializeResult `json:"result"`
+		Error  *struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+
+	if err := json.Unmarshal(respBytes, &resp); err != nil {
+		return nil, fmt.Errorf("failed to parse initialize response: %w", err)
+	}
+
+	if resp.Error != nil {
+		return nil, fmt.Errorf("initialize error %d: %s", resp.Error.Code, resp.Error.Message)
+	}
+
+	return &resp.Result, nil
+}
+
 // SendMessage sends an ACP sendMessage request and waits for the response.
 // This method is blocking and serialized - only one request can be in-flight at a time.
 //
