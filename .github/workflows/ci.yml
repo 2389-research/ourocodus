@@ -50,7 +50,7 @@ jobs:
     - name: Verify binaries
       run: |
         test -f bin/relay
-        test -f bin/cli
+        test -f bin/agentd
         test -f bin/echo-agent
         ./bin/relay > /dev/null &
         sleep 1
