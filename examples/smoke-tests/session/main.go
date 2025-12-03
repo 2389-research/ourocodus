@@ -517,6 +517,24 @@ func (c *fakeACPClient) SendMessage(ctx context.Context, content string) (*acp.A
 	}, nil
 }
 
+func (c *fakeACPClient) InitializeACP(ctx context.Context) (*acp.InitializeResult, error) {
+	return &acp.InitializeResult{ProtocolVersion: 1}, nil
+}
+
+func (c *fakeACPClient) CreateSession(ctx context.Context, cwd string) (string, error) {
+	return "fake-session-id", nil
+}
+
+func (c *fakeACPClient) SendPrompt(ctx context.Context, sessionID, prompt string) error {
+	return nil
+}
+
+func (c *fakeACPClient) Stream(ctx context.Context) <-chan acp.Event {
+	ch := make(chan acp.Event)
+	close(ch)
+	return ch
+}
+
 func (c *fakeACPClient) Close(ctx context.Context) error {
 	c.closed = true
 	return nil
