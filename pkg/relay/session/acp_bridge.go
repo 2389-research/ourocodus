@@ -259,6 +259,40 @@ func (b *ACPBridge) CreateSession(ctx context.Context, cwd string) (string, erro
 	return resp.Result.SessionID, nil
 }
 
+// SendPrompt sends a prompt to an existing ACP session
+// This triggers streaming - use Stream() to receive events
+func (b *ACPBridge) SendPrompt(ctx context.Context, sessionID, prompt string) error {
+	reqID := b.generateRequestID()
+
+	req := map[string]interface{}{
+		"jsonrpc": "2.0",
+		"id":      reqID,
+		"method":  acp.MethodSessionPrompt,
+		"params": acp.SessionPromptParams{
+			SessionID: sessionID,
+			Prompt:    prompt,
+		},
+	}
+
+	reqBytes, err := json.Marshal(req)
+	if err != nil {
+		return fmt.Errorf("failed to marshal session/prompt request: %w", err)
+	}
+
+	// Send request (fire-and-forget for streaming)
+	reqBytes = append(reqBytes, '\n')
+
+	b.writeMu.Lock()
+	_, err = b.conn.Write(reqBytes)
+	b.writeMu.Unlock()
+
+	if err != nil {
+		return fmt.Errorf("failed to send prompt: %w", err)
+	}
+
+	return nil
+}
+
 // SendMessage sends an ACP sendMessage request and waits for the response.
 // This method is blocking and serialized - only one request can be in-flight at a time.
 //
