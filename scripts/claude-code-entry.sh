@@ -59,7 +59,12 @@ fi
 
 # Write PID file for health check (before exec replaces this process)
 # The node process will inherit this PID
-echo $$ > /tmp/claude-code.pid
+# NOTE: /tmp must be writable (tmpfs is required when using read-only rootfs)
+if ! echo $$ > /tmp/claude-code.pid 2>/dev/null; then
+    echo "[claude-code] ERROR: Failed to write PID file to /tmp/claude-code.pid" >&2
+    echo "[claude-code] Ensure /tmp is writable (check TmpfsSizeMB > 0 when ReadOnlyRootfs=true)" >&2
+    exit 1
+fi
 
 # Start claude-code-acp
 # stdin/stdout are used for ACP protocol communication
