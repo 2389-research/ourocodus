@@ -243,16 +243,9 @@ func (l *AgentContainerLauncher) createContainerWithMounts(
 		WorkspaceDir:      wt.Path(),  // Use the AgentWorktree path
 		CustomMounts:      credMounts, // Add credential mounts (includes .creds if present)
 		Env:               config.Env,
-		Labels:            containerLabels,   // Use labels from builder
-		SkipOutputLogging: skipOutputLogging, // Skip if using container attach mode
-		RuntimeHardening: containersession.RuntimeHardening{
-			ReadOnlyRootfs:  config.RuntimeHardening.ReadOnlyRootfs,
-			DropAllCaps:     config.RuntimeHardening.DropAllCaps,
-			NoNewPrivileges: config.RuntimeHardening.NoNewPrivileges,
-			MemoryLimitMB:   config.RuntimeHardening.MemoryLimitMB,
-			CPULimit:        config.RuntimeHardening.CPULimit,
-			TmpfsSizeMB:     config.RuntimeHardening.TmpfsSizeMB,
-		},
+		Labels:            containerLabels,         // Use labels from builder
+		SkipOutputLogging: skipOutputLogging,       // Skip if using container attach mode
+		RuntimeHardening:  config.RuntimeHardening, // Same type via alias, no field-by-field copy needed
 	})
 	if err != nil {
 		return nil, err

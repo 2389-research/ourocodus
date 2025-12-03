@@ -44,9 +44,55 @@ The container runs with these security options by default:
 - `--read-only`: Root filesystem is read-only
 - `--cap-drop=ALL`: All Linux capabilities dropped
 - `--security-opt=no-new-privileges`: Cannot gain privileges
-- `--tmpfs /tmp`: Writable tmpfs for temporary files (100MB, noexec, nosuid)
+- `--tmpfs /tmp`: Writable tmpfs for temporary files (256MB, noexec, nosuid)
 - `--memory=2g`: 2GB memory limit
 - `--cpus=2`: 2 CPU cores limit
+
+### Configurable Resource Limits
+
+Resource limits can be overridden via environment variables on the host:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AGENT_MEMORY_LIMIT_MB` | 2048 | Memory limit in megabytes |
+| `AGENT_CPU_LIMIT` | 2.0 | CPU cores (fractional allowed) |
+| `AGENT_TMPFS_SIZE_MB` | 256 | tmpfs size for /tmp in megabytes |
+
+Example:
+```bash
+export AGENT_MEMORY_LIMIT_MB=4096
+export AGENT_CPU_LIMIT=4.0
+export AGENT_TMPFS_SIZE_MB=512
+# Then start your agent orchestrator
+```
+
+## Security Considerations
+
+### API Key Exposure via Environment
+
+**Warning:** When credentials are sourced from `.creds/.env`, the `ANTHROPIC_API_KEY` is exposed in the process environment. This is visible via `/proc/$pid/environ` to anyone with `docker exec` access to the container.
+
+**Mitigations applied:**
+- Read-only root filesystem prevents persistent modifications
+- All Linux capabilities dropped (`--cap-drop=ALL`)
+- No privilege escalation (`--security-opt=no-new-privileges`)
+- Credentials file mounted read-only with 0600 permissions
+- Container runs as non-root user (`node`, UID 1000)
+
+**Recommendations:**
+- Restrict Docker socket access to trusted users only
+- Use network policies to limit container egress
+- Consider migrating to Docker secrets or file-descriptor passing in production
+- Monitor container exec events in production environments
+
+### User and Home Directory
+
+The container uses the `node` user (UID 1000) from the Node.js base image:
+- Home directory: `/home/node`
+- Credential paths: `/home/node/.creds/`, `/home/node/.claude/`
+- SSH keys: `/home/node/.ssh/`
+
+This differs from some documentation that may reference `/home/agent`. The UID (1000) is consistent with container best practices for non-root execution.
 
 ## Building Images
 
@@ -69,7 +115,7 @@ docker run --rm -it \
   --read-only \
   --cap-drop=ALL \
   --security-opt=no-new-privileges \
-  --tmpfs /tmp:size=100m,noexec,nosuid \
+  --tmpfs /tmp:size=256m,noexec,nosuid \
   -v /tmp/test-creds:/home/node/.creds:ro \
   ourocodus/agent:latest
 ```

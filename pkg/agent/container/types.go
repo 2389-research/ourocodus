@@ -7,27 +7,17 @@ import (
 	"github.com/2389-research/ourocodus/pkg/worktree"
 )
 
-// RuntimeHardening contains security hardening options for containers.
-// These settings reduce attack surface and limit container capabilities.
-type RuntimeHardening struct {
-	// ReadOnlyRootfs makes the container's root filesystem read-only
-	ReadOnlyRootfs bool
-
-	// DropAllCaps drops all Linux capabilities
-	DropAllCaps bool
-
-	// NoNewPrivileges prevents privilege escalation
-	NoNewPrivileges bool
-
-	// MemoryLimitMB sets memory limit in megabytes (0 = no limit)
-	MemoryLimitMB int64
-
-	// CPULimit sets CPU limit as number of cores (0 = no limit)
-	CPULimit float64
-
-	// TmpfsSizeMB sets tmpfs size for /tmp in megabytes (0 = no tmpfs)
-	TmpfsSizeMB int64
-}
+// RuntimeHardening is an alias to containersession.RuntimeHardening.
+// This ensures a single source of truth for security hardening options.
+//
+// Available fields:
+//   - ReadOnlyRootfs: makes the container's root filesystem read-only
+//   - DropAllCaps: drops all Linux capabilities
+//   - NoNewPrivileges: prevents privilege escalation
+//   - MemoryLimitMB: memory limit in megabytes (0 = no limit)
+//   - CPULimit: CPU limit as number of cores (0 = no limit)
+//   - TmpfsSizeMB: tmpfs size for /tmp in megabytes (0 = no tmpfs)
+type RuntimeHardening = containersession.RuntimeHardening
 
 // SpawnConfig contains configuration for spawning an agent container.
 type SpawnConfig struct {

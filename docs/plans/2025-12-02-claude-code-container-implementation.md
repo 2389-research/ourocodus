@@ -875,19 +875,19 @@ All credential mount paths were updated from `/root/` to `/home/node/`:
 
 ### RuntimeHardening Implementation
 
-The `RuntimeHardening` struct was implemented across multiple packages:
-- `pkg/agent/container/types.go` - Core struct definition
-- `pkg/containersession/config.go` - Container session configuration
-- `pkg/agent/container/launcher.go` - Hardening option passthrough
-- `pkg/agent/factory.go` - Default hardening for Claude Code agents
+The `RuntimeHardening` struct is defined in `pkg/containersession/config.go` as the single source of truth:
+- `pkg/agent/container/types.go` - Type alias to `containersession.RuntimeHardening`
+- `pkg/containersession/config.go` - Canonical struct definition
+- `pkg/agent/container/launcher.go` - Passes hardening options directly (no field-by-field copy)
+- `pkg/agent/factory.go` - Default hardening for Claude Code agents with env var overrides
 
-Default hardening settings:
+Default hardening settings (configurable via environment variables):
 - Read-only root filesystem (`ReadOnlyRootfs: true`)
 - All Linux capabilities dropped (`DropAllCaps: true`)
 - No privilege escalation (`NoNewPrivileges: true`)
-- 2GB memory limit (`MemoryLimitMB: 2048`)
-- 2 CPU cores limit (`CPULimit: 2.0`)
-- 100MB tmpfs for /tmp (`TmpfsSizeMB: 100`)
+- 2GB memory limit (`MemoryLimitMB: 2048`, override: `AGENT_MEMORY_LIMIT_MB`)
+- 2 CPU cores limit (`CPULimit: 2.0`, override: `AGENT_CPU_LIMIT`)
+- 256MB tmpfs for /tmp (`TmpfsSizeMB: 256`, override: `AGENT_TMPFS_SIZE_MB`)
 
 ### Security Considerations
 

@@ -8,13 +8,19 @@ cleanup() {
 trap cleanup EXIT
 
 # Credential sourcing with fallback
-# Priority: 1) .creds/.env file  2) ~/.claude directory  3) Error
+# Priority:
+#   1) ANTHROPIC_API_KEY already in environment (passed via -e flag)
+#   2) .creds/.env file (mounted volume)
+#   3) ~/.claude directory (OAuth credentials)
+#   4) Error
 #
-# SECURITY NOTE: Sourcing .env exposes API key to process environment.
-# This is visible via /proc/$pid/environ to anyone with container exec access.
+# SECURITY NOTE: API key in environment is visible via /proc/$pid/environ
+# to anyone with container exec access.
 # Mitigations: read-only rootfs, drop capabilities, no-new-privileges.
 
-if [ -f "/home/node/.creds/.env" ]; then
+if [ -n "$ANTHROPIC_API_KEY" ]; then
+    echo "[claude-code] Using ANTHROPIC_API_KEY from environment" >&2
+elif [ -f "/home/node/.creds/.env" ]; then
     echo "[claude-code] Sourcing credentials from .creds/.env" >&2
     # Validate .env format before sourcing (basic safety check)
     if grep -qE '^[A-Z_][A-Z0-9_]*=' /home/node/.creds/.env 2>/dev/null; then
@@ -30,7 +36,10 @@ elif [ -f "/home/node/.claude/.credentials.json" ]; then
     # claude-code-acp will read from standard location
 else
     echo "[claude-code] ERROR: No credentials found" >&2
-    echo "[claude-code] Provide ANTHROPIC_API_KEY via .creds/.env or mount ~/.claude" >&2
+    echo "[claude-code] Provide credentials via one of:" >&2
+    echo "[claude-code]   - ANTHROPIC_API_KEY environment variable" >&2
+    echo "[claude-code]   - .creds/.env file mounted at /home/node/.creds" >&2
+    echo "[claude-code]   - ~/.claude directory with OAuth credentials" >&2
     exit 1
 fi
 
