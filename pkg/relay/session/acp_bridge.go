@@ -558,6 +558,45 @@ func (b *ACPBridge) Notifications() <-chan []byte {
 	return b.notifCh
 }
 
+// Stream returns a channel of parsed events from session/update notifications
+func (b *ACPBridge) Stream(ctx context.Context) <-chan acp.Event {
+	eventCh := make(chan acp.Event, 100)
+
+	go func() {
+		defer close(eventCh)
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case raw, ok := <-b.notifCh:
+				if !ok {
+					return
+				}
+
+				event, err := acp.ParseSessionUpdate(raw)
+				if err != nil {
+					b.logf("[ACPBridge] Failed to parse notification: %v", err)
+					continue
+				}
+
+				select {
+				case eventCh <- *event:
+				case <-ctx.Done():
+					return
+				}
+
+				// Stop streaming on session end
+				if event.Type == acp.EventSessionEnd {
+					return
+				}
+			}
+		}
+	}()
+
+	return eventCh
+}
+
 // extractJSONRPCID extracts the "id" field from a JSON-RPC response.
 // Returns empty string if id is not present or cannot be extracted.
 // Handles string, numeric, and null IDs per JSON-RPC 2.0 spec.

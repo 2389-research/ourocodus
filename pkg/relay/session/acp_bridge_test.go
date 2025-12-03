@@ -135,3 +135,10 @@ func TestACPBridge_SendPrompt_Exists(t *testing.T) {
 	var bridge *ACPBridge
 	var _ func(context.Context, string, string) error = bridge.SendPrompt
 }
+
+// TestACPBridge_Stream_Exists verifies the Stream method signature exists and compiles.
+func TestACPBridge_Stream_Exists(t *testing.T) {
+	// This test verifies the method signature exists
+	var bridge *ACPBridge
+	var _ func(context.Context) <-chan acp.Event = bridge.Stream
+}
