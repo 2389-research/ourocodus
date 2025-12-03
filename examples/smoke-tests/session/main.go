@@ -172,15 +172,15 @@ func testSpawnMultipleAgents(ctx context.Context, manager *session.Manager, verb
 
 	// Use unique agent IDs with timestamp to avoid lease conflicts
 	ts := time.Now().UnixNano()
-	roles := []string{
+	agentIDs := []string{
 		fmt.Sprintf("multi-auth-%d", ts),
 		fmt.Sprintf("multi-db-%d", ts),
 		fmt.Sprintf("multi-tests-%d", ts),
 	}
-	for _, role := range roles {
-		workspace := fmt.Sprintf("./workspaces/%s", role)
-		if err := manager.SpawnAgent(ctx, sessionID, role, workspace); err != nil {
-			return fmt.Errorf("failed to spawn %s: %w", role, err)
+	for _, agentID := range agentIDs {
+		workspace := fmt.Sprintf("./workspaces/%s", agentID)
+		if err := manager.SpawnAgent(ctx, sessionID, agentID, workspace); err != nil {
+			return fmt.Errorf("failed to spawn %s: %w", agentID, err)
 		}
 	}
 
@@ -193,13 +193,13 @@ func testSpawnMultipleAgents(ctx context.Context, manager *session.Manager, verb
 		return fmt.Errorf("expected 3 agents, got %d", len(agents))
 	}
 
-	for _, role := range roles {
-		agent, err := manager.GetAgent(sessionID, role)
+	for _, agentID := range agentIDs {
+		agent, err := manager.GetAgent(sessionID, agentID)
 		if err != nil {
-			return fmt.Errorf("agent %s not found: %w", role, err)
+			return fmt.Errorf("agent %s not found: %w", agentID, err)
 		}
 		if agent.GetState() != session.AgentActive {
-			return fmt.Errorf("agent %s not ACTIVE: %s", role, agent.GetState())
+			return fmt.Errorf("agent %s not ACTIVE: %s", agentID, agent.GetState())
 		}
 	}
 
@@ -543,6 +543,24 @@ func (c *fakeACPClient) SendMessage(ctx context.Context, content string) (*acp.A
 	return &acp.AgentMessage{
 		Content: "fake response from " + c.workspace,
 	}, nil
+}
+
+func (c *fakeACPClient) InitializeACP(ctx context.Context) (*acp.InitializeResult, error) {
+	return &acp.InitializeResult{ProtocolVersion: 1}, nil
+}
+
+func (c *fakeACPClient) CreateSession(ctx context.Context, cwd string) (string, error) {
+	return "fake-session-id", nil
+}
+
+func (c *fakeACPClient) SendPrompt(ctx context.Context, sessionID, prompt string) error {
+	return nil
+}
+
+func (c *fakeACPClient) Stream(ctx context.Context) <-chan acp.Event {
+	ch := make(chan acp.Event)
+	close(ch)
+	return ch
 }
 
 func (c *fakeACPClient) Close(ctx context.Context) error {

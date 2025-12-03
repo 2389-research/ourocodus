@@ -182,6 +182,31 @@ func (a *acpClientAdapter) SendMessage(ctx context.Context, content string) (*ac
 	return a.client.SendMessage(ctx, content)
 }
 
+// InitializeACP performs the ACP protocol handshake
+func (a *acpClientAdapter) InitializeACP(ctx context.Context) (*acp.InitializeResult, error) {
+	return a.client.InitializeACP(ctx)
+}
+
+// CreateSession creates a new ACP session
+func (a *acpClientAdapter) CreateSession(ctx context.Context, cwd string) (string, error) {
+	return a.client.CreateSession(ctx, cwd)
+}
+
+// SendPrompt sends a prompt to an existing ACP session
+// For host mode, this delegates to legacy SendMessage
+func (a *acpClientAdapter) SendPrompt(ctx context.Context, sessionID, prompt string) error {
+	_, err := a.client.SendMessage(ctx, prompt)
+	return err
+}
+
+// Stream returns a channel of parsed events from session/update notifications
+// For host mode, this returns an empty channel since streaming isn't supported
+func (a *acpClientAdapter) Stream(ctx context.Context) <-chan acp.Event {
+	ch := make(chan acp.Event)
+	close(ch)
+	return ch
+}
+
 // Close closes the ACP client
 func (a *acpClientAdapter) Close(ctx context.Context) error {
 	return a.client.Close(ctx)

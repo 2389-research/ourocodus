@@ -169,6 +169,136 @@ func NewACPBridge(ctx context.Context, containerID, agentID string, logger Logge
 	return bridge, nil
 }
 
+// InitializeACP performs the ACP protocol handshake with the agent container.
+// It sends an initialize request with client info and capabilities, and returns
+// the agent's protocol version and capabilities. This must be called before
+// creating sessions.
+func (b *ACPBridge) InitializeACP(ctx context.Context) (*acp.InitializeResult, error) {
+	reqID := b.generateRequestID()
+
+	req := map[string]interface{}{
+		"jsonrpc": "2.0",
+		"id":      reqID,
+		"method":  acp.MethodInitialize,
+		"params": acp.InitializeParams{
+			ProtocolVersion: 1,
+			ClientInfo: acp.ClientInfo{
+				Name:    "ourocodus",
+				Version: "1.0",
+			},
+			Capabilities: map[string]any{},
+		},
+	}
+
+	reqBytes, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal initialize request: %w", err)
+	}
+
+	respBytes, err := b.sendRaw(ctx, reqBytes, reqID)
+	if err != nil {
+		return nil, fmt.Errorf("initialize failed: %w", err)
+	}
+
+	var resp struct {
+		Result acp.InitializeResult `json:"result"`
+		Error  *struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+
+	if err := json.Unmarshal(respBytes, &resp); err != nil {
+		return nil, fmt.Errorf("failed to parse initialize response: %w", err)
+	}
+
+	if resp.Error != nil {
+		return nil, fmt.Errorf("initialize error %d: %s", resp.Error.Code, resp.Error.Message)
+	}
+
+	return &resp.Result, nil
+}
+
+// CreateSession creates a new ACP session with the agent using the specified
+// working directory. It sends a session/new request and returns the session ID
+// that should be used for subsequent prompts. The session is created in
+// bypassPermissions mode with no MCP servers.
+func (b *ACPBridge) CreateSession(ctx context.Context, cwd string) (string, error) {
+	reqID := b.generateRequestID()
+
+	req := map[string]interface{}{
+		"jsonrpc": "2.0",
+		"id":      reqID,
+		"method":  acp.MethodSessionNew,
+		"params": acp.SessionNewParams{
+			Cwd:        cwd,
+			MCPServers: []any{},
+		},
+	}
+
+	reqBytes, err := json.Marshal(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal session/new request: %w", err)
+	}
+
+	respBytes, err := b.sendRaw(ctx, reqBytes, reqID)
+	if err != nil {
+		return "", fmt.Errorf("session/new failed: %w", err)
+	}
+
+	var resp struct {
+		Result acp.SessionNewResult `json:"result"`
+		Error  *struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+
+	if err := json.Unmarshal(respBytes, &resp); err != nil {
+		return "", fmt.Errorf("failed to parse session/new response: %w", err)
+	}
+
+	if resp.Error != nil {
+		return "", fmt.Errorf("session/new error %d: %s", resp.Error.Code, resp.Error.Message)
+	}
+
+	return resp.Result.SessionID, nil
+}
+
+// SendPrompt sends a prompt to an existing ACP session
+// This triggers streaming - use Stream() to receive events
+func (b *ACPBridge) SendPrompt(ctx context.Context, sessionID, prompt string) error {
+	reqID := b.generateRequestID()
+
+	req := map[string]interface{}{
+		"jsonrpc": "2.0",
+		"id":      reqID,
+		"method":  acp.MethodSessionPrompt,
+		"params": acp.SessionPromptParams{
+			SessionID: sessionID,
+			Prompt:    prompt,
+		},
+	}
+
+	reqBytes, err := json.Marshal(req)
+	if err != nil {
+		return fmt.Errorf("failed to marshal session/prompt request: %w", err)
+	}
+
+	// Send request (fire-and-forget for streaming)
+	reqBytes = append(reqBytes, '\n')
+
+	b.writeMu.Lock()
+	_, err = b.conn.Write(reqBytes)
+	b.writeMu.Unlock()
+
+	if err != nil {
+		return fmt.Errorf("failed to send prompt: %w", err)
+	}
+
+	return nil
+}
+
 // SendMessage sends an ACP sendMessage request and waits for the response.
 // This method is blocking and serialized - only one request can be in-flight at a time.
 //
@@ -432,6 +562,50 @@ func (b *ACPBridge) Close(ctx context.Context) error {
 // This can be used to forward notifications to the WebSocket client.
 func (b *ACPBridge) Notifications() <-chan []byte {
 	return b.notifCh
+}
+
+// Stream returns a channel of parsed events from session/update notifications.
+// The returned channel is closed when the context is cancelled, when a session.end
+// event is received, or when the notification channel closes.
+// The goroutine is tracked by the bridge's WaitGroup for clean shutdown.
+func (b *ACPBridge) Stream(ctx context.Context) <-chan acp.Event {
+	eventCh := make(chan acp.Event, 100)
+
+	b.wg.Add(1)
+	go func() {
+		defer b.wg.Done()
+		defer close(eventCh)
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case raw, ok := <-b.notifCh:
+				if !ok {
+					return
+				}
+
+				event, err := acp.ParseSessionUpdate(raw)
+				if err != nil {
+					b.logf("[ACPBridge] Failed to parse notification: %v", err)
+					continue
+				}
+
+				select {
+				case eventCh <- *event:
+				case <-ctx.Done():
+					return
+				}
+
+				// Stop streaming on session end
+				if event.Type == acp.EventSessionEnd {
+					return
+				}
+			}
+		}
+	}()
+
+	return eventCh
 }
 
 // extractJSONRPCID extracts the "id" field from a JSON-RPC response.

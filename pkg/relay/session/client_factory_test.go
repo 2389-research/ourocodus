@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/2389-research/ourocodus/pkg/acp"
 	"github.com/2389-research/ourocodus/pkg/containersession"
 	"github.com/docker/docker/api/types"
 	dockercontainer "github.com/docker/docker/api/types/container"
@@ -760,4 +761,24 @@ func (m *mockDockerClient) ImagePull(ctx context.Context, refStr string,
 	options image.PullOptions,
 ) (io.ReadCloser, error) {
 	return io.NopCloser(strings.NewReader("")), nil
+}
+
+// TestACPClientAdapter_ImplementsStreamingInterface verifies that acpClientAdapter
+// implements the full ACPClient interface including streaming methods
+func TestACPClientAdapter_ImplementsStreamingInterface(t *testing.T) {
+	// This test verifies interface compliance at compile time
+	var _ ACPClient = (*acpClientAdapter)(nil)
+
+	// The interface should have these methods - this is a compile-time check
+	type requiredInterface interface {
+		SendMessage(ctx context.Context, content string) (*acp.AgentMessage, error)
+		InitializeACP(ctx context.Context) (*acp.InitializeResult, error)
+		CreateSession(ctx context.Context, cwd string) (string, error)
+		SendPrompt(ctx context.Context, sessionID, prompt string) error
+		Stream(ctx context.Context) <-chan acp.Event
+		Close(ctx context.Context) error
+	}
+
+	// Verify acpClientAdapter implements the required interface
+	var _ requiredInterface = (*acpClientAdapter)(nil)
 }

@@ -1,7 +1,10 @@
 package session
 
 import (
+	"context"
 	"testing"
+
+	"github.com/2389-research/ourocodus/pkg/acp"
 )
 
 // TestExtractJSONRPCID tests the extractJSONRPCID function with various ID types.
@@ -110,4 +113,32 @@ func TestACPBridge_GenerateRequestID_PerInstance(t *testing.T) {
 	if id2Next != "req-2" {
 		t.Errorf("Bridge 2 second ID = %s, want req-2", id2Next)
 	}
+}
+
+// TestACPBridge_InitializeACP_Exists verifies the InitializeACP method signature exists and compiles.
+func TestACPBridge_InitializeACP_Exists(t *testing.T) {
+	// This test verifies the method signature exists and is type-safe
+	var bridge *ACPBridge
+	var _ func(context.Context) (*acp.InitializeResult, error) = bridge.InitializeACP
+}
+
+// TestACPBridge_CreateSession_Exists verifies the CreateSession method signature exists and compiles.
+func TestACPBridge_CreateSession_Exists(t *testing.T) {
+	// This test verifies the method signature exists
+	var bridge *ACPBridge
+	var _ func(context.Context, string) (string, error) = bridge.CreateSession
+}
+
+// TestACPBridge_SendPrompt_Exists verifies the SendPrompt method signature exists and compiles.
+func TestACPBridge_SendPrompt_Exists(t *testing.T) {
+	// This test verifies the method signature exists
+	var bridge *ACPBridge
+	var _ func(context.Context, string, string) error = bridge.SendPrompt
+}
+
+// TestACPBridge_Stream_Exists verifies the Stream method signature exists and compiles.
+func TestACPBridge_Stream_Exists(t *testing.T) {
+	// This test verifies the method signature exists
+	var bridge *ACPBridge
+	var _ func(context.Context) <-chan acp.Event = bridge.Stream
 }

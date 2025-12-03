@@ -40,6 +40,24 @@ func (m *integrationMockACPClient) SendMessage(ctx context.Context, content stri
 	}, nil
 }
 
+func (m *integrationMockACPClient) InitializeACP(ctx context.Context) (*acp.InitializeResult, error) {
+	return &acp.InitializeResult{ProtocolVersion: 1}, nil
+}
+
+func (m *integrationMockACPClient) CreateSession(ctx context.Context, cwd string) (string, error) {
+	return "integration-test-session", nil
+}
+
+func (m *integrationMockACPClient) SendPrompt(ctx context.Context, sessionID, prompt string) error {
+	return nil
+}
+
+func (m *integrationMockACPClient) Stream(ctx context.Context) <-chan acp.Event {
+	ch := make(chan acp.Event)
+	close(ch)
+	return ch
+}
+
 func (m *integrationMockACPClient) Close(ctx context.Context) error {
 	if m.closeFunc != nil {
 		return m.closeFunc(ctx)

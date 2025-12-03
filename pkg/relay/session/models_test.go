@@ -516,6 +516,22 @@ func isDockerAvailable(t *testing.T) bool {
 	return true
 }
 
+func TestAgentSession_ACPSessionID(t *testing.T) {
+	now := time.Now()
+	agent := NewAgentSession("test-agent", "/workspace", now)
+
+	// Initially empty
+	if agent.GetACPSessionID() != "" {
+		t.Errorf("expected empty ACPSessionID, got %s", agent.GetACPSessionID())
+	}
+
+	// Set and get
+	agent.SetACPSessionID("session-123")
+	if agent.GetACPSessionID() != "session-123" {
+		t.Errorf("expected session-123, got %s", agent.GetACPSessionID())
+	}
+}
+
 // createTestContainer creates a test agent container for unit tests
 func createTestContainer(t *testing.T, agentID, workspace string) string {
 	t.Helper()

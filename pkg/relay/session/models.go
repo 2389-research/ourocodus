@@ -87,11 +87,12 @@ type AgentSession struct {
 	expiresAt   time.Time // Lease expiration timestamp
 
 	// Mutable fields (protected by mu)
-	state      AgentState
-	acpClient  ACPClient
-	lastActive time.Time
-	errorMsg   string    // Error message if state is FAILED
-	history    []Message // Conversation history
+	state        AgentState
+	acpClient    ACPClient
+	lastActive   time.Time
+	errorMsg     string    // Error message if state is FAILED
+	history      []Message // Conversation history
+	acpSessionID string    // ACP session ID (1:1 with this agent)
 
 	mu sync.RWMutex
 }
@@ -135,9 +136,17 @@ type WebSocketConn interface {
 }
 
 // ACPClient abstracts ACP process operations
-// Implemented by pkg/acp.Client
+// Implemented by pkg/acp.Client and ACPBridge
 type ACPClient interface {
+	// Legacy method (deprecated, for backward compat)
 	SendMessage(ctx context.Context, content string) (*acp.AgentMessage, error)
+
+	// New ACP protocol methods
+	InitializeACP(ctx context.Context) (*acp.InitializeResult, error)
+	CreateSession(ctx context.Context, cwd string) (string, error)
+	SendPrompt(ctx context.Context, sessionID, prompt string) error
+	Stream(ctx context.Context) <-chan acp.Event
+
 	Close(ctx context.Context) error
 }
 
@@ -300,6 +309,20 @@ func (a *AgentSession) GetHistory() []Message {
 	history := make([]Message, len(a.history))
 	copy(history, a.history)
 	return history
+}
+
+// GetACPSessionID returns the ACP session ID for this agent
+func (a *AgentSession) GetACPSessionID() string {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.acpSessionID
+}
+
+// SetACPSessionID sets the ACP session ID for this agent
+func (a *AgentSession) SetACPSessionID(sessionID string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.acpSessionID = sessionID
 }
 
 // --- CLI Agent Adoption methods (Phase 1) ---
