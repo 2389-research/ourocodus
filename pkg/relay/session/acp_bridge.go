@@ -216,6 +216,49 @@ func (b *ACPBridge) InitializeACP(ctx context.Context) (*acp.InitializeResult, e
 	return &resp.Result, nil
 }
 
+// CreateSession creates a new ACP session with bypassPermissions mode
+func (b *ACPBridge) CreateSession(ctx context.Context, cwd string) (string, error) {
+	reqID := b.generateRequestID()
+
+	req := map[string]interface{}{
+		"jsonrpc": "2.0",
+		"id":      reqID,
+		"method":  acp.MethodSessionNew,
+		"params": acp.SessionNewParams{
+			Cwd:        cwd,
+			MCPServers: []any{},
+		},
+	}
+
+	reqBytes, err := json.Marshal(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal session/new request: %w", err)
+	}
+
+	respBytes, err := b.sendRaw(ctx, reqBytes, reqID)
+	if err != nil {
+		return "", fmt.Errorf("session/new failed: %w", err)
+	}
+
+	var resp struct {
+		Result acp.SessionNewResult `json:"result"`
+		Error  *struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+
+	if err := json.Unmarshal(respBytes, &resp); err != nil {
+		return "", fmt.Errorf("failed to parse session/new response: %w", err)
+	}
+
+	if resp.Error != nil {
+		return "", fmt.Errorf("session/new error %d: %s", resp.Error.Code, resp.Error.Message)
+	}
+
+	return resp.Result.SessionID, nil
+}
+
 // SendMessage sends an ACP sendMessage request and waits for the response.
 // This method is blocking and serialized - only one request can be in-flight at a time.
 //

@@ -121,3 +121,10 @@ func TestACPBridge_InitializeACP_Exists(t *testing.T) {
 	var bridge *ACPBridge
 	var _ func(context.Context) (*acp.InitializeResult, error) = bridge.InitializeACP
 }
+
+// TestACPBridge_CreateSession_Exists verifies the CreateSession method signature exists and compiles.
+func TestACPBridge_CreateSession_Exists(t *testing.T) {
+	// This test verifies the method signature exists
+	var bridge *ACPBridge
+	var _ func(context.Context, string) (string, error) = bridge.CreateSession
+}
