@@ -81,9 +81,9 @@ func NewAgentContainerLauncher(
 //
 // The container will have:
 //   - Workspace mounted at /workspace (read-write)
-//   - SSH key at /root/.ssh/id_ed25519 (read-only, if provided)
-//   - GitHub token at /root/.github-token (read-only, if provided)
-//   - .creds directory at /root/.creds (read-only, if exists in workspace)
+//   - SSH key at /home/node/.ssh/id_ed25519 (read-only, if provided)
+//   - GitHub token at /home/node/.github-token (read-only, if provided)
+//   - .creds directory at /home/node/.creds (read-only, if exists in workspace)
 //
 // Returns:
 //   - AgentContainerHandle: Handle to the running container
@@ -194,7 +194,7 @@ func (l *AgentContainerLauncher) Spawn(ctx context.Context, config SpawnConfig) 
 //
 // The worktree path is mounted at /workspace (read-write) and credentials are mounted
 // read-only via the paths returned by the credential mounter.
-// If a .creds directory exists in the workspace, it is mounted read-only at /root/.creds.
+// If a .creds directory exists in the workspace, it is mounted read-only at /home/node/.creds.
 func (l *AgentContainerLauncher) createContainerWithMounts(
 	ctx context.Context,
 	config SpawnConfig,
@@ -211,7 +211,7 @@ func (l *AgentContainerLauncher) createContainerWithMounts(
 		credMounts = append(credMounts, mount.Mount{
 			Type:     mount.TypeBind,
 			Source:   credsPath,
-			Target:   "/root/.creds",
+			Target:   "/home/node/.creds",
 			ReadOnly: true,
 		})
 	}
@@ -243,8 +243,9 @@ func (l *AgentContainerLauncher) createContainerWithMounts(
 		WorkspaceDir:      wt.Path(),  // Use the AgentWorktree path
 		CustomMounts:      credMounts, // Add credential mounts (includes .creds if present)
 		Env:               config.Env,
-		Labels:            containerLabels,   // Use labels from builder
-		SkipOutputLogging: skipOutputLogging, // Skip if using container attach mode
+		Labels:            containerLabels,         // Use labels from builder
+		SkipOutputLogging: skipOutputLogging,       // Skip if using container attach mode
+		RuntimeHardening:  config.RuntimeHardening, // Same type via alias, no field-by-field copy needed
 	})
 	if err != nil {
 		return nil, err

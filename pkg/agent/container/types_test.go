@@ -164,3 +164,17 @@ func TestCredentialFiles_EmptyFields(t *testing.T) {
 	assert.Empty(t, files.GitSSHKeyPath)
 	assert.Empty(t, files.GitHubTokenPath)
 }
+
+func TestSpawnConfig_RuntimeHardening(t *testing.T) {
+	hardening := RuntimeHardening{
+		ReadOnlyRootfs: true,
+		MemoryLimitMB:  2048,
+	}
+
+	if !hardening.ReadOnlyRootfs {
+		t.Error("expected ReadOnlyRootfs to be true")
+	}
+	if hardening.MemoryLimitMB != 2048 {
+		t.Errorf("expected MemoryLimitMB=2048, got %d", hardening.MemoryLimitMB)
+	}
+}

@@ -1105,3 +1105,139 @@ func TestCreateContainerSession_TimestampInvariant(t *testing.T) {
 		}
 	})
 }
+
+func TestCreateContainerSessionWithConfig_RuntimeHardening(t *testing.T) {
+	t.Run("applies runtime hardening to container", func(t *testing.T) {
+		var capturedHostConfig *container.HostConfig
+		docker := &mockDockerClient{
+			createFn: func(ctx context.Context, config *container.Config, hostConfig *container.HostConfig, networkingConfig *network.NetworkingConfig, platform *ocispec.Platform, containerName string) (container.CreateResponse, error) {
+				capturedHostConfig = hostConfig
+				return container.CreateResponse{ID: "test-container-id"}, nil
+			},
+			listFn: func(ctx context.Context, options container.ListOptions) ([]container.Summary, error) {
+				return []container.Summary{}, nil
+			},
+		}
+		manager := NewManager(docker, &mockIDGenerator{}, &mockClock{}, &mockLogger{}, t.TempDir())
+
+		config := CreateConfig{
+			ImageName: "test:latest",
+			Command:   []string{"echo", "test"},
+			RuntimeHardening: RuntimeHardening{
+				ReadOnlyRootfs:  true,
+				DropAllCaps:     true,
+				NoNewPrivileges: true,
+				MemoryLimitMB:   2048,
+				CPULimit:        2.0,
+				TmpfsSizeMB:     100,
+			},
+		}
+
+		_, err := manager.CreateContainerSessionWithConfig(context.Background(), config)
+		if err != nil {
+			t.Fatalf("Expected no error, got %v", err)
+		}
+
+		if capturedHostConfig == nil {
+			t.Fatal("Expected hostConfig to be captured")
+		}
+
+		// Verify read-only rootfs
+		if !capturedHostConfig.ReadonlyRootfs {
+			t.Error("Expected ReadonlyRootfs to be true")
+		}
+
+		// Verify capabilities dropped
+		capDropFound := false
+		for _, cap := range capturedHostConfig.CapDrop {
+			if cap == "ALL" {
+				capDropFound = true
+				break
+			}
+		}
+		if !capDropFound {
+			t.Error("Expected CapDrop to contain 'ALL'")
+		}
+
+		// Verify no-new-privileges
+		noNewPrivFound := false
+		for _, opt := range capturedHostConfig.SecurityOpt {
+			if opt == "no-new-privileges" {
+				noNewPrivFound = true
+				break
+			}
+		}
+		if !noNewPrivFound {
+			t.Error("Expected SecurityOpt to contain 'no-new-privileges'")
+		}
+
+		// Verify memory limit
+		expectedMemory := int64(2048 * 1024 * 1024)
+		if capturedHostConfig.Memory != expectedMemory {
+			t.Errorf("Expected Memory to be %d, got %d", expectedMemory, capturedHostConfig.Memory)
+		}
+
+		// Verify CPU limit
+		expectedCPU := int64(2.0 * 1e9)
+		if capturedHostConfig.NanoCPUs != expectedCPU {
+			t.Errorf("Expected NanoCPUs to be %d, got %d", expectedCPU, capturedHostConfig.NanoCPUs)
+		}
+
+		// Verify tmpfs
+		tmpfsValue, exists := capturedHostConfig.Tmpfs["/tmp"]
+		if !exists {
+			t.Error("Expected /tmp tmpfs to be configured")
+		} else if tmpfsValue != "size=100m,noexec,nosuid" {
+			t.Errorf("Expected tmpfs value 'size=100m,noexec,nosuid', got '%s'", tmpfsValue)
+		}
+	})
+
+	t.Run("works without hardening", func(t *testing.T) {
+		var capturedHostConfig *container.HostConfig
+		docker := &mockDockerClient{
+			createFn: func(ctx context.Context, config *container.Config, hostConfig *container.HostConfig, networkingConfig *network.NetworkingConfig, platform *ocispec.Platform, containerName string) (container.CreateResponse, error) {
+				capturedHostConfig = hostConfig
+				return container.CreateResponse{ID: "test-container-id"}, nil
+			},
+			listFn: func(ctx context.Context, options container.ListOptions) ([]container.Summary, error) {
+				return []container.Summary{}, nil
+			},
+		}
+		manager := NewManager(docker, &mockIDGenerator{}, &mockClock{}, &mockLogger{}, t.TempDir())
+
+		config := CreateConfig{
+			ImageName: "test:latest",
+			Command:   []string{"echo", "test"},
+			// No RuntimeHardening specified
+		}
+
+		_, err := manager.CreateContainerSessionWithConfig(context.Background(), config)
+		if err != nil {
+			t.Fatalf("Expected no error, got %v", err)
+		}
+
+		if capturedHostConfig == nil {
+			t.Fatal("Expected hostConfig to be captured")
+		}
+
+		// Verify no hardening applied
+		if capturedHostConfig.ReadonlyRootfs {
+			t.Error("Expected ReadonlyRootfs to be false")
+		}
+		if len(capturedHostConfig.CapDrop) > 0 {
+			t.Error("Expected no capabilities dropped")
+		}
+		if len(capturedHostConfig.SecurityOpt) > 0 {
+			t.Error("Expected no security options")
+		}
+		if capturedHostConfig.Memory != 0 {
+			t.Error("Expected no memory limit")
+		}
+		if capturedHostConfig.NanoCPUs != 0 {
+			t.Error("Expected no CPU limit")
+		}
+		if len(capturedHostConfig.Tmpfs) > 0 {
+			t.Error("Expected no tmpfs")
+		}
+	})
+}

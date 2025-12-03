@@ -104,3 +104,10 @@ issues:
       text: "cyclomatic complexity.*initializeAgentInfrastructure"
       linters:
         - gocyclo
+
+    # Temporary exception for CreateContainerSessionWithConfig complexity
+    # Function handles container lifecycle with comprehensive error handling and state management
+    - path: pkg/containersession/manager\.go
+      text: "cyclomatic complexity.*CreateContainerSessionWithConfig"
+      linters:
+        - gocyclo

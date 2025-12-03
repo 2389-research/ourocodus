@@ -109,8 +109,8 @@ func (m *AgentCredentialMounter) Setup(ctx context.Context, agentID string, gitS
 // GetMounts returns Docker mount configurations for credential files.
 //
 // This creates read-only bind mounts for credentials in the container:
-//   - SSH key: /root/.ssh/id_ed25519 (if provided)
-//   - GitHub token: /root/.github-token (if provided)
+//   - SSH key: /home/node/.ssh/id_ed25519 (if provided)
+//   - GitHub token: /home/node/.github-token (if provided)
 //
 // All mounts are read-only to prevent tampering from inside the container.
 func (m *AgentCredentialMounter) GetMounts(files *CredentialFiles) []mount.Mount {
@@ -125,7 +125,7 @@ func (m *AgentCredentialMounter) GetMounts(files *CredentialFiles) []mount.Mount
 		mounts = append(mounts, mount.Mount{
 			Type:     mount.TypeBind,
 			Source:   files.GitSSHKeyPath,
-			Target:   "/root/.ssh/id_ed25519",
+			Target:   "/home/node/.ssh/id_ed25519",
 			ReadOnly: true,
 		})
 	}
@@ -135,7 +135,7 @@ func (m *AgentCredentialMounter) GetMounts(files *CredentialFiles) []mount.Mount
 		mounts = append(mounts, mount.Mount{
 			Type:     mount.TypeBind,
 			Source:   files.GitHubTokenPath,
-			Target:   "/root/.github-token",
+			Target:   "/home/node/.github-token",
 			ReadOnly: true,
 		})
 	}

@@ -1,4 +1,4 @@
-.PHONY: all build build-tui test smoke-relay smoke-session smoke-all test-e2e demo interactive run stop clean lint fmt check pre-commit nats-start nats-stop nats-logs nats-health assets assets-check tailwind-download acp-binary agent-image
+.PHONY: all build build-tui test smoke-relay smoke-session smoke-all test-e2e demo interactive run stop clean lint fmt check pre-commit nats-start nats-stop nats-logs nats-health assets assets-check tailwind-download acp-binary agent-image agent-base-image docker-images
 
 # Default target: build and test
 all: build test
@@ -119,7 +119,7 @@ bin/build:
 	@mkdir -p bin
 	@go build -o bin/build ./cmd/build
 
-# Build ACP binary for inclusion in agent Docker image
+# Build ACP binary for inclusion in agent Docker image (legacy, for echo-agent)
 # Cross-compile for Linux since the binary runs inside a Linux container
 acp-binary:
 	@echo "Building ACP binary (echo-agent) for Linux..."
@@ -127,10 +127,57 @@ acp-binary:
 	GOOS=linux GOARCH=amd64 go build -o bin/acp ./cmd/echo-agent
 	@echo "ACP binary built: bin/acp (linux/amd64)"
 
-# Build the agent Docker image used by relay-managed spawns
-agent-image: acp-binary
-	@echo "Building Docker image ourocodus/agent:latest..."
-	docker build -t ourocodus/agent:latest -f Dockerfile.agent .
+# =============================================================================
+# Docker Images for Claude Code Container
+# =============================================================================
+#
+# Two-stage image architecture:
+#   1. ourocodus/claude-code-base - Foundation with Node.js, tini, git
+#   2. ourocodus/agent            - Runtime with claude-code-acp baked in
+#
+# The base image rarely changes (system deps), while the agent image updates
+# when claude-code-acp versions change.
+
+# Build the base Docker image (Node.js 22 + tini + git + system deps)
+# This layer caches well since system dependencies rarely change
+agent-base-image:
+	@echo "Building base image ourocodus/claude-code-base:latest..."
+	docker build -f Dockerfile.claude-code-base -t ourocodus/claude-code-base:latest .
+	@echo "✓ Base image built: ourocodus/claude-code-base:latest"
+
+# Build the agent Docker image with claude-code-acp baked in
+# Requires base image to exist (run agent-base-image first, or use docker-images)
+agent-image:
+	@echo "Building agent image ourocodus/agent:latest..."
+	@echo "  Note: Requires ourocodus/claude-code-base:latest to exist"
+	@echo "  Run 'make agent-base-image' first if base image is missing"
+	docker build -f Dockerfile.agent -t ourocodus/agent:latest .
+	@echo "✓ Agent image built: ourocodus/agent:latest"
+
+# Build both Docker images in the correct order
+# Use this for a clean build or CI
+docker-images: agent-base-image agent-image
+	@echo ""
+	@echo "✓ All Docker images built successfully:"
+	@echo "  - ourocodus/claude-code-base:latest (foundation layer)"
+	@echo "  - ourocodus/agent:latest (runtime with claude-code-acp)"
+	@echo ""
+	@echo "Usage:"
+	@echo ""
+	@echo "  Production (orchestrator attaches to stdin/stdout for ACP protocol):"
+	@echo "    docker run --rm -i \\"
+	@echo "      --read-only --cap-drop=ALL --security-opt=no-new-privileges \\"
+	@echo "      --tmpfs /tmp:size=256m,noexec,nosuid \\"
+	@echo "      -v ~/.cache/ourocodus-test-creds:/home/node/.creds:ro \\"
+	@echo "      ourocodus/agent:latest"
+	@echo ""
+	@echo "  Debug shell (explore container manually):"
+	@echo "    docker run --rm -it ... ourocodus/agent:latest /bin/bash"
+	@echo ""
+	@echo "  Setup credentials first:"
+	@echo "    mkdir -p ~/.cache/ourocodus-test-creds"
+	@echo "    echo 'ANTHROPIC_API_KEY=sk-ant-...' > ~/.cache/ourocodus-test-creds/.env"
+	@echo "    chmod 600 ~/.cache/ourocodus-test-creds/.env"
 
 # Run unit tests
 test:
