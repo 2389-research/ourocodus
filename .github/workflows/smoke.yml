@@ -47,4 +47,4 @@ jobs:
         run: docker build -t ourocodus/agent:latest -f Dockerfile.agent .
 
       - name: Run all smoke tests
-        run: ./scripts/smoke-test.sh all
+        run: ./scripts/smoke-test.sh all --verbose
