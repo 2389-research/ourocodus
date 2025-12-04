@@ -68,17 +68,16 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, relayPath) // #nosec G204 -- relayPath is determined by the repository layout, not user input
+	// --plain runs the relay in headless mode (no TUI)
+	cmd := exec.CommandContext(ctx, relayPath, "--plain") // #nosec G204 -- relayPath is determined by the repository layout, not user input
 
 	// Set environment variables for testing with echo-agent
 	// OUROCODUS_ACP_RUNTIME=host tells the relay to spawn agents as host processes
 	// instead of Docker containers, using the OUROCODUS_ACP_BINARY path
-	// RELAY_NO_TUI=1 runs the relay in headless mode (no TUI)
 	cmd.Env = append(os.Environ(),
 		"OUROCODUS_ACP_BINARY="+echoAgentPath,
 		"OUROCODUS_ACP_RUNTIME=host",
 		"ANTHROPIC_API_KEY=smoke-test-dummy-key",
-		"RELAY_NO_TUI=1",
 	)
 
 	if *verbose {

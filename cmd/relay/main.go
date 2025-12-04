@@ -52,9 +52,6 @@ var tuiLogWriter *relaytui.LogWriter
 // Version is set by ldflags at build time
 var Version = "dev"
 
-// headlessFlag is set via --headless flag
-var headlessFlag bool
-
 var rootCmd = &cobra.Command{
 	Use:   "relay",
 	Short: "🔄 relay - Ourocodus WebSocket relay and PWA server",
@@ -67,7 +64,6 @@ It provides:
   💓 Agent heartbeat monitoring via NATS
 
 Environment variables:
-  RELAY_NO_TUI=1        Run in headless mode (no TUI)
   NATS_URL              NATS server URL (default: nats://localhost:4222)
   WORKSPACE_DIR         Agent workspace directory (default: ./workspaces)
   REPO_PATH             Repository path (default: .)
@@ -78,9 +74,7 @@ Environment variables:
 	RunE:    runRelay,
 }
 
-func init() {
-	rootCmd.Flags().BoolVar(&headlessFlag, "headless", false, "Run without TUI (same as RELAY_NO_TUI=1)")
-}
+// init is empty - standard flags registered by cli.NewApp
 
 func main() {
 	app := cli.NewApp(rootCmd)
@@ -89,10 +83,16 @@ func main() {
 
 // runRelay is the main entry point for the relay server
 func runRelay(cmd *cobra.Command, _ []string) error {
-	// Check for headless mode (flag or environment)
-	headlessMode := headlessFlag || os.Getenv("RELAY_NO_TUI") != ""
+	ctx := cmd.Context()
 
-	if !headlessMode {
+	// Get mode from AppContext (set by cli.App wrapper)
+	appCtx := cli.FromContext(ctx)
+	if appCtx == nil {
+		return cli.ContextError()
+	}
+
+	// Rich mode = TUI, Plain/JSON mode = headless
+	if appCtx.Mode.IsRich() {
 		// Create log writer for TUI (program set later)
 		tuiLogWriter = relaytui.NewLogWriter(nil)
 		log.SetOutput(tuiLogWriter)
@@ -106,8 +106,6 @@ func runRelay(cmd *cobra.Command, _ []string) error {
 	logger := &relay.StdLogger{}
 	clock := &relay.SystemClock{}
 	idGen := &relay.UUIDGenerator{}
-
-	ctx := cmd.Context()
 
 	// Initialize Docker and agent dependencies
 	dockerClient, launcherFactory, containerManager := initializeAgentInfrastructure(ctx, logger, clock, idGen)
@@ -202,10 +200,10 @@ func runRelay(cmd *cobra.Command, _ []string) error {
 		heartbeatCancel:  heartbeatCancel,
 	}
 
-	if headlessMode {
-		runHeadlessMode(sigChan, shutdownCtx)
-	} else {
+	if appCtx.Mode.IsRich() {
 		runTUIMode(sigChan, shutdownCtx, sessionManager, natsClient)
+	} else {
+		runHeadlessMode(sigChan, shutdownCtx)
 	}
 
 	return nil

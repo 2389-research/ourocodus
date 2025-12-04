@@ -77,7 +77,8 @@ func StartRelayWithConfig(ctx context.Context, config RelayConfig) (*RelayServer
 
 	// Start the relay server in headless mode
 	// #nosec G204 -- binaryPath is constructed from trusted sources (project root + config)
-	cmd := exec.CommandContext(serverCtx, binaryPath)
+	// --plain runs relay in headless mode for E2E testing (no TUI, logs to stderr)
+	cmd := exec.CommandContext(serverCtx, binaryPath, "--plain")
 	cmd.Env = append(os.Environ(),
 		fmt.Sprintf("PORT=%s", config.Port),
 		// Base directory for agent workspaces, relative to relay's CWD (project root)
@@ -85,8 +86,6 @@ func StartRelayWithConfig(ctx context.Context, config RelayConfig) (*RelayServer
 		// See workspaceBase constant in e2e_test.go
 		// Note: Relay reads WORKSPACE_BASE_DIR (not WORKSPACE_DIR)
 		"WORKSPACE_BASE_DIR=./agent",
-		// Run relay in headless mode for E2E testing (no TUI, logs to stderr)
-		"RELAY_NO_TUI=1",
 		// Use isolated lease directory for this test run
 		fmt.Sprintf("OUROCODUS_LEASE_DIR=%s", leaseDir),
 	)
@@ -94,7 +93,7 @@ func StartRelayWithConfig(ctx context.Context, config RelayConfig) (*RelayServer
 	// Set working directory to project root so relay can find ./web and ./agent
 	cmd.Dir = projectRoot
 
-	// In headless mode (RELAY_NO_TUI=1), we don't need PTY
+	// In plain mode, we don't need PTY
 	// Start the process and capture output directly
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
