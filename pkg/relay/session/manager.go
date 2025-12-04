@@ -285,7 +285,7 @@ func (m *Manager) SpawnAgent(ctx context.Context, userSessionID, agentID, worksp
 	// Create launcher ONLY in container mode
 	var handle agent.AgentHandle
 	if m.isContainerModeEnabled() {
-		// Container mode: Use image default (ENTRYPOINT ["/usr/local/bin/acp"])
+		// Container mode: Use image default (ENTRYPOINT ["/usr/local/bin/claude-code-acp"])
 		// ContainerAttachProcessLauncher will attach to the container's stdio
 		// where ACP runs as the main process. The CMD from image provides default args.
 		command := []string{"--workspace", "/workspace"} // Args for ACP

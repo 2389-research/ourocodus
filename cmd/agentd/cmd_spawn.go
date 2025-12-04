@@ -320,7 +320,7 @@ func buildSpawnConfig(agentID string) (container.SpawnConfig, error) {
 		AgentID:    agentID,
 		ImageName:  spawnImage,
 		Command:    []string{"--workspace", "/workspace"},
-		Entrypoint: []string{"/usr/local/bin/acp"},
+		Entrypoint: []string{"/usr/local/bin/claude-code-acp"},
 		Env:        env,
 		APIKey:     apiKey,
 		// GitSSHKey and GitHubToken handled by credential mounter
