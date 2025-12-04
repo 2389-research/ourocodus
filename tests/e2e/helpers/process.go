@@ -75,10 +75,9 @@ func StartRelayWithConfig(ctx context.Context, config RelayConfig) (*RelayServer
 	// Create a context with cancel for the server process
 	serverCtx, cancel := context.WithCancel(ctx)
 
-	// Start the relay server in headless mode
+	// Start the relay server (auto-detects headless mode in CI/non-TTY)
 	// #nosec G204 -- binaryPath is constructed from trusted sources (project root + config)
-	// --plain runs relay in headless mode for E2E testing (no TUI, logs to stderr)
-	cmd := exec.CommandContext(serverCtx, binaryPath, "--plain")
+	cmd := exec.CommandContext(serverCtx, binaryPath)
 	cmd.Env = append(os.Environ(),
 		fmt.Sprintf("PORT=%s", config.Port),
 		// Base directory for agent workspaces, relative to relay's CWD (project root)
